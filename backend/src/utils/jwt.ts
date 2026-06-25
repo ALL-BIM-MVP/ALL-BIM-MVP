@@ -17,23 +17,23 @@ const JWT_REFRESH_EXPIRES_IN : SignOptions["expiresIn"] =
     (process.env.JWT_REFRESH_EXPIRES_IN as SignOptions["expiresIn"]) || "7d";
 
 
-export const generarAccessToken = (payload : AuthPayload) : string => {
+export const generateAccessToken = (payload : AuthPayload) : string => {
     return jwt.sign(payload, JWT_SECRET, {expiresIn: JWT_EXPIRES_IN});
 };
 
-export const generarRefreshToken = (payload : AuthPayload) : string => {
+export const generateRefreshToken = (payload : AuthPayload) : string => {
     return jwt.sign(payload, JWT_REFRESH_SECRET, {expiresIn: JWT_REFRESH_EXPIRES_IN});
 };
 
-export const verificarAccessToken = (token : string) : DecodedToken | null => {
-    return verificarToken(token, JWT_SECRET);
+export const verifyAccessToken = (token : string) : DecodedToken | null => {
+    return verifyToken(token, JWT_SECRET);
 }
 
-export const verificarRefreshToken = (token : string) : DecodedToken | null => {
-    return verificarToken(token, JWT_REFRESH_SECRET);
+export const verifyRefreshToken = (token : string) : DecodedToken | null => {
+    return verifyToken(token, JWT_REFRESH_SECRET);
 }
 
-const verificarToken = (token : string, secretKey : string | Buffer) : DecodedToken | null => {
+const verifyToken = (token : string, secretKey : string | Buffer) : DecodedToken | null => {
     try {
         const decoded = jwt.verify(token, secretKey);
         

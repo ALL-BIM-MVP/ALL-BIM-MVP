@@ -1,13 +1,13 @@
 import type { JwtPayload } from "jsonwebtoken";
 
-export interface Login {
-    correo: string,
-    contrasena: string
+export interface LoginData {
+    email: string,
+    password: string
 };
 
 export interface AuthPayload {
-    usuario_id: number;
-    correo: string
+    user_id: number;
+    email: string
 }
 
 export interface DecodedToken extends JwtPayload, AuthPayload {};

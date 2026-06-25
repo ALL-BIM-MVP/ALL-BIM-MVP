@@ -1,8 +1,8 @@
-export interface Usuario {
-    usuario_id: number;
-    nombre: string;
-    correo: string;
-    contrasena_hash: string;
-    activo: boolean;
-    creado_en: string
+export interface User {
+    user_id: number;
+    name: string;
+    email: string;
+    password_hash: string;
+    active: boolean;
+    created_at: string;
 };

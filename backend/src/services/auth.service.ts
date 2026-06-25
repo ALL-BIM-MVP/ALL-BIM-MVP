@@ -1,34 +1,37 @@
 import bcrypt from 'bcrypt';
 import pool from "../db/database.js";
-import type { Login, Tokens, AuthPayload } from '../models/auth.models.js';
-import { generarAccessToken, generarRefreshToken } from '../utils/jwt.js';
-import type { Usuario } from '../models/usuario.models.js';
+import type { LoginData, Tokens, AuthPayload } from '../models/auth.models.js';
+import { generateAccessToken, generateRefreshToken } from '../utils/jwt.js';
+import type { User } from '../models/usuario.models.js';
 
-export const loginService = async ({correo, contrasena} : Login) : Promise<Tokens | null> => {
+export const loginService = async ({email, password} : LoginData) : Promise<Tokens | null> => {
     const result = await pool.query(
-        `SELECT * FROM usuarios WHERE correo = $1`,
-        [correo]
+        `SELECT * FROM users WHERE email = $1`,
+        [email]
     );
 
-    const usuario : Usuario | undefined = result.rows[0];
-    if (!usuario) return null;
+    const user: User | undefined = result.rows[0];
+    if (!user) return null;
 
-    const storedHash = usuario.contrasena_hash;
+    const storedHash = user.password_hash;
 
     // COMPARACION DIRECTA MIENTRAS PRUEBAS
-    const esValido = storedHash.startsWith('$2')
-        ? await bcrypt.compare(contrasena, storedHash)
-        : storedHash === contrasena;
+    const isValid = await bcrypt.compare(password, storedHash);
 
-    if (!esValido) return null;
+    if (!isValid) return null;
 
     const payload : AuthPayload = {
-        usuario_id: usuario.usuario_id,
-        correo: usuario.correo
+        user_id: user.user_id,
+        email: user.email
     };
 
     return {
-        access_token: generarAccessToken(payload),
-        refresh_token: generarRefreshToken(payload)
+        access_token: generateAccessToken(payload),
+        refresh_token: generateRefreshToken(payload)
     };
 };
+
+
+export const registerService = async () => {
+
+}
