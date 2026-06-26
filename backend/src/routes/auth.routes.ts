@@ -1,12 +1,13 @@
 import { Router } from 'express';
-import { invitationController, loginController, validateInvitationController } from '../controllers/auth.controller.js';
+import { invitationController, loginController, validateInvitationController, registerController } from '../controllers/auth.controller.js';
+
 
 const router = Router();
 
 
 router.post('/login', loginController);
 router.post('/invitations', invitationController);
-router.post('/invitations/validate', validateInvitationController);
-
+router.get('/invitations/validate', validateInvitationController);
+router.get('/register', registerController)
 
 export default router;

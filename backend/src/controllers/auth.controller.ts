@@ -1,8 +1,9 @@
 import type { Request, Response} from 'express';
-import type { Tokens } from '../models/auth.models.js';
-import { invitationService, loginService } from '../services/auth.service.js';
-import { InvitationSchema, LoginSchema } from '../schemas/auth.schema.js';
+import type { Tokens, ValidateResponse } from '../models/auth.models.js';
+import { invitationService, loginService, validateInvitationTokenService } from '../services/auth.service.js';
+import { InvitationSchema, LoginSchema, TokenSchema } from '../schemas/auth.schema.js';
 import { AppError } from '../models/error.models.js';
+import { Result } from 'pg';
 
 export const loginController = async (req : Request, res : Response) : Promise<Response> => {
     const result = LoginSchema.safeParse(req.body);
@@ -45,6 +46,27 @@ export const invitationController = async (req : Request, res : Response) : Prom
     }
 };
 
-export const validateInvitationController = () => {
+export const validateInvitationController = async (req : Request, res : Response) : Promise<Response>=>  {
+
+    const result = TokenSchema.safeParse(req.query);
+    if (!result.success) {
+        return res.status(400).json({ message: "El recurso 'token' invalido."});
+    }
+
+    const { token } = result.data;
+
+    try {
+        const validateData : ValidateResponse = await validateInvitationTokenService(token);
+    
+        return res.status(200).json(validateData);
+    } catch (error) {
+        if (error instanceof AppError ) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        return res.status(500).json({ message: 'Problema interno del servidor.' });
+    }
+}
+
+export const registerController = () => {
 
 }

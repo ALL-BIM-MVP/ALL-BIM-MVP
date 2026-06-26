@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcrypt';
 import pool from "../db/database.js";
-import type { Tokens, AuthPayload } from '../models/auth.models.js';
+import type { Tokens, AuthPayload, ValidateResponse } from '../models/auth.models.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt.js';
 import type { User } from '../models/usuario.models.js';
 import type { InvitationRequest, LoginRequest } from '../schemas/auth.schema.js';
@@ -20,7 +20,6 @@ export const loginService = async ({email, password} : LoginRequest) : Promise<T
     const storedHash = user.password_hash;
     const isValid : Boolean = await bcrypt.compare(password, storedHash);
     if (!isValid) return null;
-    
 
     const payload : AuthPayload = {
         user_id: user.user_id,
@@ -49,14 +48,8 @@ export const invitationService = async ({role_id, email} : InvitationRequest) =>
 
     if (roleCorrect.rowCount === 0) throw new AppError(ERRORS.INVALID_ROLE, 400);
 
-    
     const tokenRandom = crypto.randomUUID();
     const tokenHash = crypto.createHash("sha256").update(tokenRandom).digest("hex");
-    
-    console.log({
-        tokenHash,
-        tokenRandom
-    });
 
     await pool.query(
         `INSERT INTO invitations(email, token_hash, role_id)
@@ -69,6 +62,18 @@ export const invitationService = async ({role_id, email} : InvitationRequest) =>
     await sendInvitation(email, inviteUrl);
 };
 
-export const validateInvitationService = () => {
+export const validateInvitationTokenService = async (queryToken : string) : Promise< ValidateResponse > => {
+    const tokenHash  = crypto.createHash("sha256").update(queryToken).digest("hex"); 
 
-}
+    const resultQuery = await pool.query(
+        `SELECT r.role_id, r.name AS role_name, i.email FROM invitations AS i 
+            INNER JOIN roles AS r USING(role_id)
+            WHERE i.token_hash = $1  AND i.expires_at > NOW() AND i.used = false`,
+        [tokenHash]
+    );
+
+    const validateData : ValidateResponse | undefined = resultQuery.rows[0];
+    if (!validateData) throw new AppError(ERRORS.INVALID_INVITATION, 404);
+
+    return validateData;
+};

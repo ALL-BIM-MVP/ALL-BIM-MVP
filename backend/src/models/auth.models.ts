@@ -11,3 +11,9 @@ export interface Tokens {
     refresh_token: string;
     access_token: string;
 }
+
+export interface ValidateResponse {
+    role_id : number,
+    role_name : string,
+    email : string
+}   

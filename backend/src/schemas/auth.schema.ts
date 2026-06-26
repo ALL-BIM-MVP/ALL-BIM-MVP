@@ -21,3 +21,7 @@ export const RegisterSchema = z.object({
 });
 export type RegisterRequest = z.infer<typeof RegisterSchema>;
 
+export const TokenSchema = z.object({
+    token: z.uuid()
+});
+
