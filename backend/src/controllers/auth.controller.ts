@@ -1,9 +1,8 @@
 import type { Request, Response} from 'express';
 import type { Tokens, ValidateResponse } from '../models/auth.models.js';
-import { invitationService, loginService, validateInvitationTokenService } from '../services/auth.service.js';
-import { InvitationSchema, LoginSchema, TokenSchema } from '../schemas/auth.schema.js';
+import { invitationService, loginService, registerService, validateInvitationTokenService } from '../services/auth.service.js';
+import { InvitationSchema, LoginSchema, RegisterSchema, TokenSchema } from '../schemas/auth.schema.js';
 import { AppError } from '../models/error.models.js';
-import { Result } from 'pg';
 
 export const loginController = async (req : Request, res : Response) : Promise<Response> => {
     const result = LoginSchema.safeParse(req.body);
@@ -67,6 +66,19 @@ export const validateInvitationController = async (req : Request, res : Response
     }
 }
 
-export const registerController = () => {
+export const registerController = async (req : Request, res : Response) => {
+    const result = RegisterSchema.safeParse(req.body);
+    if (!result.success) {
+        return res.status(400).json({ message: "Credenciales invalidas o incompletas."});
+    }
 
+    try {
+        await registerService(result.data);
+        return res.status(200).json({ message: "Usuario creado correctamente."});
+    } catch (error) {
+        if (error instanceof AppError ) {
+            return res.status(error.statusCode).json({ message: error.message });
+        }
+        return res.status(500).json({ message: 'Problema interno del servidor.' });
+    }
 }

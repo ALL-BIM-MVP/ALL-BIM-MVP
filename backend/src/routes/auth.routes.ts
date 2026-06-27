@@ -4,10 +4,9 @@ import { invitationController, loginController, validateInvitationController, re
 
 const router = Router();
 
-
 router.post('/login', loginController);
 router.post('/invitations', invitationController);
 router.get('/invitations/validate', validateInvitationController);
-router.get('/register', registerController)
+router.post('/register', registerController)
 
 export default router;

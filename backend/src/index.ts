@@ -1,9 +1,6 @@
 import 'dotenv/config';
 import express from "express";
 import routerAuth from './routes/auth.routes.js';
-import pool from './db/database.js'
-import bcrypt from 'bcrypt';
-import crypto from 'crypto'
 const app = express();
 
 

@@ -4,7 +4,7 @@ import pool from "../db/database.js";
 import type { Tokens, AuthPayload, ValidateResponse } from '../models/auth.models.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt.js';
 import type { User } from '../models/usuario.models.js';
-import type { InvitationRequest, LoginRequest } from '../schemas/auth.schema.js';
+import type { InvitationRequest, LoginRequest, RegisterRequest } from '../schemas/auth.schema.js';
 import { sendInvitation } from '../config/resend.js';
 import { AppError, ERRORS } from '../models/error.models.js';
 
@@ -32,7 +32,7 @@ export const loginService = async ({email, password} : LoginRequest) : Promise<T
     };
 };
 
-export const invitationService = async ({role_id, email} : InvitationRequest) => {
+export const invitationService = async ({role_id, email} : InvitationRequest) : Promise<void> => {
 
     const userData = await pool.query(
         `SELECT 1 FROM users WHERE email = $1`,
@@ -68,7 +68,8 @@ export const validateInvitationTokenService = async (queryToken : string) : Prom
     const resultQuery = await pool.query(
         `SELECT r.role_id, r.name AS role_name, i.email FROM invitations AS i 
             INNER JOIN roles AS r USING(role_id)
-            WHERE i.token_hash = $1  AND i.expires_at > NOW() AND i.used = false`,
+            WHERE i.token_hash = $1  AND i.expires_at > NOW() AND i.used = false
+            LIMIT 1`,
         [tokenHash]
     );
 
@@ -76,4 +77,49 @@ export const validateInvitationTokenService = async (queryToken : string) : Prom
     if (!validateData) throw new AppError(ERRORS.INVALID_INVITATION, 404);
 
     return validateData;
+};
+
+export const registerService = async ({name, email, password, token} : RegisterRequest) => {
+
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+
+        const tokenHashed = crypto.createHash("sha256").update(token).digest("hex");
+        const invitationQuery = await client.query(
+            `SELECT role_id FROM invitations  
+                WHERE token_hash = $1 AND email = $2 AND expires_at > NOW() AND used = false`,
+            [tokenHashed, email]
+        );
+
+        if (invitationQuery.rowCount === 0) throw new AppError(ERRORS.INVALID_INVITATION, 400);
+        const role_id = invitationQuery.rows[0].role_id;
+
+        const userQuey = await client.query(
+            `SELECT 1 FROM users WHERE email = $1`,
+            [email]
+        );
+
+        if (userQuey.rowCount !== 0) throw new AppError(ERRORS.USER_EXISTS, 409);
+
+        const passwordHash = await bcrypt.hash(password, 10);
+        await client.query(
+            `INSERT INTO users(name, email, password_hash, role_id)
+                VALUES ($1, $2, $3, $4)`,
+            [name, email, passwordHash, role_id]
+        );
+
+        await client.query(
+            `UPDATE invitations SET used = true WHERE token_hash = $1`,
+            [tokenHashed]
+        );
+
+        await client.query("COMMIT");
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    } 
+  
 };

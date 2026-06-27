@@ -17,11 +17,12 @@ export const RegisterSchema = z.object({
     name: z.string(),
     email: z.email(),
     password: z.string(),
-    role: z.string(),
+    token : z.uuid(),
 });
 export type RegisterRequest = z.infer<typeof RegisterSchema>;
 
 export const TokenSchema = z.object({
     token: z.uuid()
 });
+
 
