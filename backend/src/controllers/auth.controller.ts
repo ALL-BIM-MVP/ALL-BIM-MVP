@@ -66,16 +66,19 @@ export const validateInvitationController = async (req : Request, res : Response
     }
 }
 
-export const registerController = async (req : Request, res : Response) => {
+export const registerController = async (req : Request, res : Response) : Promise<Response> => {
+    
     const result = RegisterSchema.safeParse(req.body);
     if (!result.success) {
         return res.status(400).json({ message: "Credenciales invalidas o incompletas."});
     }
+    
 
     try {
         await registerService(result.data);
         return res.status(200).json({ message: "Usuario creado correctamente."});
     } catch (error) {
+        console.log("Hoakekwdk")
         if (error instanceof AppError ) {
             return res.status(error.statusCode).json({ message: error.message });
         }

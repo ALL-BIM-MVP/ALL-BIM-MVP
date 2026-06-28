@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import express from "express";
 import routerAuth from './routes/auth.routes.js';
+import routerRoles from './routes/roles.routes.js';
+import routerUsers from './routes/users.routes.js'
 const app = express();
 
 
@@ -10,7 +12,8 @@ app.use(express.json());
 //rutas definidas
 
 app.use('/auth', routerAuth);
-
+app.use('/roles', routerRoles);
+app.use('/users', routerUsers);
 app.post("/", async (req, res) => {
   try {
     res.json(typeof req.body.numero);

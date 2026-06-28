@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import pool from "../db/database.js";
 import type { Tokens, AuthPayload, ValidateResponse } from '../models/auth.models.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/jwt.js';
-import type { User } from '../models/usuario.models.js';
+import type { User } from '../models/users.models.js';
 import type { InvitationRequest, LoginRequest, RegisterRequest } from '../schemas/auth.schema.js';
 import { sendInvitation } from '../config/resend.js';
 import { AppError, ERRORS } from '../models/error.models.js';
@@ -91,7 +91,7 @@ export const registerService = async ({name, email, password, token} : RegisterR
                 WHERE token_hash = $1 AND email = $2 AND expires_at > NOW() AND used = false`,
             [tokenHashed, email]
         );
-
+        console.log(invitationQuery)
         if (invitationQuery.rowCount === 0) throw new AppError(ERRORS.INVALID_INVITATION, 400);
         const role_id = invitationQuery.rows[0].role_id;
 

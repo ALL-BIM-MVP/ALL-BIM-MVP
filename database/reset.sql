@@ -68,13 +68,30 @@ CREATE TABLE cache_data (
 
 INSERT INTO roles(name)
 VALUES
-    ('admin'),
-    ('editor'),
-    ('usuario');
+    ('ADMINISTRADOR'),
+    ('EDITOR'),
+    ('USUARIO');
 
 INSERT INTO users (
     name, email, password_hash, role_id
 )
 VALUES (
     'Ismael', 'ismael@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo4i', 1
+),(
+    'Ismael Salvador ', 'ismaelsalvador@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo5i', 2
+),(
+    'Ismael Pacahcutec', 'ismaelpachacutec@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo6i', 3
+),(
+    'Ismael Llanos', 'ismaellanos@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo8qi', 2
+);
+
+
+---PARA EL UUID : 621a7eaf-4d18-46eb-8fcb-9b3935f292a3
+INSERT INTO invitations(
+    email, token_hash, role_id
+) 
+VALUES (
+    'ismaelsalvadorpachacutecllanos@gmail.com', 
+    'a6957c03a48a92d4a510ec6d67943c90399009a49e741759e1869ae6e2537a5f', 
+    1
 );

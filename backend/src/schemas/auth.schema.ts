@@ -19,6 +19,7 @@ export const RegisterSchema = z.object({
     password: z.string(),
     token : z.uuid(),
 });
+
 export type RegisterRequest = z.infer<typeof RegisterSchema>;
 
 export const TokenSchema = z.object({
