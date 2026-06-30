@@ -14,6 +14,7 @@ app.use(express.json());
 app.use('/auth', routerAuth);
 app.use('/roles', routerRoles);
 app.use('/users', routerUsers);
+
 app.post("/", async (req, res) => {
   try {
     res.json(typeof req.body.numero);

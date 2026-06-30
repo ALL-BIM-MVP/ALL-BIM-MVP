@@ -13,7 +13,7 @@ export const loginController = async (req : Request, res : Response) : Promise<R
 
     try {
         const tokens : Tokens | null = await loginService(result.data);
-        console.log(tokens)
+        
         if (!tokens) {
             return res.status(401).json({ message: 'Credenciales inválidas.' });
         }

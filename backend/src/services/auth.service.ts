@@ -22,13 +22,14 @@ export const loginService = async ({email, password} : LoginRequest) : Promise<T
     if (!isValid) return null;
 
     const payload : AuthPayload = {
+        role_id: user.role_id,
         user_id: user.user_id,
         email: user.email
     };
 
     return {
         access_token: generateAccessToken(payload),
-        refresh_token: generateRefreshToken(payload)
+        refresh_token: generateRefreshToken(payload),
     };
 };
 
