@@ -2,25 +2,28 @@ import type { Request, Response} from 'express';
 import type { Tokens, ValidateResponse } from '../models/auth.models.js';
 import { invitationService, loginService, registerService, validateInvitationTokenService } from '../services/auth.service.js';
 import { InvitationSchema, LoginSchema, RegisterSchema, TokenSchema } from '../schemas/auth.schema.js';
-import { AppError } from '../models/error.models.js';
+import { AppError, ERRORS } from '../models/error.models.js';
 
 export const loginController = async (req : Request, res : Response) : Promise<Response> => {
     const result = LoginSchema.safeParse(req.body);
     
     if (!result.success) {
-        return res.status(400).json({ message: "Credenciales invalidas"});
+        const error = ERRORS.AUTH_BAD_REQUEST;
+        return res.status(error.statusCode).json(error.response);
     }
 
     try {
         const tokens : Tokens | null = await loginService(result.data);
         
         if (!tokens) {
-            return res.status(401).json({ message: 'Credenciales inválidas.' });
+            const error = ERRORS.LOGIN_FAILED;
+            return res.status(error.statusCode).json(error.response);
         }
 
         return res.status(200).json(tokens);
     } catch (error) {
-        return res.status(500).json({ message: 'Problema interno del servidor.' });
+        const serverError = ERRORS.INTERNAL_SERVER_ERROR;
+        return res.status(serverError.statusCode).json(serverError.response);
     }
 };
 
@@ -29,7 +32,8 @@ export const invitationController = async (req : Request, res : Response) : Prom
     const result = InvitationSchema.safeParse(req.body);
     
     if (!result.success) {
-        return res.status(400).json({ message: "Datos de la invitacion invalidos."});
+        const error = ERRORS.AUTH_BAD_REQUEST;
+        return res.status(error.statusCode).json(error.response);
     }
 
     try {  
@@ -38,10 +42,11 @@ export const invitationController = async (req : Request, res : Response) : Prom
         return res.status(200).json({ message: `Invitacion enviada Correctamente a: ${result.data.email}` });
     } catch (error) {
     
-        if (error instanceof AppError ) {
-            return res.status(error.statusCode).json({ message: error.message });
+        if (error instanceof AppError) {
+            return res.status(error.statusCode).json(error.response);
         }
-        return res.status(500).json({ message: 'Problema interno del servidor.' });
+        const serverError = ERRORS.INTERNAL_SERVER_ERROR;
+        return res.status(serverError.statusCode).json(serverError.response);
     }
 };
 
@@ -49,7 +54,8 @@ export const validateInvitationController = async (req : Request, res : Response
 
     const result = TokenSchema.safeParse(req.query);
     if (!result.success) {
-        return res.status(400).json({ message: "El recurso 'token' invalido."});
+        const error = ERRORS.AUTH_BAD_REQUEST;
+        return res.status(error.statusCode).json(error.response);
     }
 
     const { token } = result.data;
@@ -59,10 +65,11 @@ export const validateInvitationController = async (req : Request, res : Response
     
         return res.status(200).json(validateData);
     } catch (error) {
-        if (error instanceof AppError ) {
-            return res.status(error.statusCode).json({ message: error.message });
+        if (error instanceof AppError) {
+            return res.status(error.statusCode).json(error.response);
         }
-        return res.status(500).json({ message: 'Problema interno del servidor.' });
+        const serverError = ERRORS.INTERNAL_SERVER_ERROR;
+        return res.status(serverError.statusCode).json(serverError.response);
     }
 }
 
@@ -70,18 +77,18 @@ export const registerController = async (req : Request, res : Response) : Promis
     
     const result = RegisterSchema.safeParse(req.body);
     if (!result.success) {
-        return res.status(400).json({ message: "Credenciales invalidas o incompletas."});
+        const error = ERRORS.AUTH_BAD_REQUEST;
+        return res.status(error.statusCode).json(error.response);
     }
     
-
     try {
         await registerService(result.data);
         return res.status(200).json({ message: "Usuario creado correctamente."});
     } catch (error) {
-        console.log("Hoakekwdk")
-        if (error instanceof AppError ) {
-            return res.status(error.statusCode).json({ message: error.message });
+        if (error instanceof AppError) {
+            return res.status(error.statusCode).json(error.response);
         }
-        return res.status(500).json({ message: 'Problema interno del servidor.' });
+        const serverError = ERRORS.INTERNAL_SERVER_ERROR;
+        return res.status(serverError.statusCode).json(serverError.response);
     }
 }

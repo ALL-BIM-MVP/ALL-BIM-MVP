@@ -40,14 +40,14 @@ export const invitationService = async ({role_id, email} : InvitationRequest) : 
         [email]
     );
 
-    if (userData.rowCount !== 0) throw new AppError(ERRORS.USER_EXISTS, 409);
+    if (userData.rowCount !== 0) throw new AppError(ERRORS.USER_EXISTS);
 
     const roleCorrect = await pool.query(
         `SELECT 1 FROM roles WHERE role_id = $1`,
         [role_id]
     );
 
-    if (roleCorrect.rowCount === 0) throw new AppError(ERRORS.INVALID_ROLE, 400);
+    if (roleCorrect.rowCount === 0) throw new AppError(ERRORS.INVALID_ROLE);
 
     const tokenRandom = crypto.randomUUID();
     const tokenHash = crypto.createHash("sha256").update(tokenRandom).digest("hex");
@@ -75,7 +75,7 @@ export const validateInvitationTokenService = async (queryToken : string) : Prom
     );
 
     const validateData : ValidateResponse | undefined = resultQuery.rows[0];
-    if (!validateData) throw new AppError(ERRORS.INVALID_INVITATION, 404);
+    if (!validateData) throw new AppError(ERRORS.INVALID_INVITATION);
 
     return validateData;
 };
@@ -93,15 +93,15 @@ export const registerService = async ({name, email, password, token} : RegisterR
             [tokenHashed, email]
         );
         console.log(invitationQuery)
-        if (invitationQuery.rowCount === 0) throw new AppError(ERRORS.INVALID_INVITATION, 400);
+        if (invitationQuery.rowCount === 0) throw new AppError(ERRORS.INVALID_INVITATION);
         const role_id = invitationQuery.rows[0].role_id;
 
-        const userQuey = await client.query(
+        const userQuery = await client.query(
             `SELECT 1 FROM users WHERE email = $1`,
             [email]
         );
 
-        if (userQuey.rowCount !== 0) throw new AppError(ERRORS.USER_EXISTS, 409);
+        if (userQuery.rowCount !== 0) throw new AppError(ERRORS.USER_EXISTS);
 
         const passwordHash = await bcrypt.hash(password, 10);
         await client.query(
@@ -117,8 +117,9 @@ export const registerService = async ({name, email, password, token} : RegisterR
 
         await client.query("COMMIT");
     } catch (error) {
-        await client.query("ROLLBACK");
-        throw error;
+        if (error instanceof AppError) throw error;
+        
+        throw new AppError(ERRORS.INTERNAL_SERVER_ERROR);
     } finally {
         client.release();
     } 

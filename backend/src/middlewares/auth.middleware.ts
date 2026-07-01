@@ -1,67 +1,83 @@
-import type { NextFunction, Request, Response} from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { verifyAccessToken } from '../utils/jwt.js';
 import type { DecodedToken } from '../models/auth.models.js';
+import { ERRORS } from '../models/error.models.js';
 
-export const requireAuth = (req : Request, res : Response, next : NextFunction ) : void  => {
+
+export const requireAuth = (req: Request, res: Response, next: NextFunction): void => {
     console.log("Ruta(requireAuth): ", req.route?.path);
-    const header : string = req.headers.authorization || "";
-    const token : string | null = header.startsWith("Bearer ") ? header.slice(7) : null;
+    const header: string = req.headers.authorization || "";
+    const token: string | null = header.startsWith("Bearer ") ? header.slice(7) : null;
 
     if (!token) {
-        res.status(401).json({ message: "Token requerido, no recibido correctamente."});
+        const error = ERRORS.TOKEN_ACCESS_UNDEFINED;
+        res.status(error.statusCode).json(error.response);
         return;
     }
 
-    const decoded : DecodedToken | null = verifyAccessToken(token);
+    const decoded: DecodedToken | null = verifyAccessToken(token);
 
     if (!decoded) {
-        res.status(401).json({ message: "Token inválido, no pertenece a ALL-BIM." });
+        const error = ERRORS.TOKEN_ACCESS_INVALID;
+        res.status(error.statusCode).json(error.response);
+        return;
+    }
+
+    const ahora = Math.floor(Date.now() / 1000);
+
+    if (decoded.exp && decoded.exp < ahora) {
+        const error = ERRORS.TOKEN_ACCESS_EXPIRED;
+        res.status(error.statusCode).json(error.response);
         return;
     }
 
     req.user = decoded;
-
     next();
 };
 
-export const requireOwner = (req : Request, res : Response, next : NextFunction) : void  => {
+export const requireOwner = (req: Request, res: Response, next: NextFunction): void => {
     console.log("Ruta(requireOwner): ", req.route?.path);
-     if (!req.user) {
-        res.status(401).json({ message: "Identidad no verificada o sin acceso." });
+    if (!req.user) {
+        const error = ERRORS.AUTH_IDENTITY_UNKNOWN;
+        res.status(error.statusCode).json(error.response);
         return;
     }
+    
     const userIdParam = Number(req.params.id);
 
     if (Number.isNaN(userIdParam)) {
-        res.status(400).json({ message: "Parámetro 'id' inválido." });
+        const error = ERRORS.INVALID_ID_PARAM;
+        res.status(error.statusCode).json(error.response);
         return;
     }
 
-    const userIdAuth : number = req.user.user_id;
+    const userIdAuth: number = req.user.user_id;
 
-    if (userIdAuth !== userIdParam ) {
-        res.status(403).json( { message: "Acceso Prohibido a los datos." });
+    if (userIdAuth !== userIdParam) {
+        const error = ERRORS.FORBIDDEN_OWNER;
+        res.status(error.statusCode).json(error.response);
         return;
     }
     
     next();
 };
 
-export const requireAdminPrivileges = (req : Request, res : Response, next : NextFunction) : void => {
+export const requireAdminPrivileges = (req: Request, res: Response, next: NextFunction): void => {
     console.log("Ruta(requireAdminPrivileges): ", req.route?.path);
 
     if (!req.user) {
-        res.status(401).json({ message: "Identidad con verificada o sin acceso." });
+        const error = ERRORS.AUTH_IDENTITY_UNKNOWN;
+        res.status(error.statusCode).json(error.response);
         return;
     }
 
-    const { role_id : roleId } = req.user;    
+    const { role_id: roleId } = req.user;    
 
-    if (roleId !== 1 ) {
-        res.status(403).json( { message: "Se requiere privilegios de administrador." });
+    if (roleId !== 1) {
+        const error = ERRORS.FORBIDDEN_ADMIN;
+        res.status(error.statusCode).json(error.response);
         return;
     }
     
     next();
-};  
-
+};
