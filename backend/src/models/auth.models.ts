@@ -20,7 +20,3 @@ export interface ValidateResponse {
     email : string
 }   
 
-
-export interface AuthenticatedRequest extends Request {
-  user: NonNullable<Request['user']>; // Vuelve el 'user' obligatorio
-}

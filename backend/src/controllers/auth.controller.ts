@@ -1,8 +1,9 @@
 import type { Request, Response} from 'express';
 import type { Tokens, ValidateResponse } from '../models/auth.models.js';
-import { invitationService, loginService, registerService, validateInvitationTokenService } from '../services/auth.service.js';
+import { getMeService, invitationService, loginService, logoutService, refreshSessionService, registerService, validateInvitationTokenService } from '../services/auth.service.js';
 import { InvitationSchema, LoginSchema, RegisterSchema, TokenSchema } from '../schemas/auth.schema.js';
 import { AppError, ERRORS } from '../models/error.models.js';
+import type { UserLayout } from '../models/users.models.js';
 
 export const loginController = async (req : Request, res : Response) : Promise<Response> => {
     const result = LoginSchema.safeParse(req.body);
@@ -92,3 +93,62 @@ export const registerController = async (req : Request, res : Response) : Promis
         return res.status(serverError.statusCode).json(serverError.response);
     }
 }
+
+export const refreshSessionController = async (req: Request, res: Response): Promise<Response> => {
+
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+        const error = ERRORS.TOKEN_REFRESH_UNDEFINED;
+        return res.status(error.statusCode).json(error.response);
+    }
+
+    try {
+        const tokens = await refreshSessionService(refresh_token);
+        
+        return res.status(200).json(tokens);
+    } catch (error) {
+        if (error instanceof AppError) {
+            return res.status(error.statusCode).json(error.response);
+        }
+        const serverError = ERRORS.INTERNAL_SERVER_ERROR;
+        return res.status(serverError.statusCode).json(serverError.response);
+    }
+};
+
+export const logoutController = async (req: Request, res: Response): Promise<Response> => {
+    const { refresh_token } = req.body;
+
+    if (!refresh_token) {
+        const error = ERRORS.TOKEN_REFRESH_UNDEFINED;
+        return res.status(error.statusCode).json(error.response);
+    }
+
+    try {
+        await logoutService(refresh_token);
+        
+        return res.status(200).json({ message: "Sesión cerrada correctamente." });
+    } catch (error) {
+        if (error instanceof AppError) return res.status(error.statusCode).json(error.response);
+        const serverError = ERRORS.INTERNAL_SERVER_ERROR;
+        return res.status(serverError.statusCode).json(serverError.response);
+    }
+};
+
+export const getMeController = async (req: Request, res: Response): Promise<Response> => {
+    if (!req.user) {
+        const error = ERRORS.AUTH_IDENTITY_UNKNOWN;
+        return res.status(error.statusCode).json(error.response);
+    }
+
+    try {
+        const userInfo : UserLayout = await getMeService(req.user.user_id);
+        return res.status(200).json(userInfo);
+    } catch (error) {
+        if (error instanceof AppError) {
+            return res.status(error.statusCode).json(error.response);
+        }
+        const serverError = ERRORS.INTERNAL_SERVER_ERROR;
+        return res.status(serverError.statusCode).json(serverError.response);
+    }
+};

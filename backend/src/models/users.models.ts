@@ -1,19 +1,21 @@
-export interface User {
+export interface BaseUser {
     user_id: number;
-    role_id: number;
     name: string;
-    password_hash: string;
     email: string;
-    active: boolean;
     created_at: Date;
-};
+}
 
-export interface UserResponse {
-    user_id: number;
-    role_id: number;
+export interface UserLayout extends BaseUser {
     role_name: string;
-    name: string;
-    email: string;
+}
+
+export interface UserResponse extends UserLayout {
+    role_id: number;
     active: boolean;
-    created_at: Date;
-};
+}
+
+export interface User extends BaseUser {
+    role_id: number;
+    password_hash: string;
+    active: boolean;
+}

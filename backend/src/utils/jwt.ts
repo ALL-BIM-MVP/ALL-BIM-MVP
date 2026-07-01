@@ -1,6 +1,6 @@
 import jwt, {type SignOptions} from "jsonwebtoken";
 import type { AuthPayload, DecodedToken } from "../models/auth.models.js";
-
+import ms, { type StringValue } from 'ms';
 if (!process.env.JWT_SECRET) {
     throw new Error("ERROR: variable 'JWT_SECRET' no definida.");
 }
@@ -16,6 +16,11 @@ const JWT_REFRESH_SECRET : string = process.env.JWT_REFRESH_SECRET;
 const JWT_REFRESH_EXPIRES_IN : SignOptions["expiresIn"] = 
     (process.env.JWT_REFRESH_EXPIRES_IN as SignOptions["expiresIn"]) || "7d";
 
+
+export const getRefreshTokenExpiresAt = (): Date => {
+    const durationInMs = ms(JWT_REFRESH_EXPIRES_IN as StringValue);
+    return new Date(Date.now() + durationInMs);
+};
 
 export const generateAccessToken = (payload : AuthPayload) : string => {
     return jwt.sign(payload, JWT_SECRET, {expiresIn: JWT_EXPIRES_IN});

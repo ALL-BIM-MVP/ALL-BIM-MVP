@@ -15,7 +15,7 @@ CREATE TABLE users (
     email VARCHAR(150) UNIQUE NOT NULL,
     password_hash VARCHAR(256) NOT NULL,
     active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIME DEFAULT NOW(),
     role_id INT NOT NULL REFERENCES roles(role_id)
 );
 
@@ -34,7 +34,6 @@ CREATE TABLE refresh_tokens (
     token_hash TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL,
     expires_at TIMESTAMPTZ NOT NULL,
-    last_used TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     active BOOLEAN NOT NULL DEFAULT TRUE,
     user_id INT NOT NULL REFERENCES users(user_id)
 );
@@ -77,12 +76,6 @@ INSERT INTO users (
 )
 VALUES (
     'Ismael', 'ismael@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo4i', 1
-),(
-    'Ismael Salvador ', 'ismaelsalvador@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo5i', 2
-),(
-    'Ismael Pacahcutec', 'ismaelpachacutec@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo6i', 3
-),(
-    'Ismael Llanos', 'ismaellanos@email.com', '$2b$10$NxPQ5w4pQpFsSXT9ICdn7O2xCIhhBP5oou1Rzd9P9aodX2Cqlfo8qi', 2
 );
 
 
