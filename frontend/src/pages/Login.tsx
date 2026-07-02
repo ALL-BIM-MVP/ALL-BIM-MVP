@@ -1,63 +1,67 @@
-import { useState } from 'react';
+import React from 'react';
+import { useAuth } from '../hooks/useAuth';
+import loginBgImage from '../assets/fondologin.png';
 
 export default function Login() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { formData, handleChange, handleRegister } = useAuth();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Intentando iniciar sesión con:', { email, password });
+    try {
+      await handleRegister();
+      alert("Registro exitoso");
+    } catch (error: any) {
+      alert(error.message);
+    }
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-slate-900 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-2xl">
-        
-        {/* Encabezado */}
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">ALL-BIM</h1>
-          <p className="mt-2 text-sm text-slate-500">Ingresa tus credenciales para acceder al MVP</p>
+    <div 
+        className="relative min-h-screen w-full flex items-center justify-end pr-[150px] p-4 font-sans"  
+        style={{
+          backgroundImage: `url(${loginBgImage})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center'
+        }}
+    >
+      <div className="absolute inset-0 bg-black opacity-0 z-0"></div>
+
+      <div className="relative z-10 w-full max-w-[440px] bg-white border border-gray-200 shadow-xl p-10 flex flex-col rounded-xl">
+        <div className="mb-5 text-center">
+          <span className="font-sans font-black tracking-tighter text-[41px] text-[#0056b3]">ALL-BIM</span>
         </div>
+        <h2 className="text-2xl font-bold font-black text-black mb-1">Has sido invitado a ALL-BIM</h2>
+        <p className="text-sm text-gray-600 mb-8">Creando cuenta como ADMINISTRADOR</p>
 
-        {/* Formulario */}
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Correo Electrónico
-            </label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="correo@ejemplo.com"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-            />
-          </div>
+        <form className="space-y-5" onSubmit={handleSubmit}>
+          {[
+            { label: "Correo electrónico", name: "email", type: "email" },
+            { label: "Nombre de usuario", name: "username", type: "text" },
+            { label: "Contraseña", name: "password", type: "password" },
+            { label: "Confirmar contraseña", name: "confirmPassword", type: "password" }
+          ].map((field) => (
+            <div key={field.name}>
+              <label className="block text-[18px] font-sans text-gray-700 mb-1.5">
+                {field.label}
+              </label>
+              <input 
+                name={field.name}
+                type={field.type} 
+                value={formData[field.name as keyof typeof formData]}
+                onChange={handleChange}
+                className="w-full bg-white border border-gray-300 p-2 text-sm focus:outline-none focus:border-[#0056b3] transition-colors"
+                required
+              />
+            </div>
+          ))}
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Contraseña
-            </label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
-            />
-          </div>
-
-          {/* Botón de Ingreso */}
-          <button
-            type="submit"
-            className="w-full rounded-xl bg-blue-600 py-3 text-sm font-semibold text-white shadow-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-colors"
+          <button 
+            type="submit" 
+            className="w-full bg-[#0056b3] text-white font-sans h-10 hover:bg-[#004494] transition-colors mt-2 rounded-md font-semibold"
           >
-            Iniciar Sesión
+            CREAR CUENTA
           </button>
         </form>
-
       </div>
     </div>
   );

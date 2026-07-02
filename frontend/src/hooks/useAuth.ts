@@ -1,36 +1,25 @@
+// src/hooks/useAuth.ts
 import { useState } from 'react';
-import { User } from '../types/User';
-import { authService } from '../services/auth.service';
+import { api } from '../services/auth.service';
 
-export function useAuth() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
+const REGISTER_ENDPOINT = '/auth/register';
 
-  const loginUser = async (email: string, password: string) => {
-    setLoading(true);
-    try {
-      const data = await authService.login(email, password);
-      // Aquí se guardará el usuario en el estado cuando el servicio responda
-      setUser(data.user);
-      return data;
-    } catch (error) {
-      console.error("Error al iniciar sesión en el hook:", error);
-      throw error;
-    } finally {
-      setLoading(false);
+export const useAuth = () => {
+  const [formData, setFormData] = useState({
+    email: '', username: '', password: '', confirmPassword: ''
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleRegister = async () => {
+    if (formData.password !== formData.confirmPassword) {
+      throw new Error("Las contraseñas no coinciden");
     }
+    // Ahora usa fetch a través de nuestro servicio
+    return await api.post(REGISTER_ENDPOINT, formData);
   };
 
-  const logoutUser = () => {
-    authService.logout();
-    setUser(null);
-  };
-
-  return {
-    user,
-    loading,
-    isAuthenticated: !!user,
-    loginUser,
-    logoutUser
-  };
-}
+  return { formData, handleChange, handleRegister };
+};
