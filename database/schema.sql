@@ -1,18 +1,62 @@
 CREATE DATABASE all_bim;
 
 CREATE TABLE roles (
-    rol_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    nombre VARCHAR(40) UNIQUE NOT NULL
+    role_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(40) UNIQUE NOT NULL
 );
 
-CREATE TABLE usuarios (
-    usuario_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    nombre VARCHAR(60) NOT NULL,
-    correo VARCHAR(120) UNIQUE NOT NULL,
-    contrasena_hash VARCHAR(256) NOT NULL,
-    activo BOOLEAN DEFAULT TRUE,
-    creado_en TIMESTAMP DEFAULT NOW(),
-    rol_id INT NOT NULL REFERENCES roles(rol_id)
+CREATE TABLE users (
+    user_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(60) NOT NULL,
+    email VARCHAR(150) UNIQUE NOT NULL,
+    password_hash VARCHAR(256) NOT NULL,
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIME DEFAULT NOW(),
+    role_id INT NOT NULL REFERENCES roles(role_id)
 );
+
+CREATE TABLE invitations (
+    invitation_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    email VARCHAR(150) NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '3 days',
+    used BOOLEAN NOT NULL DEFAULT FALSE,
+    role_id INT NOT NULL REFERENCES roles(role_id)
+);
+
+CREATE TABLE refresh_tokens (
+    refresh_token_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    user_id INT NOT NULL REFERENCES users(user_id)
+);
+
+CREATE TABLE projects (
+    project_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    start_date DATE,
+    end_date DATE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE ifc_files (
+    ifc_file_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(80) NOT NULL,
+    file_path VARCHAR(120) NOT NULL,
+    uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    user_id INT REFERENCES users(user_id)
+);
+
+CREATE TABLE cache_data (
+    cache_data_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(80) NOT NULL,
+    cache_path VARCHAR(120) NOT NULL,
+    ifc_file_id INT REFERENCES ifc_files(ifc_file_id)
+);
+
 
 

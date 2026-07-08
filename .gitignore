@@ -22,6 +22,7 @@ jspm_packages/
 .pnpm-store/
 
 # builds
+test/
 dist/
 build/
 out/

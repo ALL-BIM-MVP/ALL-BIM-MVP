@@ -1,7 +1,8 @@
 import 'dotenv/config';
 import express from "express";
 import routerAuth from './routes/auth.routes.js';
-import pool from './db/database.js'
+import routerRoles from './routes/roles.routes.js';
+import routerUsers from './routes/users.routes.js'
 const app = express();
 
 
@@ -11,19 +12,22 @@ app.use(express.json());
 //rutas definidas
 
 app.use('/auth', routerAuth);
+app.use('/roles', routerRoles);
+app.use('/users', routerUsers);
 
-app.get("/", async (req, res) => {
+app.post("/", async (req, res) => {
   try {
-    const result = await pool.query("SELECT NOW()");
-    res.json(result.rows[0]);
+    res.json(typeof req.body.numero);
   } catch (error) {
     res.status(500).json({ error: "DB no conectada" });
   }
 });
 
-
+//const hash = await bcrypt.hash('hash_de_prueba', 10);
+//console.log(`hash de 'hash_de_prueba' : ${hash}`);
 
 const PORT = Number(process.env.PORT) || 4000;
 app.listen(PORT, () => {
   console.log(`\nServidor corriendo en http://localhost:${PORT}\n`);
+
 });
