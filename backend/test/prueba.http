@@ -1,0 +1,93 @@
+### Configuración de Variables del Archivo (Modifica según tu entorno)
+@hostname = localhost
+@port = 4000
+@baseUrl = http://{{hostname}}:{{port}}
+
+
+### Login Exitoso (Guardamos el access y refresh token en variables)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+    "email": "ismael@email.com",
+    "password": "hash_de_prueba"
+}
+
+###
+
+### Guardar tokens devueltos por el login para usarlos abajo automáticamente
+@accessToken = {{login.response.body.access_token}}
+@refreshToken = {{login.response.body.refresh_token}}
+
+
+### Obtener mi Perfil Actual (Ruta protegida /me)
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+###
+
+### Refrescar la Sesión (Silent Refresh)
+# @name refresh
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+    "refresh_token": "{{refreshToken}}"
+}
+
+###
+
+### Actualizar el access token con el nuevo que devolvió el refresh
+@newAccessToken = {{refresh.response.body.access_token}}
+
+
+### Cerrar Sesión (Logout)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+    "refresh_token": "{{refreshToken}}"
+}
+
+### 
+
+POST {{baseUrl}}/auth/invitations
+Content-Type: application/json
+
+{
+    "role_id": 2,
+    "email": "sayadenilson@gmail.com"
+}
+
+###
+
+GET {{baseUrl}}/auth/invitations/validate?token=621a7eaf-4d18-46eb-8fcb-9b3935f292a3
+
+### la consulta responde con lo siguiente en caso de exito
+    export interface ValidateResponse {
+        role_id : number,
+        role_name : string,
+        email : string
+    } 
+###
+
+### Registrarse con la Invitación Válida
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+    "name": "Ismael Salvador Pachacutec Llanos",
+    "email": "ismaelsalvadorpachacutecllanos@gmail.com",
+    "password": "isma1357",
+    "token": "621a7eaf-4d18-46eb-8fcb-9b3935f292a3"
+}
+
+
+### Listar Roles
+GET {{baseUrl}}/roles
+
+###
+
+### Listar Usuarios (Ordenados por email descendente)
+GET {{baseUrl}}/users?sort=email&order=desc&active=false
