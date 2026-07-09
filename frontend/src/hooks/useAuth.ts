@@ -5,9 +5,9 @@ import { getRoleName } from '../utils/roles';
 
 export const useAuth = () => {
   const [formData, setFormData] = useState({
-    correo: '',
+    email: '',
     name: '',
-    contrasena: '',
+    password: '',
     confirmPassword: ''
   });
 
@@ -25,8 +25,8 @@ export const useAuth = () => {
     setLoading(true);
     try {
       const response = await loginUser({
-        correo: formData.correo,
-        contrasena: formData.contrasena
+        email: formData.email,
+        password: formData.password
       });
 
       localStorage.setItem('accessToken', response.access_token);
@@ -49,19 +49,19 @@ export const useAuth = () => {
   const handleRegister = async (token: string) => {
     setLoading(true);
     try {
-      if (formData.contrasena !== formData.confirmPassword) {
+      if (formData.password !== formData.confirmPassword) {
         throw new Error("Las contraseñas no coinciden");
       }
 
       const response = await registerUser({
-        token: token,
+        token: token,   //  gmail
         nombre: formData.name,
-        contrasena: formData.contrasena
+        password: formData.password
       });
 
-      localStorage.setItem('accessToken', response.access_token);
+      localStorage.setItem('accessToken', response.access_token);  
       localStorage.setItem('refreshToken', response.refresh_token);
-      localStorage.setItem('userRoleId', String(response.rol_id));
+      localStorage.setItem('userRoleId', String(response.rol_id));      //rol-name, rol_ide,psaword
       const roleName = getRoleName(response.rol_id);
       localStorage.setItem('userRole', roleName);
       localStorage.setItem('username', formData.name);
@@ -72,30 +72,30 @@ export const useAuth = () => {
     }
   };
 
-  const validateToken = async (token: string) => {
-    setLoading(true);
-    try {
-      console.log(' [useAuth] Validando token:', token);
-      const data = await validateInvitation(token);
-      console.log(' [useAuth] Datos del backend:', data);
-      
-     
-      if (data && typeof data === 'object') {
-        return {
-          email: data.email || '',
-          valid: data.valid === true,
-          expires_at: data.expires_at || ''
-        };
-      }
-      
-      return { email: '', valid: false, expires_at: '' };
-    } catch (error) {
-      console.error(' [useAuth] Error en validación:', error);
-      return { email: '', valid: false, expires_at: '' };
-    } finally {
-      setLoading(false);
+ const validateToken = async (token: string) => {
+  setLoading(true);
+  try {
+    console.log(' [useAuth] Validando token:', token);
+    const data = await validateInvitation(token);
+    console.log(' [useAuth] Datos del backend:', data);
+    
+    //  El backend envía: { gmail, role_id, role_name }
+    if (data?.email) {
+      return {
+        email: data.email,
+        role_id: data.role_id || 0,
+        role_name: data.role_name || ''
+      };
     }
-  };
+    
+    return { email: '', role_id: 0, role_name: '' };
+  } catch (error) {
+    console.error('❌ [useAuth] Error:', error);
+    return { email: '', role_id: 0, role_name: '' };
+  } finally {
+    setLoading(false);
+  }
+};
 
   // 4. LOGOUT
   const handleLogout = () => {
