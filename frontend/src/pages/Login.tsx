@@ -12,7 +12,12 @@ export default function Login() {
   const { validateToken, loading } = useAuth();
 
   const [isInvited, setIsInvited] = useState(false);
-  const [invitationData, setInvitationData] = useState<{ email: string; valid: boolean } | null>(null);
+ const [invitationData, setInvitationData] = useState<{ 
+  email: string; 
+  role_id: number; 
+  role_name: string;
+} | null>(null);
+
   const [validating, setValidating] = useState(true);
   
   const hasValidated = useRef(false);
@@ -36,9 +41,13 @@ export default function Login() {
       .then((data) => {
         console.log(' [Login] Datos recibidos:', data);
         
-        if (data && data.valid === true && data.email) {
+        if (data?.email) {
           console.log(' [Login] Token válido, mostrando formulario');
-          setInvitationData({ email: data.email, valid: true });
+          setInvitationData({
+  email: data.email,
+  role_id: data.role_id || 0,
+  role_name: data.role_name || ''
+});
           setIsInvited(true);
         } else {
           console.log(' [Login] Token inválido o expirado');

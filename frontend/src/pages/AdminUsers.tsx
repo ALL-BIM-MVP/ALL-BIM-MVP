@@ -1,11 +1,10 @@
 // src/pages/AdminUsers.tsx
 import React from 'react';
-import Sidebar from '../components/Sidebar';
+
 
 const AdminUsers: React.FC = () => {
   return (
     <div className="min-h-screen flex bg-gray-50">
-      <Sidebar />
       <div className="flex-1 flex flex-col">
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <h1 className="text-2xl font-bold text-gray-900">Gestión de Usuarios</h1>
