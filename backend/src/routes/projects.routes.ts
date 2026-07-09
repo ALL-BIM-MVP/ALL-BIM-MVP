@@ -1,9 +1,8 @@
 import { Router } from 'express';
-import { getRolesController } from '../controllers/roles.controller.js';
+import {  } from '../controllers/projects.controller.js';
 import { requireAuth } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
-router.get('/',requireAuth, getRolesController);
 
 export default router;
