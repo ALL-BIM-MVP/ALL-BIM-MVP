@@ -1,6 +1,7 @@
 import jwt, {type SignOptions} from "jsonwebtoken";
 import type { AuthPayload, DecodedToken } from "../models/auth.models.js";
 import ms, { type StringValue } from 'ms';
+import { AppError, ERRORS } from "../models/error.models.js";
 if (!process.env.JWT_SECRET) {
     throw new Error("ERROR: variable 'JWT_SECRET' no definida.");
 }
@@ -30,21 +31,38 @@ export const generateRefreshToken = (payload : AuthPayload) : string => {
     return jwt.sign(payload, JWT_REFRESH_SECRET, {expiresIn: JWT_REFRESH_EXPIRES_IN});
 };
 
-export const verifyAccessToken = (token : string) : DecodedToken | null => {
-    return verifyToken(token, JWT_SECRET);
+export const verifyAccessToken = (token : string) : DecodedToken => {
+    return verifyToken(token, JWT_SECRET, 'access');
 }
 
-export const verifyRefreshToken = (token : string) : DecodedToken | null => {
-    return verifyToken(token, JWT_REFRESH_SECRET);
+export const verifyRefreshToken = (token : string) : DecodedToken => {
+    return verifyToken(token, JWT_REFRESH_SECRET, 'refresh');
 }
 
-const verifyToken = (token : string, secretKey : string | Buffer) : DecodedToken | null => {
+const verifyToken = (token : string, secretKey : string | Buffer, tokenType : 'refresh' | 'access') : DecodedToken => {
     try {
         const decoded = jwt.verify(token, secretKey);
-        
-        if (typeof decoded === "string") return null;
+
+        if(typeof decoded === "string"){
+            const err = (tokenType === 'access') ? ERRORS.TOKEN_ACCESS_INVALID : ERRORS.TOKEN_REFRESH_INVALID;
+            throw new AppError(err);
+        }
+
         return decoded as DecodedToken;
-    }catch {
-        return null
+
+
+    } catch(error){
+
+        if(error instanceof AppError){
+            throw error;
+        }
+
+        if(error instanceof jwt.TokenExpiredError){
+            const err = (tokenType === 'access') ? ERRORS.TOKEN_ACCESS_EXPIRED : ERRORS.TOKEN_REFRESH_EXPIRED;
+            throw new AppError(err);
+        }
+
+        const err = (tokenType === 'access') ? ERRORS.TOKEN_ACCESS_INVALID : ERRORS.TOKEN_REFRESH_INVALID;
+        throw new AppError(err);
     }
 }

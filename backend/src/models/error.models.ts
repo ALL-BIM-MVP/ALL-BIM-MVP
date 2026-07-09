@@ -38,7 +38,7 @@ type ErrorKeys =
     | "AUTH_IDENTITY_UNKNOWN"
     | "FORBIDDEN_OWNER"
     | "FORBIDDEN_ADMIN"
-    
+    | "FORBIDDEN_ROLE"
     | "INVALID_ID_PARAM"
     | "RESOURCE_NOT_FOUND"
     | "INTERNAL_SERVER_ERROR"
@@ -99,6 +99,13 @@ export const ERRORS: Readonly<Record<ErrorKeys, ErrorOptions>> = {
     FORBIDDEN_ADMIN: {
         statusCode: 403,
         response: { code: "AUTH_FORBIDDEN_REQUIRES_ADMIN", message: "Se requiere privilegios de administrador." }
+    },
+    FORBIDDEN_ROLE: {
+        statusCode: 403,
+        response: {
+            code: "AUTH_FORBIDDEN_ROLE",
+            message: "No tiene permisos suficientes para realizar esta acción."
+        }
     },
 
     INVALID_ID_PARAM: {

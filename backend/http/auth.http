@@ -1,0 +1,90 @@
+@baseUrl = http://localhost:4000/api
+
+### =========================
+### Login Admin
+### =========================
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ismael@email.com",
+  "password": "hash_de_prueba"
+}
+
+###
+
+### Capturar tokens automáticamente
+@accessToken = {{login.response.body.access_token}}
+@refreshToken = {{login.response.body.refresh_token}}
+
+### =========================
+### Obtener usuario actual
+### =========================
+GET {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+
+### =========================
+### Refresh token
+### =========================
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
+
+### =========================
+### Logout
+### =========================
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
+
+### =========================
+### Crear invitación
+### (admin/supervisor)
+### =========================
+# @name invitations
+POST {{baseUrl}}/invitations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "role_id": 4,
+  "email": "nuevo@correo.com"
+}
+
+### Capturar tokens automáticamente
+@tokenLink = {{invitations.response.body.token}}
+### =========================
+### Validar invitación
+### =========================
+GET {{baseUrl}}/invitations/validate?token={{tokenLink}}
+
+### =========================
+### Registrar usuario con invitación
+### =========================
+POST {{baseUrl}}/users/register
+Content-Type: application/json
+
+{
+  "name": "Nuevo Usuario",
+  "password": "123456",
+  "token": "{{tokenLink}}"
+}
+
+### =========================
+### Obtener roles
+### =========================
+GET {{baseUrl}}/roles
+Authorization: Bearer {{accessToken}}
+
+### =========================
+### Obtener usuarios
+### =========================
+GET {{baseUrl}}/users
+Authorization: Bearer {{accessToken}}
