@@ -1,7 +1,7 @@
 import React from 'react';
 import { Users, UserPlus, Folder, PlusCircle, Layers } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-
+ import logo from "../assets/logo.png";
 const Sidebar: React.FC = () => {
   const navigate = useNavigate();
   const userRole = localStorage.getItem('userRole');
@@ -18,7 +18,10 @@ const Sidebar: React.FC = () => {
   return (
     <aside className="w-1/3 max-w-[250px] min-w-[400px] bg-white border-r border-gray-200 p-6 flex flex-col justify-between h-screen">
       <div>
-        <div className="mb-10 text-center font-bold text-[40px] text-[#0056b3]">ALL-BIM</div>
+        <div className="mb-10 flex items-center justify-center gap-1">
+  <img src={logo} alt="Logo ALL-BIM" className="h-[75px] w-[80px]" />
+  <span className="font-bold text-[40px] text-blue-600">ALL-BIM</span>
+</div>
         
         <nav className="space-y-8">
           {/* Sección Administración - Solo visible para admin */}
@@ -63,7 +66,7 @@ const Sidebar: React.FC = () => {
               </li>
               <li className="cursor-pointer group rounded-lg hover:bg-blue-100 transition-colors">
                 <Link 
-                  to="/projects/nuevo" 
+                  to="/dashboard/nuevoproyecto" 
                   className="flex items-center gap-3 p-3 rounded-lg group-hover:text-blue-700 transition-colors"
                 >
                   <PlusCircle size={22} className="text-gray-400 group-hover:text-blue-600" />

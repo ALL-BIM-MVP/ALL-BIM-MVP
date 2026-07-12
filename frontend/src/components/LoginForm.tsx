@@ -33,9 +33,9 @@ export default function LoginForm() {
             Correo electrónico
           </label>
           <input
-            name="correo"       
+            name="email"       
             type="email"
-            value={formData.correo} 
+            value={formData.email} 
             onChange={handleChange}
             className="w-full bg-white border border-gray-300 p-2 text-sm focus:outline-none focus:border-[#0056b3] transition-colors"
             required
@@ -47,9 +47,9 @@ export default function LoginForm() {
             Contraseña
           </label>
           <input
-            name="contrasena"           
+            name="password"           
             type="password"
-            value={formData.contrasena} 
+            value={formData.password} 
             onChange={handleChange}
             className="w-full bg-white border border-gray-300 p-2 text-sm focus:outline-none focus:border-[#0056b3] transition-colors"
             required

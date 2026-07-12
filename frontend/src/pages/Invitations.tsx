@@ -1,21 +1,21 @@
 // src/pages/Invitations.tsx
 import React, { useState } from 'react';
 import { createInvitation } from '../services/auth.service';
-import Sidebar from '../components/Sidebar';
 import { INVITATION_ROLES } from '../utils/roles';
 
 const Invitations: React.FC = () => {
   const [email, setEmail] = useState('');
-  const [rol, setRol] = useState('EDITOR');
+   const [role_id, setRolId] = useState(2);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const result = await createInvitation({ email, rol });
+      const result = await createInvitation({ email, role_id });
       alert(` ${result.message}`);
       setEmail('');
+      setRolId(2); 
     } catch (error: any) {
       alert(error.message || 'Error al enviar invitación');
     } finally {
@@ -25,7 +25,7 @@ const Invitations: React.FC = () => {
 
   return (
     <div className="min-h-screen flex bg-gray-50">
-      <Sidebar />
+      
       <div className="flex-1 flex flex-col">
         <header className="bg-white border-b border-gray-200 px-8 py-4">
           <h1 className="text-2xl font-bold text-gray-900">Invitar Usuario</h1>
@@ -55,12 +55,13 @@ const Invitations: React.FC = () => {
        selecciona el rol del usuario
       </label>
       <select
-        value={rol}
-        onChange={(e) => setRol(e.target.value)}
+        value={role_id}
+         onChange={(e) => setRolId(Number(e.target.value))} 
         className="w-full border border-gray-300 p-3 rounded-lg focus:outline-none focus:border-[#0056b3]"
       >
         {INVITATION_ROLES.map((role) => (
-          <option key={role.id} value={role.name}>
+          <option key={role.id} value={role.id}>    
+           {/*              //  mandar  rol_id             */}  
             {role.name}
           </option>
         ))}

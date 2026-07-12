@@ -4,7 +4,11 @@ import { useAuth } from '../hooks/useAuth';
 import { useNavigate } from 'react-router-dom';
 
 interface RegisterInvitedFormProps {
-  invitationData: { email: string; valid: boolean };
+  invitationData: {
+    email: string;
+    role_id: number;
+    role_name: string;
+  };
   token: string;
 }
 
@@ -31,7 +35,7 @@ export default function RegisterInvitedForm({ invitationData, token }: RegisterI
   return (
     <>
       <h2 className="text-2xl font-bold text-black mb-1">Completar registro</h2>
-      <p className="text-sm text-gray-600 mb-8">Crea tu cuenta para acceder a ALL-BIM</p>
+      <p className="text-sm text-gray-600 mb-8"> Crea tu cuenta para acceder a ALL-BIM como <strong>{invitationData.role_name}</strong></p>
 
       <form className="space-y-5" onSubmit={handleSubmit}>
        
@@ -69,9 +73,9 @@ export default function RegisterInvitedForm({ invitationData, token }: RegisterI
             Contraseña
           </label>
           <input
-            name="contrasena"             
+            name="password"             
             type="password"
-            value={formData.contrasena}    
+            value={formData.password}    
             onChange={handleChange}
              autoComplete="new-password"
             className="w-full bg-white border border-gray-300 p-2 text-sm focus:outline-none focus:border-[#0056b3] transition-colors"
