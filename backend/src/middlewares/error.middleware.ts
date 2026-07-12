@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { AppError, ERRORS } from "../models/error.models.js";
+import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 
 export const errorHandler = ( err: unknown, req: Request, res: Response, next: NextFunction ): void => {
 
@@ -10,6 +11,6 @@ export const errorHandler = ( err: unknown, req: Request, res: Response, next: N
 
     console.error(err);
 
-    res.status(ERRORS.INTERNAL_SERVER_ERROR.statusCode)
-        .json(ERRORS.INTERNAL_SERVER_ERROR.response);
+    res.status(COMMON_ERRORS.INTERNAL_SERVER_ERROR.statusCode)
+        .json(COMMON_ERRORS.INTERNAL_SERVER_ERROR.response);
 };

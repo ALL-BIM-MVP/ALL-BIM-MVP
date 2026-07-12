@@ -6,13 +6,14 @@ import { AppError, ERRORS } from '../models/error.models.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { RegisterSchema } from '../schemas/auth.schema.js';
 import type { AuthResponse } from '../models/auth.models.js';
+import { COMMON_ERRORS } from '../models/errors/common.errors.js';
+import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
 
 export const registerController = asyncHandler( async (req : Request, res : Response) : Promise<void> => {
     const result = RegisterSchema.safeParse(req.body);
     if (!result.success) {
-        throw new AppError(ERRORS.AUTH_BAD_REQUEST);
+        throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
     }
-    console.log(`\n\n\nHOLA AQUI LLEGO\n\n\n`)
     const data : AuthResponse = await registerService(result.data);
     console.log({message : "Usuaio creado correctamente", data})
     
@@ -21,7 +22,7 @@ export const registerController = asyncHandler( async (req : Request, res : Resp
 
 export const getMeController = asyncHandler( async (req: Request, res: Response): Promise<void> => {
     if (!req.user) {
-        throw new AppError(ERRORS.AUTH_IDENTITY_UNKNOWN);
+        throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
     }
 
     const userInfo : UserLayout = await getMeService(req.user.user_id);
@@ -33,7 +34,7 @@ export const getAllUsersController = asyncHandler( async (req : Request, res : R
     const result = GetUsersSchema.safeParse(req.query);
 
     if (!result.success) {
-        throw new AppError(ERRORS.USERS_BAD_REQUEST);
+        throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
     }
 
     const users : UserResponse[] = await getAllUsersService(result.data); 

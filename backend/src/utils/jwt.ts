@@ -2,6 +2,7 @@ import jwt, {type SignOptions} from "jsonwebtoken";
 import type { AuthPayload, DecodedToken } from "../models/auth.models.js";
 import ms, { type StringValue } from 'ms';
 import { AppError, ERRORS } from "../models/error.models.js";
+import { AUTH_ERRORS } from "../models/errors/auth.errors.js";
 if (!process.env.JWT_SECRET) {
     throw new Error("ERROR: variable 'JWT_SECRET' no definida.");
 }
@@ -44,7 +45,7 @@ const verifyToken = (token : string, secretKey : string | Buffer, tokenType : 'r
         const decoded = jwt.verify(token, secretKey);
 
         if(typeof decoded === "string"){
-            const err = (tokenType === 'access') ? ERRORS.TOKEN_ACCESS_INVALID : ERRORS.TOKEN_REFRESH_INVALID;
+            const err = (tokenType === 'access') ? AUTH_ERRORS.ACCESS_TOKEN_INVALID : AUTH_ERRORS.REFRESH_TOKEN_INVALID;
             throw new AppError(err);
         }
 
@@ -58,7 +59,7 @@ const verifyToken = (token : string, secretKey : string | Buffer, tokenType : 'r
         }
 
         if(error instanceof jwt.TokenExpiredError){
-            const err = (tokenType === 'access') ? ERRORS.TOKEN_ACCESS_EXPIRED : ERRORS.TOKEN_REFRESH_EXPIRED;
+            const err = (tokenType === 'access') ? AUTH_ERRORS.ACCESS_TOKEN_EXPIRED : AUTH_ERRORS.REFRESH_TOKEN_EXPIRED;
             throw new AppError(err);
         }
 

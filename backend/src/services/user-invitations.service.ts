@@ -4,6 +4,9 @@ import type { InvitationResponse, ValidateResponse } from "../models/auth.models
 import { AppError, ERRORS } from "../models/error.models.js";
 import type { InvitationRequest } from "../schemas/auth.schema.js";
 import { generateRandomToken, hashToken } from "../utils/hashing.js";
+import { USER_ERRORS } from "../models/errors/user.errors.js";
+import { ROLE_ERRORS } from "../models/errors/role.errors.js";
+import { INVITATION_ERRRORS } from "../models/errors/invitation.errors.js";
 
 export const createInvitationService = async ({role_id, email} : InvitationRequest) : Promise<InvitationResponse> => {
 
@@ -12,7 +15,7 @@ export const createInvitationService = async ({role_id, email} : InvitationReque
         [email]
     );
 
-    if (userData.rowCount !== 0) throw new AppError(ERRORS.USER_EXISTS);
+    if (userData.rowCount !== 0) throw new AppError(USER_ERRORS.USER_ALREADY_EXISTS);
 
     const roleCorrect = await pool.query(
         `SELECT name AS "rolName" FROM roles 
@@ -20,7 +23,7 @@ export const createInvitationService = async ({role_id, email} : InvitationReque
         [role_id]
     );
 
-    if (roleCorrect.rowCount === 0) throw new AppError(ERRORS.INVALID_ROLE);
+    if (roleCorrect.rowCount === 0) throw new AppError(ROLE_ERRORS.ROLE_NOT_ASSIGNABLE);
     const { rolName } = roleCorrect.rows[0];
 
     const tokenRandom = generateRandomToken();
@@ -54,7 +57,7 @@ export const validateInvitationService = async (queryToken : string) : Promise< 
     );
 
     const validateData : ValidateResponse | undefined = resultQuery.rows[0];
-    if (!validateData) throw new AppError(ERRORS.INVALID_INVITATION);
+    if (!validateData) throw new AppError(INVITATION_ERRRORS.INVITATION_INVALID);
 
     return validateData;
 };

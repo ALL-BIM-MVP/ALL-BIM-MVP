@@ -5,12 +5,14 @@ import { InvitationSchema, LoginSchema, TokenSchema } from '../schemas/auth.sche
 import { AppError, ERRORS } from '../models/error.models.js';
 import type { UserLayout } from '../models/users.models.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { COMMON_ERRORS } from '../models/errors/common.errors.js';
+import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
 
 export const loginController = asyncHandler( async (req : Request, res : Response) : Promise<void> => {
     const result = LoginSchema.safeParse(req.body);
     
     if (!result.success) {
-        throw new AppError(ERRORS.AUTH_BAD_REQUEST);
+        throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
     }
     
     const data : AuthResponse = await loginService(result.data);
@@ -22,7 +24,7 @@ export const loginController = asyncHandler( async (req : Request, res : Respons
 export const refreshSessionController = asyncHandler( async (req: Request, res: Response): Promise<void> => {
     const { refresh_token } = req.body;
     if (!refresh_token) {
-        throw new AppError(ERRORS.TOKEN_REFRESH_UNDEFINED);
+        throw new AppError(AUTH_ERRORS.REFRESH_TOKEN_MISSING);
     }
 
     const tokens : Tokens = await refreshSessionService(refresh_token);
@@ -33,7 +35,7 @@ export const refreshSessionController = asyncHandler( async (req: Request, res: 
 export const logoutController = asyncHandler( async (req: Request, res: Response): Promise<void> => {
     const { refresh_token } = req.body;
     if (!refresh_token) {
-        throw new AppError(ERRORS.TOKEN_REFRESH_UNDEFINED);
+        throw new AppError(AUTH_ERRORS.REFRESH_TOKEN_MISSING);
     }
         
     await logoutService(refresh_token);

@@ -2,6 +2,9 @@ import type { NextFunction, Request, Response } from 'express';
 import { verifyAccessToken } from '../utils/jwt.js';
 import type { DecodedToken } from '../models/auth.models.js';
 import { AppError, ERRORS } from '../models/error.models.js';
+import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
+import { COMMON_ERRORS } from '../models/errors/common.errors.js';
+import { PERMISSION_ERRORS } from '../models/errors/permission.errors.js';
 
 
 export const requireAuth = (req: Request, res: Response, next: NextFunction): void => {
@@ -10,7 +13,7 @@ export const requireAuth = (req: Request, res: Response, next: NextFunction): vo
     const token: string | null = header.startsWith("Bearer ") ? header.slice(7) : null;
 
     if (!token) {
-        throw new AppError(ERRORS.TOKEN_ACCESS_UNDEFINED);
+        throw new AppError(AUTH_ERRORS.ACCESS_TOKEN_MISSING);
     }
 
     const decoded: DecodedToken = verifyAccessToken(token);
@@ -23,17 +26,17 @@ export const requireOwner = (req: Request, res: Response, next: NextFunction): v
     console.log("Ruta(requireOwner): ", req.route?.path);
     
     if (!req.user) {
-        throw new AppError(ERRORS.AUTH_IDENTITY_UNKNOWN);
+        throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
     }
     
     const userIdParam = Number(req.params.id);
 
     if (Number.isNaN(userIdParam)) {
-        throw new AppError(ERRORS.INVALID_ID_PARAM);
+        throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
     }
 
     if (req.user.user_id !== userIdParam) {
-        throw new AppError(ERRORS.FORBIDDEN_OWNER);
+        throw new AppError(PERMISSION_ERRORS.OWNER_PERMISSION_REQUIRED);
     }
 
     next();
@@ -44,13 +47,13 @@ export const requireRolePrivileges = (...allowedRolesIds: number[]) => {
         console.log("Ruta(requireAdminPrivileges): ", req.route?.path);
 
         if (!req.user) {
-            throw new AppError(ERRORS.AUTH_IDENTITY_UNKNOWN);
+            throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
         }
 
         const { role_id: roleId } = req.user;    
 
         if (!allowedRolesIds.includes(roleId)) {
-            throw new AppError(ERRORS.FORBIDDEN_ROLE);
+            throw new AppError(PERMISSION_ERRORS.INSUFFICIENT_PERMISSIONS);
         }
             
         next();

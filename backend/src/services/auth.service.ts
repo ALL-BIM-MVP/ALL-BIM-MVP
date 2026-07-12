@@ -9,6 +9,7 @@ import { AppError, ERRORS } from '../models/error.models.js';
 import type { UserLayout } from '../models/users.models.js';
 import { createSession } from './session.service.js';
 import { hashToken } from '../utils/hashing.js';
+import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
 
 export const loginService = async ({email, password} : LoginRequest) : Promise<AuthResponse> => {
     const result = await pool.query(
@@ -17,11 +18,11 @@ export const loginService = async ({email, password} : LoginRequest) : Promise<A
     );
     
     const user = result.rows[0];
-    if (!user) throw new AppError(ERRORS.LOGIN_FAILED);
+    if (!user) throw new AppError(AUTH_ERRORS.LOGIN_FAILED);
 
     const storedHash = user.password_hash;
     const isValid : boolean = await bcrypt.compare(password, storedHash);
-    if (!isValid) throw new AppError(ERRORS.LOGIN_FAILED);
+    if (!isValid) throw new AppError(AUTH_ERRORS.LOGIN_FAILED);
 
     const payload : AuthPayload = {
         role_id: user.role_id,
@@ -41,11 +42,10 @@ export const loginService = async ({email, password} : LoginRequest) : Promise<A
     }
 };
 
-
 export const refreshSessionService = async (refreshToken: string) : Promise<Tokens> => {
     const decoded = verifyRefreshToken(refreshToken);
     if (!decoded) {
-        throw new AppError(ERRORS.TOKEN_REFRESH_INVALID);
+        throw new AppError(AUTH_ERRORS.REFRESH_TOKEN_INVALID);
     }
     
     const tokenHash = crypto.createHash("sha256").update(refreshToken).digest("hex");
@@ -59,15 +59,15 @@ export const refreshSessionService = async (refreshToken: string) : Promise<Toke
     const dbToken = tokenQuery.rows[0];
 
     if (!dbToken) {
-        throw new AppError(ERRORS.TOKEN_REFRESH_INVALID);
+        throw new AppError(AUTH_ERRORS.REFRESH_TOKEN_INVALID);
     }
 
     if (!dbToken.active) {
-        throw new AppError(ERRORS.TOKEN_REFRESH_INVALID);
+        throw new AppError(AUTH_ERRORS.REFRESH_TOKEN_INVALID);
     }
 
     if (new Date(dbToken.expires_at) < new Date()) {
-        throw new AppError(ERRORS.TOKEN_REFRESH_EXPIRED);
+        throw new AppError(AUTH_ERRORS.REFRESH_TOKEN_EXPIRED);
     }
 
     await pool.query(
@@ -80,7 +80,7 @@ export const refreshSessionService = async (refreshToken: string) : Promise<Toke
         [decoded.user_id]
     );
     const user = userQuery.rows[0];
-    if (!user) throw new AppError(ERRORS.AUTH_IDENTITY_UNKNOWN);
+    if (!user) throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
 
     const payload: AuthPayload = {
         user_id: user.user_id,

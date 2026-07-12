@@ -54,8 +54,8 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "role_id": 4,
-  "email": "nuevo@correo.com"
+  "role_id": 3,
+  "email": "Denilson@correo.com"
 }
 
 ### Capturar tokens automáticamente
@@ -72,7 +72,7 @@ POST {{baseUrl}}/users/register
 Content-Type: application/json
 
 {
-  "name": "Nuevo Usuario",
+  "name": "Denilson",
   "password": "123456",
   "token": "{{tokenLink}}"
 }
@@ -87,4 +87,73 @@ Authorization: Bearer {{accessToken}}
 ### Obtener usuarios
 ### =========================
 GET {{baseUrl}}/users
+Authorization: Bearer {{accessToken}}
+
+
+###
+GET {{baseUrl}}/projects?scope=mine
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### MÓDULO DE PROYECTOS
+### =========================================================================
+
+### 1. Crear un proyecto nuevo
+# @name createProject
+POST {{baseUrl}}/projects
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "12",
+  "description": "Modelado de estructura residencial de 5 pisos",
+  "location": "Puno, Perú",
+  "start_date": "2026-08-01",
+  "end_date": "2027-02-28"
+}
+
+### Capturar el ID del proyecto creado automáticamente
+@createdProjectId = {{createProject.response.body.project_id}}
+
+
+### 2. Listar proyectos (Filtro por defecto o 'mine')
+GET {{baseUrl}}/projects?scope=mine
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Listar todos los proyectos disponibles (Owner, member, etc.)
+GET {{baseUrl}}/projects?scope=all
+Authorization: Bearer {{accessToken}}
+
+
+### 4. Obtener un proyecto específico por ID
+GET {{baseUrl}}/projects/{{createdProjectId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 5. Actualizar proyecto (Caso Exitoso - Modificando campos)
+PATCH {{baseUrl}}/projects/{{createdProjectId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Proyecto BIM - Nombre Editado",
+  "description": "Nueva descripción actualizada"
+}
+
+
+### 6. Actualizar proyecto (Caso de Error - Cuerpo Vacío)
+### 🚨 Esto debería devolver tu error 400 (NO_FIELDS_TO_UPDATE)
+PATCH {{baseUrl}}/projects/{{createdProjectId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name" : ""
+}
+
+
+### 7. Eliminar un proyecto por ID
+DELETE {{baseUrl}}/projects/{{createdProjectId}}
 Authorization: Bearer {{accessToken}}

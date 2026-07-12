@@ -9,6 +9,9 @@ import type { AuthPayload, AuthResponse } from "../models/auth.models.js";
 import { createSession } from "./session.service.js";
 import { ROLES } from "../constants/roles.js";
 import type { PoolClient } from "pg";
+import { INVITATION_ERRRORS } from "../models/errors/invitation.errors.js";
+import { USER_ERRORS } from "../models/errors/user.errors.js";
+import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 
 export const registerService = async ({name, password, token} : RegisterRequest) : Promise< AuthResponse >=> {
 
@@ -24,7 +27,7 @@ export const registerService = async ({name, password, token} : RegisterRequest)
             [tokenHashed]
         );
 
-        if (invitationQuery.rowCount === 0) throw new AppError(ERRORS.INVALID_INVITATION);
+        if (invitationQuery.rowCount === 0) throw new AppError(INVITATION_ERRRORS.INVITATION_INVALID);
         const { role_id, email } = invitationQuery.rows[0];
 
         const userQuery = await client.query(
@@ -32,7 +35,7 @@ export const registerService = async ({name, password, token} : RegisterRequest)
             [email]
         );
 
-        if (userQuery.rowCount !== 0) throw new AppError(ERRORS.USER_EXISTS);
+        if (userQuery.rowCount !== 0) throw new AppError(USER_ERRORS.USER_ALREADY_EXISTS);
 
         const passwordHash = await bcrypt.hash(password, 10);
         const newUser = await client.query(
@@ -68,7 +71,7 @@ export const registerService = async ({name, password, token} : RegisterRequest)
         await client.query("ROLLBACK");
         if (error instanceof AppError) throw error;
         
-        throw new AppError(ERRORS.INTERNAL_SERVER_ERROR);
+        throw new AppError(COMMON_ERRORS.INTERNAL_SERVER_ERROR);
     } finally {
         client.release();
     } 
@@ -86,7 +89,7 @@ export const getMeService = async (userId : number) : Promise<UserLayout> => {
     const userInfo : UserLayout | undefined = result.rows[0];
 
     if (!userInfo) {
-        throw new AppError(ERRORS.AUTH_IDENTITY_UNKNOWN);
+        throw new AppError(USER_ERRORS.USER_NOT_FOUND);
     }
 
     return userInfo;
@@ -100,7 +103,6 @@ export const getAllUsersService = async ( {sort, active, order} : GetUsersQuery)
     if (active !== undefined) {
         queryParams.push(active); 
         activeFilter = `AND u.active = $${queryParams.length}`;
-    
     }
 
     const usersQuery = await pool.query<UserResponse>(
