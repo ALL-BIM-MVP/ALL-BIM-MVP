@@ -157,3 +157,67 @@ Content-Type: application/json
 ### 7. Eliminar un proyecto por ID
 DELETE {{baseUrl}}/projects/{{createdProjectId}}
 Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### MÓDULO DE ROLES DE PROYECTO (PROJECT ROLES)
+### =========================================================================
+
+### 1. Crear un nuevo rol de proyecto personalizado
+# @name createProjectRole
+POST {{baseUrl}}/project-roles
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Modelador BIM Senior"
+}
+
+### Capturar automáticamente el ID del rol de proyecto creado
+@createdProjectRoleId = {{createProjectRole.response.body.project_role_id}}
+
+
+### 2. Listar roles de proyecto (Por defecto trae combinados: defaults + creados por mí)
+GET {{baseUrl}}/project-roles
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Listar roles filtrando por Scope 'default' (Para cuando implementes el Query Schema)
+GET {{baseUrl}}/project-roles?scope=default
+Authorization: Bearer {{accessToken}}
+
+
+### 4. Listar roles filtrando por Scope 'owner' (Solo los creados por mí)
+GET {{baseUrl}}/project-roles?scope=owner
+Authorization: Bearer {{accessToken}}
+
+
+### 5. Actualizar el nombre de un rol de proyecto (Caso Exitoso)
+PATCH {{baseUrl}}/project-roles/{{createdProjectRoleId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Coordinador BIM Líder"
+}
+
+
+### 6. Actualizar rol (Caso de Error - Nombre vacío)
+PATCH {{baseUrl}}/project-roles/{{createdProjectRoleId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": ""
+}
+
+
+### 7. Intentar eliminar un rol por defecto o en uso (Caso de Error esperado: 400 o 404)
+### 💡 Nota: Puedes probar cambiar el ID por uno que sepas que está asignado a un miembro
+DELETE {{baseUrl}}/project-roles/2
+Authorization: Bearer {{accessToken}}
+
+
+### 8. Eliminar el rol de proyecto personalizado creado (Caso Exitoso)
+DELETE {{baseUrl}}/project-roles/{{createdProjectRoleId}}
+Authorization: Bearer {{accessToken}}

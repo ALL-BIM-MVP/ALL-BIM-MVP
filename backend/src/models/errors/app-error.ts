@@ -1,4 +1,3 @@
-// models/errors/app-error.ts
 
 interface ErrorResponse {
     code: string;

@@ -1,5 +1,5 @@
 
-import type { ErrorFormat } from "./app-error.js"; // Ajusta la ruta según tu estructura
+import type { ErrorFormat } from "./app-error.js"; 
 
 export const PROJECT_ERRORS = {
     PROJECT_NOT_FOUND: {

@@ -48,7 +48,7 @@ CREATE TABLE projects (
 CREATE TABLE project_roles(
     project_role_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name VARCHAR(60) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
-    is_default BOOLEAN DEFAULT FALSE,
+    is_default BOOLEAN NOT NULL DEFAULT FALSE,
     created_by INT DEFAULT NULL REFERENCES users(user_id),
     UNIQUE(created_by, name)
 );

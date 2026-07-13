@@ -1,12 +1,10 @@
 import pool from "../db/database.js";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { GetProjectsQuery, ProjectCreate, ProjectIdParam, ProjectUpdate } from "../schemas/projects.schema.js";
-import { AppError } from "../models/error.models.js";
 import { buildProjectScopeFilter } from "../repositories/projects.repository.js";
 import { transformProjectFull, type ProjectFull, type ProjectRow } from "../models/projects.models.js";
 import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
-import { parseArgs } from "node:util";
-import type { SrvRecord } from "node:dns";
+import { AppError } from "../models/errors/app-error.js";
 
 export const getListProjectService = async ( 
     { user_id : userId, role_id : roleId } : DecodedToken, { scope } : GetProjectsQuery
@@ -123,7 +121,7 @@ export const deleteProjectByIdService = async(
     {user_id : userId } : DecodedToken, { projectId } : ProjectIdParam
 ) : Promise<void> => {
 
-    const result = await pool.query<ProjectRow>(
+    const result = await pool.query(
         `DELETE FROM projects
             WHERE project_id = $1 AND created_by = $2`,
         [projectId, userId]

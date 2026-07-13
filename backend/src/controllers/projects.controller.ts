@@ -1,11 +1,11 @@
 import type { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { AppError } from "../models/error.models.js";
 import { GetProjectsSchema, ProjectCreateSchema, ProjectIdParamSchema, ProjectUpdateSchema } from "../schemas/projects.schema.js";
 import type { ProjectFull } from "../models/projects.models.js";
 import { createProjectService, deleteProjectByIdService, getListProjectService, getProjectByIdService, updateProjectService } from "../services/projects.service.js";
 import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 import { AUTH_ERRORS } from "../models/errors/auth.errors.js";
+import { AppError } from "../models/errors/app-error.js";
 
 
 export const getListProjectsController = asyncHandler( async (req : Request, res : Response) : Promise<void> => {
@@ -56,9 +56,7 @@ export const createProjectController = asyncHandler( async (req : Request, res :
 
 export const updateProjectController = asyncHandler( async (req : Request, res : Response) : Promise<void> => {
     
-    console.log(req.body)
     const resultData = ProjectUpdateSchema.safeParse(req.body);
-    console.log(resultData.data)
     if (!resultData.success) {
         throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
     }

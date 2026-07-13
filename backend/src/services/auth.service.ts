@@ -5,11 +5,11 @@ import type { Tokens, AuthPayload, ValidateResponse, AuthResponse, InvitationRes
 import { generateAccessToken, generateRefreshToken, getRefreshTokenExpiresAt, verifyRefreshToken } from '../utils/jwt.js';
 import type { InvitationRequest, LoginRequest, RegisterRequest } from '../schemas/auth.schema.js';
 import { sendInvitation } from '../utils/resend.js';
-import { AppError, ERRORS } from '../models/error.models.js';
 import type { UserLayout } from '../models/users.models.js';
 import { createSession } from './session.service.js';
 import { hashToken } from '../utils/hashing.js';
 import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
+import { AppError } from '../models/errors/app-error.js';
 
 export const loginService = async ({email, password} : LoginRequest) : Promise<AuthResponse> => {
     const result = await pool.query(

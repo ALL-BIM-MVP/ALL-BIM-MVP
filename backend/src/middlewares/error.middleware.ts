@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
-import { AppError, ERRORS } from "../models/error.models.js";
 import { COMMON_ERRORS } from "../models/errors/common.errors.js";
+import { AppError } from "../models/errors/app-error.js";
 
 export const errorHandler = ( err: unknown, req: Request, res: Response, next: NextFunction ): void => {
 

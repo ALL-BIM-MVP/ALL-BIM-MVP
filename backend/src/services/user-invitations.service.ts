@@ -1,12 +1,12 @@
 import { sendInvitation } from "../utils/resend.js";
 import pool from "../db/database.js";
 import type { InvitationResponse, ValidateResponse } from "../models/auth.models.js";
-import { AppError, ERRORS } from "../models/error.models.js";
 import type { InvitationRequest } from "../schemas/auth.schema.js";
 import { generateRandomToken, hashToken } from "../utils/hashing.js";
 import { USER_ERRORS } from "../models/errors/user.errors.js";
 import { ROLE_ERRORS } from "../models/errors/role.errors.js";
 import { INVITATION_ERRRORS } from "../models/errors/invitation.errors.js";
+import { AppError } from "../models/errors/app-error.js";
 
 export const createInvitationService = async ({role_id, email} : InvitationRequest) : Promise<InvitationResponse> => {
 

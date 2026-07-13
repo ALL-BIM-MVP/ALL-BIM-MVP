@@ -1,10 +1,10 @@
 import type { Request, Response} from 'express';
 import { InvitationSchema, TokenSchema } from "../schemas/auth.schema.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { AppError, ERRORS } from '../models/error.models.js';
 import type { InvitationResponse, ValidateResponse } from '../models/auth.models.js';
 import { createInvitationService, validateInvitationService } from '../services/user-invitations.service.js';
 import { COMMON_ERRORS } from '../models/errors/common.errors.js';
+import { AppError } from '../models/errors/app-error.js';
 
 
 export const createInvitationController = asyncHandler( async (req : Request, res : Response) : Promise<void> => {

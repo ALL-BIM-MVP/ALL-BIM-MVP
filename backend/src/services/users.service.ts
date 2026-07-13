@@ -1,6 +1,5 @@
 import pool from "../db/database.js";
-import bcrypt from 'bcrypt'
-import { AppError, ERRORS } from "../models/error.models.js";
+import bcrypt from 'bcrypt';
 import type { UserLayout, UserResponse } from "../models/users.models.js";
 import type { RegisterRequest } from "../schemas/auth.schema.js";
 import type { GetUsersQuery } from "../schemas/users.schema.js";
@@ -12,6 +11,7 @@ import type { PoolClient } from "pg";
 import { INVITATION_ERRRORS } from "../models/errors/invitation.errors.js";
 import { USER_ERRORS } from "../models/errors/user.errors.js";
 import { COMMON_ERRORS } from "../models/errors/common.errors.js";
+import { AppError } from "../models/errors/app-error.js";
 
 export const registerService = async ({name, password, token} : RegisterRequest) : Promise< AuthResponse >=> {
 

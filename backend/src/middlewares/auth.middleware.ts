@@ -1,10 +1,10 @@
 import type { NextFunction, Request, Response } from 'express';
 import { verifyAccessToken } from '../utils/jwt.js';
 import type { DecodedToken } from '../models/auth.models.js';
-import { AppError, ERRORS } from '../models/error.models.js';
 import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
 import { COMMON_ERRORS } from '../models/errors/common.errors.js';
 import { PERMISSION_ERRORS } from '../models/errors/permission.errors.js';
+import { AppError } from '../models/errors/app-error.js';
 
 
 export const requireAuth = (req: Request, res: Response, next: NextFunction): void => {

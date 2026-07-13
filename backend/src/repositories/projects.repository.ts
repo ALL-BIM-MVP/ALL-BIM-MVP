@@ -1,5 +1,5 @@
 import { ROLES } from "../constants/roles.js";
-import { AppError } from "../models/error.models.js";
+import { AppError } from "../models/errors/app-error.js";
 import { PERMISSION_ERRORS } from "../models/errors/permission.errors.js";
 import type { GetProjectsQuery } from "../schemas/projects.schema.js";
 

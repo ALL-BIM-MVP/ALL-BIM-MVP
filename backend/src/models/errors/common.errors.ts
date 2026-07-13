@@ -1,4 +1,3 @@
-// models/errors/common.errors.ts
 
 import type { ErrorFormat } from "./app-error.js";
 

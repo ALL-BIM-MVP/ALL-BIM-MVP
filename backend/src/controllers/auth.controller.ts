@@ -2,11 +2,11 @@ import type { Request, Response} from 'express';
 import type { AuthResponse, InvitationResponse, Tokens, ValidateResponse } from '../models/auth.models.js';
 import { loginService, logoutService, refreshSessionService } from '../services/auth.service.js';
 import { InvitationSchema, LoginSchema, TokenSchema } from '../schemas/auth.schema.js';
-import { AppError, ERRORS } from '../models/error.models.js';
 import type { UserLayout } from '../models/users.models.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { COMMON_ERRORS } from '../models/errors/common.errors.js';
 import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
+import { AppError } from '../models/errors/app-error.js';
 
 export const loginController = asyncHandler( async (req : Request, res : Response) : Promise<void> => {
     const result = LoginSchema.safeParse(req.body);
