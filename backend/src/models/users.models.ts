@@ -19,3 +19,9 @@ export interface User extends BaseUser {
     password_hash: string;
     active: boolean;
 }
+
+export interface UserSuggestion {
+    user_id: number;
+    name: string;
+    email: string;
+}

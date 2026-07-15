@@ -1,4 +1,9 @@
 
+
+
+
+
+
 CREATE TABLE roles (
     role_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name VARCHAR(40) UNIQUE NOT NULL,
@@ -8,7 +13,7 @@ CREATE TABLE roles (
 CREATE TABLE users (
     user_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name VARCHAR(60) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
-    email VARCHAR(150) UNIQUE NOT NULL,
+    email VARCHAR(256) UNIQUE NOT NULL,
     password_hash VARCHAR(256) NOT NULL,
     active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -17,7 +22,7 @@ CREATE TABLE users (
 
 CREATE TABLE user_invitations (
     invitation_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    email VARCHAR(150) NOT NULL,
+    email VARCHAR(256) NOT NULL,
     token_hash TEXT NOT NULL UNIQUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '1 days',
@@ -42,6 +47,7 @@ CREATE TABLE projects (
     start_date DATE,
     end_date DATE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
+    owner_id INT NOT NULL REFERENCES users(user_id),
     created_by INT NOT NULL REFERENCES users(user_id)
 );
 
@@ -64,8 +70,8 @@ CREATE TABLE project_members(
 
 CREATE TABLE project_invitations(
     invitation_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    email VARCHAR(150) NOT NULL,
-    status VARCHAR(20) NOT NULL CHECK(status IN ('pendiente', 'aceptado', 'rechazado', 'cancelado')),
+    email VARCHAR(256) NOT NULL,
+    status VARCHAR(20) DEFAULT 'pendiente' NOT NULL CHECK(status IN ('pendiente', 'aceptado', 'rechazado', 'cancelado')),
     responded_at TIMESTAMPTZ DEFAULT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '3 days',

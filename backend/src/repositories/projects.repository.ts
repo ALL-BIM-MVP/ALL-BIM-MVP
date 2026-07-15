@@ -9,7 +9,7 @@ export const buildProjectScopeFilter = ( scope : GetProjectsQuery["scope"], user
         case "mine":
             return {
                 where: `
-                WHERE p.created_by = $1
+                WHERE p.owner_id = $1
                 OR EXISTS (
                     SELECT 1
                     FROM project_members pm
@@ -22,7 +22,7 @@ export const buildProjectScopeFilter = ( scope : GetProjectsQuery["scope"], user
 
         case "owner":
             return {
-                where: "WHERE p.created_by = $1",
+                where: "WHERE p.owner_id = $1",
                 params: [userId]
             };
 
@@ -35,7 +35,7 @@ export const buildProjectScopeFilter = ( scope : GetProjectsQuery["scope"], user
                     WHERE pm.project_id = p.project_id
                     AND pm.user_id = $1
                 )
-                AND p.created_by != $1
+                AND p.owner_id != $1
                 `,
                 params: [userId]
             };

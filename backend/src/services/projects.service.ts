@@ -5,6 +5,8 @@ import { buildProjectScopeFilter } from "../repositories/projects.repository.js"
 import { transformProjectFull, type ProjectFull, type ProjectRow } from "../models/projects.models.js";
 import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
 import { AppError } from "../models/errors/app-error.js";
+import type { UserSuggestion } from "../models/users.models.js";
+import type { SearchUserQuery } from "../schemas/project-invitations.schema.js";
 
 export const getListProjectService = async ( 
     { user_id : userId, role_id : roleId } : DecodedToken, { scope } : GetProjectsQuery
@@ -18,7 +20,7 @@ export const getListProjectService = async (
             u.user_id, u.name AS user_name, u.role_id
         FROM projects p
         INNER JOIN users u
-            ON u.user_id = p.created_by
+            ON u.user_id = p.owner_id
         ${where}
         ORDER BY p.created_at DESC`,
         params
@@ -37,15 +39,15 @@ export const getProjectByIdService = async (
             u.user_id, u.name AS user_name, u.role_id
         FROM projects p
         INNER JOIN users u
-            ON u.user_id = p.created_by
-        WHERE p.project_id = $2 AND (
-                p.created_by = $1 
+            ON u.user_id = p.owner_id
+        WHERE p.project_id = $1 AND (
+                p.owner_id = $2 
                 OR EXISTS (        
                     SELECT 1 FROM project_members pm 
-                    WHERE pm.project_id = p.project_id AND pm.user_id = $1 
+                    WHERE pm.project_id = p.project_id AND pm.user_id = $2 
                 )
         ) LIMIT 1`,
-        [userId, projectId]
+        [projectId, userId ]
     );
 
     const p = result.rows[0] ;
@@ -61,14 +63,14 @@ export const createProjectService = async (
 
     const result = await pool.query<ProjectRow>(
         `INSERT INTO 
-            projects(name, description, location, start_date, end_date, created_by)
+            projects(name, description, location, start_date, end_date, created_by, owner_id)
         VALUES
-            ($1, $2, $3, $4, $5, $6)
+            ($1, $2, $3, $4, $5, $6, $6)
         RETURNING 
             project_id, name, description, location, start_date, end_date, created_at,
-            created_by AS user_id,
-            (SELECT name FROM users WHERE user_id = created_by) AS user_name,
-            (SELECT role_id FROM users WHERE user_id = created_by) AS role_id`,
+            owner_id AS user_id,
+            (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
+            (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
         [data.name, data.description, data.location, data.start_date, data.end_date, userId]
     );
 
@@ -101,12 +103,12 @@ export const updateProjectService = async(
     const result = await pool.query<ProjectRow>(
         `UPDATE projects
         SET ${querySet}
-        WHERE project_id = $${lengthParams + 1} AND created_by = $${lengthParams + 2} 
+        WHERE project_id = $${lengthParams + 1} AND owner_id = $${lengthParams + 2} 
         RETURNING 
             project_id, name, description, location, start_date, end_date, created_at,
-            created_by AS user_id,
-            (SELECT name FROM users WHERE user_id = created_by) AS user_name,
-            (SELECT role_id FROM users WHERE user_id = created_by) AS role_id`,
+            owner_id AS user_id,
+            (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
+            (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
         [...params, projectId, userId]
     );
 
@@ -123,7 +125,7 @@ export const deleteProjectByIdService = async(
 
     const result = await pool.query(
         `DELETE FROM projects
-            WHERE project_id = $1 AND created_by = $2`,
+            WHERE project_id = $1 AND owner_id = $2`,
         [projectId, userId]
     );
 

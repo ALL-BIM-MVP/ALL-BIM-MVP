@@ -7,6 +7,7 @@ import routerUsers from './routes/users.routes.js';
 import routerInvitationUser from './routes/user-invitations.routes.js';
 import routerProjects from './routes/projects.routes.js';
 import routerProjectRoles from './routes/project-roles.routes.js';
+import routerProjectInvitations from './routes/project-invitations.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 const app = express();
 
@@ -20,6 +21,7 @@ app.use('/api/users', routerUsers);
 app.use('/api/invitations', routerInvitationUser);
 app.use('/api/projects', routerProjects);
 app.use('/api/project-roles', routerProjectRoles);
+app.use('/api/projects', routerProjectInvitations );
 
 app.use(errorHandler)
 const PORT = Number(process.env.PORT) || 4000;

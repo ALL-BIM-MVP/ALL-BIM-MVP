@@ -12,7 +12,7 @@ export const getListProjectRolesService = async (
     const result = await pool.query<ProjectRoleFull>(
         `SELECT
             pr.project_role_id, pr.name, pr.is_default, pr.created_by,
-            COUNT(pm.project_member_id) FILTER (WHERE p.created_by = $1)::int AS count
+            COUNT(pm.project_member_id) FILTER (WHERE p.owner_id = $1)::int AS count
         FROM project_roles pr
         LEFT JOIN project_members pm
             USING(project_role_id)
@@ -21,7 +21,8 @@ export const getListProjectRolesService = async (
         WHERE
             pr.is_default = true OR pr.created_by = $1
         GROUP BY
-            pr.project_role_id`,
+            pr.project_role_id, pr.name, pr.is_default, pr.created_by
+        ORDER BY pr.is_default DESC, pr.name ASC`,
         [userId]
     );
 
@@ -62,7 +63,7 @@ export const updateProjectRoleService = async (
                     FROM project_members pm
                 INNER JOIN projects p USING(project_id)
                     WHERE pm.project_role_id = pr.project_role_id
-                    AND p.created_by = $2
+                    AND p.owner_id = $2
             )::int AS count;`,
         [name, userId, projectRoleId]
     );
@@ -78,14 +79,18 @@ export const deleteProjectRoleService = async (
     {user_id : userId} : DecodedToken, {projectRoleId} :ProjectRoleIdParam
 ) : Promise<void> => {
     const checkRole = await pool.query(
-        `SELECT is_default FROM project_roles WHERE project_role_id = $1 AND created_by = $2`,
+        `SELECT is_default FROM project_roles 
+            WHERE project_role_id = $1 AND created_by = $2 AND is_default = false`,
         [projectRoleId, userId]
     );
     if (checkRole.rowCount === 0) throw new AppError(PROJECT_ROLE_ERRORS.PROJECT_ROLE_NOT_FOUND);
 
     const checkUsage = await pool.query(
-        `SELECT 1 FROM project_members WHERE project_role_id = $1 LIMIT 1`,
-        [projectRoleId]
+        `SELECT 1 FROM project_members pm
+        INNER JOIN projects p USING(project_id)
+            WHERE pm.project_role_id = $1 AND p.owner_id = $2 
+        LIMIT 1`,
+        [projectRoleId, userId]
     );
     if (checkUsage.rowCount !== 0) throw new AppError(PROJECT_ROLE_ERRORS.ROLE_IN_USE);
 
@@ -93,5 +98,5 @@ export const deleteProjectRoleService = async (
         `DELETE FROM project_roles WHERE project_role_id = $1`,
         [projectRoleId]
     );
-
+    
 };

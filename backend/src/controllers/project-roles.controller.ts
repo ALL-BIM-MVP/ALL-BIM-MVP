@@ -50,7 +50,7 @@ export const updateProjectRoleController = asyncHandler( async (req : Request, r
     if (!req.user) {
         throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
     }   
-    console.log(resultData, resultIdProjectRole )
+    
     const projectRole : ProjectRoleFull = await updateProjectRoleService(req.user, resultData.data, resultIdProjectRole.data);
 
     res.status(200).json(projectRole);
