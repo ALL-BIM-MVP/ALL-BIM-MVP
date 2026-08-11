@@ -8,6 +8,8 @@ import routerInvitationUser from './routes/user-invitations.routes.js';
 import routerProjects from './routes/projects.routes.js';
 import routerProjectRoles from './routes/project-roles.routes.js';
 import routerProjectInvitations from './routes/project-invitations.routes.js';
+import routerProjectMembers from './routes/project-members.routes.js';
+import routerFiles, { fileContentRouter } from './routes/files.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 const app = express();
 
@@ -22,6 +24,10 @@ app.use('/api/invitations', routerInvitationUser);
 app.use('/api/projects', routerProjects);
 app.use('/api/project-roles', routerProjectRoles);
 app.use('/api/projects', routerProjectInvitations );
+app.use('/api/projects', routerProjectMembers );
+app.use('/api/projects', routerFiles );
+app.use('/api/files', fileContentRouter );
+
 
 app.use(errorHandler)
 const PORT = Number(process.env.PORT) || 4000;

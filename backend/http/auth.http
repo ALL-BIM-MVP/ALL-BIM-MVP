@@ -8,7 +8,7 @@ POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "email": "ismael@email.com",
+  "email": "ismael@gmail.com",
   "password": "hash_de_prueba"
 }
 
@@ -221,3 +221,4 @@ Authorization: Bearer {{accessToken}}
 ### 8. Eliminar el rol de proyecto personalizado creado (Caso Exitoso)
 DELETE {{baseUrl}}/project-roles/{{createdProjectRoleId}}
 Authorization: Bearer {{accessToken}}
+

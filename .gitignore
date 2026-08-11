@@ -22,6 +22,8 @@ jspm_packages/
 .pnpm-store/
 
 # builds
+processing/
+docs/
 test/
 dist/
 build/
