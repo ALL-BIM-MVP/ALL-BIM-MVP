@@ -1,24 +1,32 @@
-// src/components/LoginForm.tsx
-import React from 'react';
-import { useAuth } from '../hooks/useAuth';
+// frontend/src/components/LoginForm.tsx
+import React, { useState } from 'react';
+import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 export default function LoginForm() {
-  const { formData, handleChange, handleLogin, loading } = useAuth();
+  const { login } = useAuth();
   const navigate = useNavigate();
+
+  const [formData, setFormData] = useState({ email: '', password: '' });
+  const [loading, setLoading] = useState(false);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({
+      ...formData,
+      [e.target.name]: e.target.value,
+    });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     try {
-      const response = await handleLogin();
-      
-      if (response.rol_id === 1) {
-        navigate('/dashboardadmin');
-      } else {
-        navigate('/dashboard');
-      }
+      await login(formData.email, formData.password);
+      navigate('/dashboard/projects');
     } catch (error: any) {
-      alert(error.message);
+      alert(error.message ?? 'Correo o contraseña incorrectos');
+    } finally {
+      setLoading(false);
     }
   };
 

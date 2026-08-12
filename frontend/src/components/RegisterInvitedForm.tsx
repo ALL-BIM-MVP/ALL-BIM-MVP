@@ -1,6 +1,7 @@
 // src/components/RegisterInvitedForm.tsx
 import React from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useAuth as useAuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
 interface RegisterInvitedFormProps {
@@ -14,19 +15,20 @@ interface RegisterInvitedFormProps {
 
 export default function RegisterInvitedForm({ invitationData, token }: RegisterInvitedFormProps) {
   const { formData, handleChange, handleRegister, loading } = useAuth();
+  const { loginWithResponse } = useAuthContext();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       const response = await handleRegister(token);
-      alert(' Registro exitoso');
-      
-      if (response.rol_id === 1) {
-        navigate('/dashboardadmin');
-      } else {
-        navigate('/dashboard');
-      }
+
+      // El backend devuelve la misma forma que el login (access_token,
+      // refresh_token, rol_id, user), así que auto-logueamos al usuario
+      // en el Context en vez de mandarlo a /login a escribir todo de nuevo.
+      loginWithResponse(response);
+
+      navigate('/dashboard/projects');
     } catch (error: any) {
       alert(error.message);
     }

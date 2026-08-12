@@ -1,141 +1,243 @@
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Proyecto } from '../types/Project'; 
-import { projectService } from '../services/project.service'; 
+import { MapPin, Plus, Filter, Search, Eye } from 'lucide-react';
+import Header from '../components/Header';
+import NewProjectModal from '../components/NewProjectModal';
+import ProjectDetailsModal from '../components/ProjectDetailsModal';
+import { Project, ProjectScope } from '../types/project.types';
+import { useProjects } from '../hooks/useProjects';
+import { useAuth } from '../context/AuthContext';
+import { ROLE_IDS } from '../utils/roles';
 
-export const Projects: React.FC = () => {
+const ProjectRegistration: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
 
-  const [proyectos, setProyectos] = useState<Proyecto[]>([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const { projects, fetchProjects, createProject, filterScope, setFilterScope, error } = useProjects();
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
+  const [showNewProject, setShowNewProject] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedProjectForDetails, setSelectedProjectForDetails] = useState<Project | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  const isAdmin = user?.rol_id === ROLE_IDS.ADMINISTRADOR;
+
+  // Cargar proyectos respetando el scope actual
+  useEffect(() => {
+    fetchProjects(filterScope);
+  }, [fetchProjects, filterScope]);
+
+  const handleScopeChange = (scope: ProjectScope) => {
+    // 'all' solo es válido para Administrador (el backend lo rechaza igual,
+    // esto evita el request innecesario y el error feo)
+    if (scope === 'all' && !isAdmin) return;
+    setFilterScope(scope);
+  };
+
+  const handleCreateProject = async (projectData: any) => {
+    try {
+      const newProject = await createProject({
+        name: projectData.name,
+        location: projectData.location,
+        startDate: projectData.startDate,
+        endDate: projectData.endDate,
+        description: projectData.description
+      });
+
+      console.log('Proyecto creado:', newProject);
+      setShowNewProject(false);
+
+    } catch (error) {
+      console.error('Error al crear proyecto:', error);
+      alert('Error al crear el proyecto');
     }
   };
 
-  const handleCargarProyecto = () => {
-    if (!selectedFile) return;
+  const handleProjectClick = (project: Project) => {
+    navigate(`/dashboard-projects/${project.project_id}`);
+  };
 
-    const nuevoProyecto = projectService.crearDesdeIFC(selectedFile);
+  const handleViewDetails = (project: Project, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedProjectForDetails(project);
+    setShowDetailsModal(true);
+  };
 
-    setProyectos([...proyectos, nuevoProyecto]);
-    setIsModalOpen(false);
-    setSelectedFile(null);
+  // El scope ya lo filtra el backend; acá solo filtramos por búsqueda
+  const filteredProjects = projects.filter(project => {
+    const matchesSearch = project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          project.location.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesSearch;
+  });
+
+  const getStatusColor = (estado: string) => {
+    switch (estado) {
+      case 'Activo': return 'bg-green-100 text-green-700';
+      case 'Completado': return 'bg-blue-100 text-blue-700';
+      case 'Pendiente': return 'bg-yellow-100 text-yellow-700';
+      default: return 'bg-gray-100 text-gray-700';
+    }
   };
 
   return (
-    <div className="min-h-screen bg-white font-sans antialiased text-slate-800 relative">
-      <header className="border-b border-slate-100 bg-white px-8 py-4 flex items-center justify-between">
-        <span className="text-2xl font-black tracking-tight text-blue-800">
-          ALL-BIM
-        </span>
-        <div className="rounded-md border border-zinc-200 bg-zinc-50/50 px-4 py-2 text-sm font-medium text-zinc-600 backdrop-blur-sm">
-         Nombre del usuario
-        </div>
-      </header>
+    <div className="max-w-7xl mx-auto px-4">
+      <Header title="Proyectos" subtitle="Gestiona los proyectos" />
+      <div className="h-6"></div>
 
-      <main className="max-w-7xl mx-auto px-8 py-10">
-        <h1 className="text-3xl font-extrabold text-slate-900 mb-6 tracking-tight">
-          Proyectos BIM
-        </h1>
-
-        <div className="flex items-center gap-4 mb-8">
-          <button 
-            onClick={() => setIsModalOpen(true)}
-            className="bg-blue-700 hover:bg-blue-800 text-white font-semibold px-4 py-2.5 rounded-lg text-sm transition-colors shadow-sm"
+      <div className="flex flex-wrap items-center justify-between gap-12 mb-8">
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowNewProject(true)}
+            className="flex items-center gap-1.5 px-4 py-2 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition-colors font-semibold text-sm"
           >
-            + Nuevo Proyecto
+            <Plus size={16} />
+            Nuevo Proyecto
           </button>
-          <span className="text-slate-400 text-sm">
-            Selecciona un proyecto para abrir módulos
-          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {proyectos.map((proyecto) => (
-            <div
-              key={proyecto.id}
-              onClick={() => navigate(`/projects/${proyecto.id}`)}
-              className="bg-white border border-slate-100 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all cursor-pointer group hover:border-blue-200"
-            >
-              <h2 className="text-xl font-bold text-blue-800 mb-4 group-hover:text-blue-900 transition-colors">
-                {proyecto.nombre}
-              </h2>
-              
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm text-slate-600">
-                  <span> </span>
-                  <span>{proyecto.ubicacion}</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm text-slate-600">
-                  <span> </span>
-                  <span>{proyecto.fecha}</span>
-                </div>
-              </div>
-            </div>
-          ))}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+          <input
+            type="text"
+            placeholder="Buscar proyectos..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-9 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none w-56 text-sm transition"
+          />
         </div>
+      </div>
 
-        {proyectos.length === 0 && (
-          <div className="text-center py-20 border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 mt-4">
-            <p className="text-slate-500 font-medium">No tienes proyectos cargados en esta sesión.</p>
-            <p className="text-slate-400 text-sm mt-1">Presiona "+ Nuevo Proyecto" para subir un modelo .ifc</p>
-          </div>
+      {/* Filtros rápidos por scope */}
+      <div className="flex gap-2 mb-6 flex-wrap">
+        {isAdmin && (
+          <button
+            onClick={() => handleScopeChange('all')}
+            className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
+              filterScope === 'all'
+                ? 'bg-[#0056b3] text-white'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+          >
+            Todos
+          </button>
         )}
-      </main>
+        <button
+          onClick={() => handleScopeChange('mine')}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
+            filterScope === 'mine'
+              ? 'bg-[#0056b3] text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Mis proyectos
+        </button>
+        <button
+          onClick={() => handleScopeChange('owner')}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
+            filterScope === 'owner'
+              ? 'bg-[#0056b3] text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Propietario
+        </button>
+        <button
+          onClick={() => handleScopeChange('member')}
+          className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
+            filterScope === 'member'
+              ? 'bg-[#0056b3] text-white'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          Miembro
+        </button>
+      </div>
 
-      {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h2 className="text-xl font-bold text-slate-900 mb-1">Crear Nuevo Proyecto</h2>
-            <p className="text-sm text-slate-500 mb-6">Selecciona el modelo IFC desde tu computadora.</p>
-
-            <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-8 text-center cursor-pointer relative bg-slate-50 transition-colors">
-              <input 
-                type="file" 
-                accept=".ifc" 
-                onChange={handleFileChange}
-                className="absolute inset-0 opacity-0 cursor-pointer" 
-              />
-              
-              {selectedFile ? (
-                <div>
-                  <p className="text-blue-600 font-medium text-sm">✓ Archivo listo:</p>
-                  <p className="text-slate-800 text-base font-semibold mt-1 truncate">{selectedFile.name}</p>
-                  <p className="text-xs text-slate-400 mt-1">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-slate-700 font-medium text-sm">Haz clic para buscar archivo .ifc</p>
-                  <p className="text-xs text-slate-400 mt-1">El navegador leerá el modelo localmente</p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <button 
-                onClick={() => { setIsModalOpen(false); setSelectedFile(null); }}
-                className="px-4 py-2 text-sm font-medium text-slate-500 hover:text-slate-800 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button 
-                disabled={!selectedFile}
-                onClick={handleCargarProyecto}
-                className={`px-4 py-2 text-sm font-semibold rounded-lg text-white shadow-sm transition-colors ${
-                  selectedFile ? 'bg-blue-700 hover:bg-blue-800' : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                }`}
-              >
-                Cargar Proyecto
-              </button>
-            </div>
-          </div>
+      {error && (
+        <div className="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          {error}
         </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filteredProjects.length === 0 ? (
+          <div className="col-span-3 bg-white rounded-xl border border-gray-200 p-8 text-center">
+            <p className="text-gray-500">No se encontraron proyectos</p>
+          </div>
+        ) : (
+          filteredProjects.map((project) => (
+            <div
+              key={project.project_id}
+              onClick={() => handleProjectClick(project)}
+              className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-lg hover:border-[#0056b3] transition-all duration-200 flex flex-col cursor-pointer"
+            >
+              <div className="flex-1">
+                <div className="flex items-start justify-between mb-2">
+                  <h3 className="text-base font-bold text-gray-800 line-clamp-2">
+                    {project.name}
+                  </h3>
+                  {project.hasIFC && (
+                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded flex-shrink-0 ml-2">
+                      IFC
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
+                  <MapPin size={14} className="text-gray-400" />
+                  <span>{project.location}</span>
+                </div>
+
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusColor(project.estado)}`}>
+                    {project.estado}
+                  </span>
+                </div>
+
+                <p className="text-xs text-gray-500 line-clamp-2 mb-3">
+                  {project.description}
+                </p>
+              </div>
+
+              <button
+                onClick={(e) => handleViewDetails(project, e)}
+                className="w-full mt-2 px-3 py-1.5 text-[#0056b3] border border-[#0056b3] rounded-lg hover:bg-[#0056b3] hover:text-white transition-colors text-xs font-semibold flex items-center justify-center gap-1"
+              >
+                <Eye size={14} />
+                Ver Detalles
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <NewProjectModal
+        isOpen={showNewProject}
+        onClose={() => setShowNewProject(false)}
+        onCreate={handleCreateProject}
+      />
+
+      <ProjectDetailsModal
+        isOpen={showDetailsModal}
+        onClose={() => setShowDetailsModal(false)}
+        project={selectedProjectForDetails}
+      />
+
+      <style>{`
+        @keyframes floatIn {
+          from { opacity: 0; transform: scale(0.95) translateY(-10px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+        .animate-floatIn { animation: floatIn 0.2s ease-out; }
+        .line-clamp-2 {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+        }
+      `}</style>
     </div>
   );
 };
+
+export default ProjectRegistration;

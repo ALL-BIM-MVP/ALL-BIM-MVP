@@ -1,63 +1,63 @@
 // src/App.tsx
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
-import DashboardAdmin from './pages/Dashboardadmin';
-import Dashboard from './pages/Dashboard';  
+
 import AdminUsers from './pages/AdminUsers';
 import Invitations from './pages/Invitations';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import ProjectRegistration from './pages/ProjectRegistration';
+import Projects from './pages/Projects';
 import MainLayout from './layouts/MainLayout';
+import Register from './pages/Register';
+import DashboardProjects from './pages/DashboardProjects';
+import MisInvitaciones from './pages/MisInvitaciones';
+import { AuthProvider } from './context/AuthContext';
+import { ROLE_IDS } from './utils/roles';
+
 function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Ruta pública */}
-        <Route path="/login" element={<Login />} />
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          {/* Ruta pública */}
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/dashboard-projects/:id" element={<DashboardProjects />} />
+
+          <Route element={<MainLayout />}>
+
+           
+
+            <Route path="/admin/usuarios" element={
+              <ProtectedRoute allowedRoles={[ROLE_IDS.ADMINISTRADOR]}>
+                <AdminUsers />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/admin/invitaciones" element={
+              <ProtectedRoute allowedRoles={[ROLE_IDS.ADMINISTRADOR, ROLE_IDS.SUPERVISOR]}>
+                <Invitations />
+              </ProtectedRoute>
+            } />
 
 
-        <Route element={<MainLayout />}>
-      
-        <Route path="/dashboardadmin" element={
-          <ProtectedRoute requiredRoleId={1}>
-            <DashboardAdmin />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/admin/usuarios" element={
-          <ProtectedRoute requiredRoleId={1}>
-            <AdminUsers />
-          </ProtectedRoute>
-        } />
-        
-        <Route path="/admin/invitaciones" element={
-          <ProtectedRoute requiredRoleId={1}>
-            <Invitations />
-          </ProtectedRoute>
-        } />
-        
-           {/* 
-        <Route path="/dashboard" element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        } />  */}
+            <Route path="/dashboard/projects" element={
+              <ProtectedRoute allowedRoles={[ROLE_IDS.MODERADOR,ROLE_IDS.ADMINISTRADOR]}>
+                <Projects />
+              </ProtectedRoute>
+              
+            } />
+             <Route path="/mis-invitaciones" element={
+              <ProtectedRoute allowedRoles={[ROLE_IDS.MODERADOR,ROLE_IDS.ADMINISTRADOR,ROLE_IDS.USUARIO]}>
+                <MisInvitaciones />
+              </ProtectedRoute>
+            } />
 
-        <Route path="/dashboard" element={
-            <Dashboard />
-        } />
-
-         <Route path="/dashboard/nuevoproyecto" element={
-            <ProjectRegistration />
-        } />
-
-   
-
-        {/* Redirección por defecto */}
-        <Route path="/" element={<Navigate to="/login" replace />} />
-      </Route>
-      </Routes>
-    </BrowserRouter>
+            {/* Redirección por defecto */}
+            <Route path="/" element={<Navigate to="/login" replace />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 
