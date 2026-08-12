@@ -1,0 +1,197 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { ViewPreset } from './hooks/useIfcModel';
+
+interface ViewCube3DProps {
+  onSelect: (preset: ViewPreset) => void;
+  // Posición en pantalla donde debe aparecer el cubo (ya que al usar portal,
+  // ya no se posiciona relativo al visor con "absolute top-3 right-3").
+  anchorRef?: React.RefObject<HTMLElement | null>;
+}
+
+const SIZE = 44;
+const HALF = SIZE / 2;
+
+interface FaceDef {
+  preset: ViewPreset;
+  label: string;
+  transform: string;
+}
+
+const FACES: FaceDef[] = [
+  { preset: 'front', label: 'FRENTE', transform: `rotateY(0deg) translateZ(${HALF}px)` },
+  { preset: 'back', label: 'ATRÁS', transform: `rotateY(180deg) translateZ(${HALF}px)` },
+  { preset: 'right', label: 'DER', transform: `rotateY(90deg) translateZ(${HALF}px)` },
+  { preset: 'left', label: 'IZQ', transform: `rotateY(-90deg) translateZ(${HALF}px)` },
+  { preset: 'top', label: 'ARRIBA', transform: `rotateX(90deg) translateZ(${HALF}px)` },
+  { preset: 'bottom', label: 'ABAJO', transform: `rotateX(-90deg) translateZ(${HALF}px)` },
+];
+
+const DEFAULT_ROTATION = { x: -22, y: -38 };
+
+const VIEW_TARGETS: Record<ViewPreset, { x: number; y: number }> = {
+  front: { x: -22, y: 0 },
+  back: { x: -22, y: 180 },
+  right: { x: -22, y: 90 },
+  left: { x: -22, y: -90 },
+  top: { x: -85, y: -38 },
+  bottom: { x: 85, y: -38 },
+};
+
+const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef }) => {
+  const [rotation, setRotation] = useState(DEFAULT_ROTATION);
+  const [hoveredFace, setHoveredFace] = useState<ViewPreset | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [screenPos, setScreenPos] = useState<{ top: number; left: number } | null>(null);
+
+  const draggingRef = useRef(false);
+  const movedRef = useRef(false);
+  const lastPosRef = useRef({ x: 0, y: 0 });
+
+  // Calcula la posición en pantalla del widget, siguiendo la esquina superior
+  // derecha del contenedor ancla (o de la ventana, si no hay anchorRef).
+  useEffect(() => {
+    const updatePosition = () => {
+      if (anchorRef?.current) {
+        const rect = anchorRef.current.getBoundingClientRect();
+        setScreenPos({ top: rect.top + 12, left: rect.right - 110 - 12 });
+      } else {
+        setScreenPos({ top: 12, left: window.innerWidth - 110 - 12 });
+      }
+    };
+    updatePosition();
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [anchorRef]);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    movedRef.current = false;
+    lastPosRef.current = { x: e.clientX, y: e.clientY };
+    setIsDragging(true);
+  }, []);
+
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      if (!draggingRef.current) return;
+      const dx = e.clientX - lastPosRef.current.x;
+      const dy = e.clientY - lastPosRef.current.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) movedRef.current = true;
+      lastPosRef.current = { x: e.clientX, y: e.clientY };
+
+      setRotation(prev => ({
+        x: Math.max(-85, Math.min(85, prev.x - dy * 0.5)),
+        y: prev.y + dx * 0.5,
+      }));
+    };
+
+    const handleWindowMouseUp = () => {
+      draggingRef.current = false;
+      setIsDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+    };
+  }, []);
+
+  const handleFaceClick = useCallback(
+    (preset: ViewPreset) => {
+      if (movedRef.current) return;
+      onSelect(preset);
+      setRotation(VIEW_TARGETS[preset]);
+    },
+    [onSelect]
+  );
+
+  if (!screenPos) return null;
+
+  const cubeContent = (
+    <div
+      className="fixed select-none"
+      style={{
+        top: screenPos.top,
+        left: screenPos.left,
+        width: 110,
+        height: 110,
+        perspective: '420px',
+        zIndex: 9999, // por encima de todo, ya que vive en document.body
+        pointerEvents: 'auto',
+      }}
+      title="Arrastrá para rotar la vista · Click en una cara para encuadrar"
+    >
+      <div
+        onMouseDown={handleMouseDown}
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: isDragging ? 'grabbing' : 'grab',
+        }}
+      >
+        <div
+          style={{
+    width: SIZE,
+    height: SIZE,
+    position: 'relative',
+    transformStyle: 'preserve-3d',
+    transform: `rotateX(${rotation.x}deg) rotateY(${rotation.y}deg)`,
+    transition: isDragging ? 'none' : 'transform 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
+    // sin filter acá — se lo movemos a cada cara individual, más abajo
+  }}
+        >
+          {FACES.map((face) => {
+            const isHovered = hoveredFace === face.preset;
+            return (
+              <div
+                key={face.preset}
+                onMouseEnter={() => setHoveredFace(face.preset)}
+                onMouseLeave={() => setHoveredFace(null)}
+                onClick={() => handleFaceClick(face.preset)}
+                style={{
+                  position: 'absolute',
+                  width: SIZE,
+                  height: SIZE,
+                  left: 0,
+                  top: 0,
+                  transform: face.transform,
+                  background: isHovered
+                    ? 'linear-gradient(135deg, #4f9cf9, #0056b3)'
+                    : 'linear-gradient(135deg, #ffffff, #d8dee6)',
+                  border: '1px solid rgba(0,0,0,0.25)',
+                  boxShadow: '0 3px 6px rgba(0,0,0,0.25)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 8.5,
+                  fontWeight: 700,
+                  letterSpacing: '0.03em',
+                  color: isHovered ? '#ffffff' : '#5b6472',
+                  cursor: 'pointer',
+                  transition: 'background 0.15s ease, color 0.15s ease',
+                  backfaceVisibility: 'hidden',
+                }}
+              >
+                {face.label}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+
+  return createPortal(cubeContent, document.body);
+};
+
+export default ViewCube3D;

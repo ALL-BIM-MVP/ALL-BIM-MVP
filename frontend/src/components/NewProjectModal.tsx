@@ -1,0 +1,131 @@
+import React, { useState } from 'react';
+import { NewProjectData } from '../types/project.types';
+
+interface NewProjectModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreate: (projectData: NewProjectData) => void;
+}
+
+const NewProjectModal: React.FC<NewProjectModalProps> = ({
+  isOpen,
+  onClose,
+  onCreate
+}) => {
+  const [newProject, setNewProject] = useState<NewProjectData>({
+    name: '',
+    location: '',
+    startDate: '',
+    endDate: '',
+    description: ''
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    onCreate(newProject);
+    setNewProject({ name: '', location: '', startDate: '', endDate: '', description: '' });
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl w-[500px] max-h-[90vh] overflow-y-auto p-8 shadow-2xl animate-floatIn">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-2xl font-bold text-gray-800">Nuevo Proyecto</h3>
+          <button 
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-2xl transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              Nombre del Proyecto *
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="Ej. Proyecto Largo ALL-BIM"
+              value={newProject.name}
+              onChange={(e) => setNewProject({...newProject, name: e.target.value})}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none transition"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              Ubicación
+            </label>
+            <input
+              type="text"
+              placeholder="Ej. Lima, Perú"
+              value={newProject.location}
+              onChange={(e) => setNewProject({...newProject, location: e.target.value})}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none transition"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Fecha Inicio
+              </label>
+              <input
+                type="date"
+                value={newProject.startDate}
+                onChange={(e) => setNewProject({...newProject, startDate: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Fecha Final
+              </label>
+              <input
+                type="date"
+                value={newProject.endDate}
+                onChange={(e) => setNewProject({...newProject, endDate: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none transition"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">
+              Descripción
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Descripción del proyecto..."
+              value={newProject.description}
+              onChange={(e) => setNewProject({...newProject, description: e.target.value})}
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none resize-none transition"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-semibold"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              className="flex-1 px-4 py-2.5 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition font-semibold"
+            >
+              Crear Proyecto
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default NewProjectModal;
