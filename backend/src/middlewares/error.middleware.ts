@@ -4,6 +4,11 @@ import { AppError } from "../models/errors/app-error.js";
 
 export const errorHandler = ( err: unknown, req: Request, res: Response, next: NextFunction ): void => {
 
+    if (res.headersSent) {
+        next(err);
+        return;
+    }
+
     if (err instanceof AppError) {
         res.status(err.statusCode).json(err.response);
         return;

@@ -24,7 +24,7 @@ export interface ProjectFull extends ProjectCreate {
     owner : ProjectOwner;
 };
 
-export const transformProjectFull = (p : ProjectRow) : ProjectFull => {
+export const transformProjectFull = (p : ProjectRow) : ProjectFull => {    
     return {
         project_id: p.project_id,
         name: p.name,

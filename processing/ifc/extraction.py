@@ -1,0 +1,823 @@
+# extraction.py
+#
+# Helpers de bajo nivel: geometría, dimensiones, clasificación contra la
+# norma, cantidades de Revit. Puerto casi textual de
+# proceso-metrados-base/utils.py — son funciones agnósticas de la forma
+# de salida (siguen siendo válidas tanto si el resultado se arma como
+# árbol de presentación como si se arma normalizado). Se dejaron afuera
+# a propósito `extraer_cantidades_qto` (no la usaba nadie en el pipeline
+# original) y `calcular_metrados_geometrico`/`_agrupar_caras` (el cálculo
+# de área/volumen por malla triangular cruda) — esta última no es la
+# "metrado geométrico" que se usa como fallback de prioridad (ver
+# metrados.py): ese fallback es a partir de dimensiones, no de malla.
+import math
+import re
+import ifcopenshell
+import ifcopenshell.geom
+from collections import Counter
+
+from .config import DENSIDAD_ACERO_KG_M3
+
+GEOM_SETTINGS = ifcopenshell.geom.settings()
+GEOM_SETTINGS.set(GEOM_SETTINGS.USE_WORLD_COORDS, True)
+
+PALABRAS_LARGO = ["LENGTH", "LONGITUD", "LARGO"]
+PALABRAS_ANCHO = ["WIDTH", "ANCHO"]
+PALABRAS_ALTO = ["HEIGHT", "ALTURA", "DEPTH", "PERALTE", "ESPESOR", "THICKNESS"]
+
+# Tabla de pesos nominales Aceros Arequipa (kg/m) según diámetro comercial (mm)
+TABLA_PESOS_ACERO = {
+    6:    0.222,
+    8:    0.395,
+    9.525: 0.560,   # 3/8"
+    12:   0.888,
+    12.7: 0.994,    # 1/2"
+    15.875: 1.552,  # 5/8"
+    19.05: 2.235,   # 3/4"
+    25.4: 3.973,    # 1"
+    31.75: 6.208,   # 1 1/4"
+    38.1: 8.938,    # 1 1/2"
+}
+
+
+def unidad_map(unidad):
+    mapping = {"m": "lon", "m2": "area", "m3": "vol", "kg": "kg", "und": "und"}
+    return mapping.get(unidad, "und")
+
+
+# ----------------------------------------------------------------------
+# Clasificación y norma
+# ----------------------------------------------------------------------
+def limpiar_codigo_partida(texto_sucio):
+    if not texto_sucio:
+        return None
+    coincidencia = re.search(r'OE(?:\.\d+)+', str(texto_sucio), re.IGNORECASE)
+    return coincidencia.group(0).upper() if coincidencia else None
+
+
+def normalizar_codigo(codigo):
+    partes = codigo.split('.')[1:]
+    try:
+        return tuple(int(p) for p in partes if p != "")
+    except ValueError:
+        return None
+
+
+def formatear_codigo(tupla):
+    return "OE." + ".".join(f"{p:02d}" for p in tupla)
+
+
+def extraer_datos_clasificacion(el):
+    for association in getattr(el, "HasAssociations", []):
+        if association.is_a("IfcRelAssociatesClassification"):
+            ref = association.RelatingClassification
+            codigo = limpiar_codigo_partida(getattr(ref, "ItemReference", None))
+            nombre = getattr(ref, "Name", None)
+            if codigo:
+                return codigo, str(nombre).strip() if nombre else ""
+    return None, None
+
+
+def indexar_norma(norma):
+    norma_index = {}
+    for codigo_str, datos in norma.items():
+        tup = normalizar_codigo(codigo_str)
+        if tup is None:
+            continue
+        norma_index[tup] = {
+            "codigo": datos.get("codigo", codigo_str),
+            "descripcion": datos.get("descripcion", ""),
+            "tipo": datos.get("tipo", "partida"),
+            "unidad": datos.get("unidad"),
+            "tuple": tup,
+        }
+    hijos = {}
+    for tup in norma_index:
+        if len(tup) > 1:
+            padre = tup[:-1]
+            hijos.setdefault(padre, []).append(tup)
+    for padre in hijos:
+        hijos[padre].sort()
+    return norma_index, hijos
+
+
+def buscar_entrada_norma(tup, norma_index):
+    if tup in norma_index:
+        return tup, norma_index[tup], True
+    for i in range(len(tup) - 1, 0, -1):
+        ancestro = tup[:i]
+        if ancestro in norma_index:
+            return ancestro, norma_index[ancestro], False
+    return None, None, False
+
+
+def obtener_unidad_por_mayoria(tup_padre, norma_index, hijos):
+    unidades_hijas = []
+    for hijo in hijos.get(tup_padre, []):
+        entrada_hijo = norma_index.get(hijo)
+        if entrada_hijo and entrada_hijo["tipo"] == "partida":
+            unidad = entrada_hijo.get("unidad")
+            if unidad:
+                unidades_hijas.append(unidad)
+    if not unidades_hijas:
+        return None
+    freq = Counter(unidades_hijas)
+    return freq.most_common(1)[0][0]
+
+
+# ----------------------------------------------------------------------
+# Geometría y dimensiones (helpers básicos)
+# ----------------------------------------------------------------------
+def get_shape(el):
+    """Obtiene el shape geométrico del elemento una sola vez."""
+    try:
+        shape = ifcopenshell.geom.create_shape(GEOM_SETTINGS, el)
+        if shape and shape.geometry.verts and shape.geometry.faces:
+            return shape
+    except Exception:
+        pass
+    return None
+
+
+def buscar_valor_en_psets(psets, palabras_clave):
+    for pset_name, properties in psets.items():
+        for prop_name, value in properties.items():
+            if any(clave.upper() in prop_name.upper() for clave in palabras_clave):
+                try:
+                    val_float = float(value)
+                    if val_float > 0:
+                        return val_float
+                except (ValueError, TypeError):
+                    continue
+    return None
+
+
+def extraer_dimensiones_qto(el):
+    dims = {"Largo": None, "Ancho": None, "Alto": None}
+    for rel in getattr(el, "IsDefinedBy", []):
+        if not rel.is_a("IfcRelDefinesByProperties"):
+            continue
+        prop_def = rel.RelatingPropertyDefinition
+        if not (prop_def and prop_def.is_a("IfcElementQuantity")):
+            continue
+        for q in getattr(prop_def, "Quantities", []):
+            if not q.is_a("IfcQuantityLength") or q.LengthValue is None:
+                continue
+            nombre_q = (getattr(q, "Name", "") or "").upper()
+            val = float(q.LengthValue)
+            if dims["Alto"] is None and any(p in nombre_q for p in PALABRAS_ALTO):
+                dims["Alto"] = val
+            elif dims["Ancho"] is None and any(p in nombre_q for p in PALABRAS_ANCHO):
+                dims["Ancho"] = val
+            elif dims["Largo"] is None and any(p in nombre_q for p in PALABRAS_LARGO):
+                dims["Largo"] = val
+    return dims
+
+
+def extraer_dimensiones_geometria(el, shape=None):
+    """AABB clásico, como último recurso."""
+    dims = {"Largo": None, "Ancho": None, "Alto": None}
+    if shape is None:
+        shape = get_shape(el)
+    if shape is None:
+        return dims
+    verts = shape.geometry.verts
+    xs = verts[0::3]
+    ys = verts[1::3]
+    zs = verts[2::3]
+    dx = max(xs) - min(xs)
+    dy = max(ys) - min(ys)
+    dz = max(zs) - min(zs)
+    dims["Largo"] = dx if dx >= dy else dy
+    dims["Ancho"] = dy if dx >= dy else dx
+    dims["Alto"] = dz
+    return dims
+
+
+# ----------------------------------------------------------------------
+# PCA / OBB
+# ----------------------------------------------------------------------
+def extraer_dimensiones_orientadas(el, shape=None):
+    """OBB mediante PCA. Retorna Largo, Ancho, Alto y los tres ejes."""
+    if shape is None:
+        shape = get_shape(el)
+    if shape is None:
+        return None
+    verts = shape.geometry.verts
+    n = len(verts) // 3
+    if n < 3:
+        return None
+    puntos = [verts[i*3:(i+1)*3] for i in range(n)]
+
+    cx = sum(p[0] for p in puntos) / n
+    cy = sum(p[1] for p in puntos) / n
+    cz = sum(p[2] for p in puntos) / n
+
+    cov = [[0.0, 0.0, 0.0],
+           [0.0, 0.0, 0.0],
+           [0.0, 0.0, 0.0]]
+    for p in puntos:
+        dx, dy, dz = p[0]-cx, p[1]-cy, p[2]-cz
+        cov[0][0] += dx*dx
+        cov[0][1] += dx*dy
+        cov[0][2] += dx*dz
+        cov[1][1] += dy*dy
+        cov[1][2] += dy*dz
+        cov[2][2] += dz*dz
+    cov[1][0] = cov[0][1]
+    cov[2][0] = cov[0][2]
+    cov[2][1] = cov[1][2]
+
+    # Jacobi
+    max_iter, tol = 50, 1e-12
+    v = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    for _ in range(max_iter):
+        p, q = 0, 1
+        max_val = abs(cov[0][1])
+        if abs(cov[0][2]) > max_val:
+            p, q = 0, 2
+            max_val = abs(cov[0][2])
+        if abs(cov[1][2]) > max_val:
+            p, q = 1, 2
+            max_val = abs(cov[1][2])
+        if max_val < tol:
+            break
+        theta = math.pi/4 if cov[p][p] == cov[q][q] else 0.5 * math.atan2(2*cov[p][q], cov[p][p]-cov[q][q])
+        cos, sin = math.cos(theta), math.sin(theta)
+        new_cov = [row[:] for row in cov]
+        for i in range(3):
+            if i != p and i != q:
+                new_cov[i][p] = cos*cov[i][p] - sin*cov[i][q]
+                new_cov[p][i] = new_cov[i][p]
+                new_cov[i][q] = sin*cov[i][p] + cos*cov[i][q]
+                new_cov[q][i] = new_cov[i][q]
+        new_cov[p][p] = cos*cos*cov[p][p] + sin*sin*cov[q][q] - 2*sin*cos*cov[p][q]
+        new_cov[q][q] = sin*sin*cov[p][p] + cos*cos*cov[q][q] + 2*sin*cos*cov[p][q]
+        new_cov[p][q] = new_cov[q][p] = 0.0
+        cov = new_cov
+        for i in range(3):
+            vi_p, vi_q = v[i][p], v[i][q]
+            v[i][p] = cos*vi_p - sin*vi_q
+            v[i][q] = sin*vi_p + cos*vi_q
+
+    evals = [cov[i][i] for i in range(3)]
+    idx = sorted(range(3), key=lambda i: evals[i], reverse=True)
+    ejes = [[v[0][i], v[1][i], v[2][i]] for i in idx]  # normalizados
+
+    dims = [0.0, 0.0, 0.0]
+    for i, eje in enumerate(ejes):
+        vals = [eje[0]*p[0] + eje[1]*p[1] + eje[2]*p[2] for p in puntos]
+        dims[i] = max(vals) - min(vals)
+
+    z_vals = [abs(e[2]) for e in ejes]
+    idx_alto = z_vals.index(max(z_vals))
+    alto = dims[idx_alto]
+    ejes_resto = [i for i in range(3) if i != idx_alto]
+    dims_resto = [dims[i] for i in ejes_resto]
+    largo = max(dims_resto)
+    ancho = min(dims_resto)
+
+    return {
+        "Largo": largo,
+        "Ancho": ancho,
+        "Alto": alto,
+        "ejes": {
+            "alto": ejes[idx_alto],
+            "largo": ejes[ejes_resto[0]] if dims_resto[0] >= dims_resto[1] else ejes[ejes_resto[1]],
+            "ancho": ejes[ejes_resto[1]] if dims_resto[0] >= dims_resto[1] else ejes[ejes_resto[0]],
+        }
+    }
+
+
+# ----------------------------------------------------------------------
+# Aristas duras
+# ----------------------------------------------------------------------
+def obtener_aristas_duras(el, shape=None):
+    if shape is None:
+        shape = get_shape(el)
+    if shape is None:
+        return []
+
+    verts = shape.geometry.verts
+    faces = shape.geometry.faces
+    nv = len(verts) // 3
+    vertices = [(verts[i*3], verts[i*3+1], verts[i*3+2]) for i in range(nv)]
+    triangulos = [(faces[i*3], faces[i*3+1], faces[i*3+2]) for i in range(len(faces)//3)]
+
+    edge_map = {}
+    for idx, (i0, i1, i2) in enumerate(triangulos):
+        p0, p1, p2 = vertices[i0], vertices[i1], vertices[i2]
+        v1 = (p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2])
+        v2 = (p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2])
+        nx = v1[1]*v2[2] - v1[2]*v2[1]
+        ny = v1[2]*v2[0] - v1[0]*v2[2]
+        nz = v1[0]*v2[1] - v1[1]*v2[0]
+        norm = math.sqrt(nx*nx+ny*ny+nz*nz)
+        normal = (nx/norm, ny/norm, nz/norm) if norm > 1e-12 else (0, 0, 0)
+        for a, b in [(i0, i1), (i1, i2), (i2, i0)]:
+            key = (min(a, b), max(a, b))
+            edge_map.setdefault(key, []).append((idx, normal))
+
+    angle_thresh = math.cos(math.radians(25))
+    hard_edges = []
+    for (i1, i2), faces_info in edge_map.items():
+        v1, v2 = vertices[i1], vertices[i2]
+        length = math.dist(v1, v2)
+        if length < 0.05:
+            continue
+        is_hard = len(faces_info) == 1
+        if not is_hard:
+            for i in range(len(faces_info)):
+                for j in range(i+1, len(faces_info)):
+                    dot = faces_info[i][1][0]*faces_info[j][1][0] + faces_info[i][1][1]*faces_info[j][1][1] + faces_info[i][1][2]*faces_info[j][1][2]
+                    if dot < angle_thresh:
+                        is_hard = True
+                        break
+                if is_hard:
+                    break
+        if is_hard:
+            dx, dy, dz = v2[0]-v1[0], v2[1]-v1[1], v2[2]-v1[2]
+            dir_len = math.sqrt(dx*dx+dy*dy+dz*dz)
+            hard_edges.append((length, (dx/dir_len, dy/dir_len, dz/dir_len)))
+
+    if not hard_edges:
+        return []
+
+    group_thresh = math.cos(math.radians(15))
+    groups = []
+    for length, dir in hard_edges:
+        added = False
+        for g in groups:
+            dot = abs(g["direction"][0]*dir[0] + g["direction"][1]*dir[1] + g["direction"][2]*dir[2])
+            if dot > group_thresh:
+                g["max_length"] = max(g["max_length"], length)
+                g["edges"] += 1
+                w = length
+                g["direction"] = (
+                    g["direction"][0]*g["total_weight"] + dir[0]*w,
+                    g["direction"][1]*g["total_weight"] + dir[1]*w,
+                    g["direction"][2]*g["total_weight"] + dir[2]*w
+                )
+                g["total_weight"] += w
+                norm = math.sqrt(g["direction"][0]**2 + g["direction"][1]**2 + g["direction"][2]**2)
+                if norm > 1e-12:
+                    g["direction"] = (g["direction"][0]/norm, g["direction"][1]/norm, g["direction"][2]/norm)
+                added = True
+                break
+        if not added:
+            groups.append({
+                "direction": dir,
+                "max_length": length,
+                "edges": 1,
+                "total_weight": length
+            })
+
+    if len(groups) < 2:
+        return []
+
+    obb = extraer_dimensiones_orientadas(el, shape)
+    if obb and "ejes" in obb:
+        eje_alto = obb["ejes"]["alto"]
+        eje_largo = obb["ejes"]["largo"]
+        eje_ancho = obb["ejes"]["ancho"]
+        for g in groups:
+            d = g["direction"]
+            dots = [
+                abs(d[0]*eje_alto[0] + d[1]*eje_alto[1] + d[2]*eje_alto[2]),
+                abs(d[0]*eje_largo[0] + d[1]*eje_largo[1] + d[2]*eje_largo[2]),
+                abs(d[0]*eje_ancho[0] + d[1]*eje_ancho[1] + d[2]*eje_ancho[2]),
+            ]
+            g["tipo"] = ["alto", "largo", "ancho"][dots.index(max(dots))]
+    else:
+        idx_alto = max(range(len(groups)), key=lambda i: abs(groups[i]["direction"][2]))
+        groups[idx_alto]["tipo"] = "alto"
+        resto = [i for i in range(len(groups)) if i != idx_alto]
+        if len(resto) >= 2:
+            groups[resto[0]]["tipo"] = "largo"
+            groups[resto[1]]["tipo"] = "ancho"
+        elif len(resto) == 1:
+            groups[resto[0]]["tipo"] = "largo"
+
+    resultado = []
+    for g in groups:
+        resultado.append({
+            "longitud": round(g["max_length"], 4),
+            "direccion": [round(g["direction"][0], 4), round(g["direction"][1], 4), round(g["direction"][2], 4)],
+            "tipo": g.get("tipo", "otro"),
+            "cantidad_aristas": g["edges"]
+        })
+    return resultado
+
+
+def extraer_dimensiones_por_aristas(el, shape=None):
+    grupos = obtener_aristas_duras(el, shape)
+    if not grupos:
+        return None
+    alto = largo = ancho = 0.0
+    for g in grupos:
+        if g["tipo"] == "alto":
+            alto = max(alto, g["longitud"])
+        elif g["tipo"] == "largo":
+            largo = max(largo, g["longitud"])
+        elif g["tipo"] == "ancho":
+            ancho = max(ancho, g["longitud"])
+    if alto and largo and ancho:
+        return {"Largo": largo, "Ancho": ancho, "Alto": alto}
+    return None
+
+
+# ----------------------------------------------------------------------
+# Normalización por categoría
+# ----------------------------------------------------------------------
+def normalizar_ejes_por_categoria(largo, ancho, alto, ejes, categoria):
+    if categoria == 'wall':
+        return {
+            "Largo": max(largo, ancho),
+            "Ancho": min(largo, ancho),
+            "Alto": alto
+        }
+    elif categoria == 'floor':
+        dims = sorted([largo, ancho, alto], reverse=True)
+        return {
+            "Largo": dims[0],
+            "Ancho": dims[1],
+            "Alto": dims[2]
+        }
+    else:
+        if ejes:
+            z_alto = abs(ejes["alto"][2])
+            z_largo = abs(ejes["largo"][2])
+            z_ancho = abs(ejes["ancho"][2])
+            if z_alto >= z_largo and z_alto >= z_ancho:
+                return {"Largo": largo, "Ancho": ancho, "Alto": alto}
+            if z_largo >= z_alto and z_largo >= z_ancho:
+                return {"Largo": alto, "Ancho": ancho, "Alto": largo}
+            else:
+                return {"Largo": largo, "Ancho": alto, "Alto": ancho}
+        return {"Largo": largo, "Ancho": ancho, "Alto": alto}
+
+
+def inferir_categoria(el):
+    clase = el.is_a()
+    if clase in ("IfcWall", "IfcWallStandardCase", "IfcCurtainWall"):
+        return 'wall'
+    if clase in ("IfcSlab", "IfcRoof", "IfcRamp", "IfcRampFlight"):
+        return 'floor'
+    return None
+
+
+# ----------------------------------------------------------------------
+# Métodos de extracción principales
+# ----------------------------------------------------------------------
+def extraer_dimensiones_parametricas(el):
+    """IfcExtrudedAreaSolid + perfil rectangular."""
+    try:
+        rep = el.Representation
+        if not rep:
+            return None
+        for rep_map in rep.Representations:
+            for item in rep_map.Items:
+                if item.is_a('IfcExtrudedAreaSolid'):
+                    depth = float(item.Depth)
+                    profile = item.SweptArea
+                    if profile.is_a('IfcRectangleProfileDef'):
+                        return {
+                            "Largo": depth,
+                            "Ancho": float(profile.XDim),
+                            "Alto": float(profile.YDim)
+                        }
+                    elif profile.is_a('IfcArbitraryClosedProfileDef'):
+                        outer = profile.OuterCurve
+                        if outer.is_a('IfcPolyline'):
+                            pts = outer.Points
+                            xs = [p.Coordinates[0] for p in pts]
+                            ys = [p.Coordinates[1] for p in pts]
+                            ancho = max(xs) - min(xs)
+                            alto = max(ys) - min(ys)
+                            return {
+                                "Largo": depth,
+                                "Ancho": ancho,
+                                "Alto": alto
+                            }
+                    return None
+    except Exception:
+        return None
+
+
+def extraer_dimensiones_fierro(el):
+    if el.is_a('IfcReinforcingBar'):
+        largo = float(el.BarLength) if el.BarLength else None
+        diam = float(el.NominalDiameter) if el.NominalDiameter else None
+        area_sec = float(el.CrossSectionArea) if el.CrossSectionArea else None
+        return {
+            "Largo": largo,
+            "Ancho": diam,
+            "Alto": diam,
+            "Diametro": diam,
+            "AreaSeccion": area_sec,
+        }
+    return None
+
+
+def extraer_dimensiones_explicitas(el):
+    """Dimensiones para puertas y ventanas desde atributos IFC."""
+    if el.is_a('IfcDoor') or el.is_a('IfcWindow'):
+        alto = float(el.OverallHeight) if el.OverallHeight else None
+        largo = float(el.OverallWidth) if el.OverallWidth else None
+        if alto is not None and largo is not None:
+            return {
+                "Largo": largo,
+                "Ancho": 0.0,
+                "Alto": alto
+            }
+    return None
+
+
+def fallback_dimensiones(el, psets, shape):
+    dims = extraer_dimensiones_qto(el)
+    if dims["Largo"] is None:
+        dims["Largo"] = buscar_valor_en_psets(psets, PALABRAS_LARGO)
+    if dims["Ancho"] is None:
+        dims["Ancho"] = buscar_valor_en_psets(psets, PALABRAS_ANCHO)
+    if dims["Alto"] is None:
+        dims["Alto"] = buscar_valor_en_psets(psets, PALABRAS_ALTO)
+    if any(v is None for v in dims.values()):
+        dims_geo = extraer_dimensiones_geometria(el, shape)
+        for k in dims:
+            if dims[k] is None:
+                dims[k] = dims_geo.get(k)
+    return dims
+
+
+def obtener_dimensiones(el, psets):
+    shape = get_shape(el)  # una sola llamada
+
+    # 0. Fierro
+    dims_bar = extraer_dimensiones_fierro(el)
+    if dims_bar and dims_bar["Largo"] is not None:
+        return dims_bar
+
+    # 0.5. Dimensiones explícitas (puertas, ventanas)
+    dims_exp = extraer_dimensiones_explicitas(el)
+    if dims_exp and dims_exp["Largo"] is not None:
+        return dims_exp
+
+    # 1. Paramétrico
+    dims_param = extraer_dimensiones_parametricas(el)
+    if dims_param and all(v is not None for v in dims_param.values()):
+        categoria = inferir_categoria(el)
+        if categoria:
+            return normalizar_ejes_por_categoria(
+                dims_param["Largo"], dims_param["Ancho"], dims_param["Alto"],
+                ejes=None, categoria=categoria
+            )
+        return dims_param
+
+    # 2. Qto
+    dims_qto = extraer_dimensiones_qto(el)
+    if dims_qto and all(v is not None for v in dims_qto.values()):
+        return dims_qto
+
+    if shape is None:
+        return fallback_dimensiones(el, psets, None)
+
+    # 3. OBB con normalización
+    obb = extraer_dimensiones_orientadas(el, shape)
+    if obb and "ejes" in obb:
+        categoria = inferir_categoria(el)
+        return normalizar_ejes_por_categoria(
+            obb["Largo"], obb["Ancho"], obb["Alto"],
+            ejes=obb["ejes"], categoria=categoria
+        )
+
+    # 4. Aristas duras
+    dims_edges = extraer_dimensiones_por_aristas(el, shape)
+    if dims_edges and all(v is not None for v in dims_edges.values()):
+        return dims_edges
+
+    # 5. Fallback
+    return fallback_dimensiones(el, psets, shape)
+
+
+# ----------------------------------------------------------------------
+# Metrado geométrico a partir de dimensiones (fallback de metrados.py)
+# ----------------------------------------------------------------------
+def calcular_metrados(dims, el=None):
+    """lon/area/vol a partir de Largo/Ancho/Alto. Es el fallback
+    "geométrico" que usa metrados.py cuando el IFC no trae el valor via
+    Revit — NO calcula weight (eso es exclusivo de metrados.py, solo
+    para acero)."""
+    largo = dims.get("Largo") or 0.0
+    ancho = dims.get("Ancho") or 0.0
+    alto = dims.get("Alto") or 0.0
+
+    area_m2 = largo * alto  # valor por defecto (muro)
+    if el is not None:
+        clase = el.is_a()
+        if clase in ("IfcSlab", "IfcRoof", "IfcRamp", "IfcRampFlight"):
+            area_m2 = largo * ancho
+        elif clase in ("IfcWall", "IfcWallStandardCase", "IfcCurtainWall"):
+            area_m2 = largo * alto
+        else:
+            if alto > 0 and largo > 0 and ancho > 0:
+                if alto < min(largo, ancho) * 0.3:
+                    area_m2 = largo * ancho
+                elif alto > max(largo, ancho) * 2:
+                    area_m2 = largo * alto
+                else:
+                    dims_ordenadas = sorted([largo, ancho, alto])
+                    area_m2 = dims_ordenadas[1] * dims_ordenadas[2]
+
+    volumen = largo * ancho * alto
+    return {"lon": largo, "area": area_m2, "vol": volumen}
+
+
+def inferir_unidad(dims):
+    largo, ancho, alto = dims.get("Largo"), dims.get("Ancho"), dims.get("Alto")
+    if largo and ancho and alto:
+        return "m3"
+    if largo and alto:
+        return "m2"
+    if largo:
+        return "m"
+    return "und"
+
+
+def extraer_metrados_revit_completo(el):
+    metrados = {"lon": None, "area": None, "vol": None, "count": None, "weight": None}
+    propiedades = {}
+
+    # 1. IfcElementQuantity
+    for rel in getattr(el, "IsDefinedBy", []):
+        if not rel.is_a("IfcRelDefinesByProperties"):
+            continue
+        prop_def = rel.RelatingPropertyDefinition
+        if not prop_def:
+            continue
+        if prop_def.is_a("IfcElementQuantity"):
+            for q in getattr(prop_def, "Quantities", []):
+                if q.is_a("IfcQuantityLength") and q.LengthValue is not None:
+                    if metrados["lon"] is None:
+                        metrados["lon"] = float(q.LengthValue)
+                elif q.is_a("IfcQuantityArea") and q.AreaValue is not None:
+                    if metrados["area"] is None:
+                        metrados["area"] = float(q.AreaValue)
+                elif q.is_a("IfcQuantityVolume") and q.VolumeValue is not None:
+                    if metrados["vol"] is None:
+                        metrados["vol"] = float(q.VolumeValue)
+                elif q.is_a("IfcQuantityCount") and q.CountValue is not None:
+                    if metrados["count"] is None:
+                        metrados["count"] = float(q.CountValue)
+                elif q.is_a("IfcQuantityWeight") and q.WeightValue is not None:
+                    if metrados["weight"] is None:
+                        metrados["weight"] = float(q.WeightValue)
+
+    # 2. Propiedades del exportador (fallback)
+    CLAVES_AREA = ["AREA", "ÁREA", "SURFACE", "GROSS AREA", "NET AREA"]
+    CLAVES_VOLUMEN = ["VOLUME", "VOLUMEN", "NET VOLUME", "GROSS VOLUME"]
+    CLAVES_LONGITUD = ["LENGTH", "LONGITUD", "WIDTH", "ANCHURA", "ALTURA", "HEIGHT", "DEPTH", "PERALTE"]
+    CLAVES_PESO = ["WEIGHT", "PESO", "MASS"]
+    CLAVES_CONTEO = ["COUNT", "CANTIDAD", "NUMBER"]
+
+    for rel in getattr(el, "IsDefinedBy", []):
+        if not rel.is_a("IfcRelDefinesByProperties"):
+            continue
+        prop_def = rel.RelatingPropertyDefinition
+        if not prop_def or not prop_def.is_a("IfcPropertySet"):
+            continue
+        for prop in getattr(prop_def, "HasProperties", []):
+            if prop.is_a("IfcPropertySingleValue") and prop.NominalValue is not None:
+                nombre = getattr(prop, "Name", "").upper().strip()
+                valor = prop.NominalValue.wrappedValue if hasattr(prop.NominalValue, 'wrappedValue') else prop.NominalValue
+                propiedades[nombre] = valor
+
+                if metrados["area"] is None and any(k in nombre for k in CLAVES_AREA):
+                    try:
+                        metrados["area"] = float(valor)
+                    except (ValueError, TypeError):
+                        pass
+                if metrados["vol"] is None and any(k in nombre for k in CLAVES_VOLUMEN):
+                    try:
+                        metrados["vol"] = float(valor)
+                    except (ValueError, TypeError):
+                        pass
+                if metrados["lon"] is None and any(k in nombre for k in CLAVES_LONGITUD):
+                    try:
+                        metrados["lon"] = float(valor)
+                    except (ValueError, TypeError):
+                        pass
+                if metrados["weight"] is None and any(k in nombre for k in CLAVES_PESO):
+                    try:
+                        metrados["weight"] = float(valor)
+                    except (ValueError, TypeError):
+                        pass
+                if metrados["count"] is None and any(k in nombre for k in CLAVES_CONTEO):
+                    try:
+                        metrados["count"] = float(valor)
+                    except (ValueError, TypeError):
+                        pass
+
+    return {"metrados_revit": metrados, "propiedades": propiedades}
+
+
+def peso_nominal_kg_por_metro(diametro_metros):
+    """Retorna el peso (kg/m) según tabla comercial. Redondea al diámetro más cercano."""
+    if diametro_metros is None:
+        return None
+    diametro_mm = diametro_metros * 1000.0
+    comercial = None
+    menor_dif = float('inf')
+    peso_elegido = None
+    for d_com, peso in TABLA_PESOS_ACERO.items():
+        dif = abs(diametro_mm - d_com)
+        if dif < menor_dif and dif <= 0.5:
+            menor_dif = dif
+            comercial = d_com
+            peso_elegido = peso
+    if comercial is not None:
+        return peso_elegido
+    area = math.pi * (diametro_metros / 2.0) ** 2
+    return area * DENSIDAD_ACERO_KG_M3
+
+
+# ----------------------------------------------------------------------
+# Jerarquía espacial
+# ----------------------------------------------------------------------
+def get_storey_and_space(el, model=None):
+    storey = "SIN NIVEL"
+    space = "SIN ESPACIO"
+    container = None
+
+    if hasattr(el, 'ContainedInStructure'):
+        for rel in el.ContainedInStructure:
+            if rel.is_a('IfcRelContainedInSpatialStructure'):
+                container = rel.RelatingStructure
+                break
+    if container is None and hasattr(el, 'ReferencedInStructures'):
+        for rel in el.ReferencedInStructures:
+            if rel.is_a('IfcRelContainedInSpatialStructure'):
+                container = rel.RelatingStructure
+                break
+
+    if container is None and model is not None:
+        try:
+            shape = get_shape(el)
+            if shape and shape.geometry.verts:
+                verts = shape.geometry.verts
+                cx = sum(verts[0::3]) / (len(verts) // 3)
+                cy = sum(verts[1::3]) / (len(verts) // 3)
+                cz = sum(verts[2::3]) / (len(verts) // 3)
+                for space_el in model.by_type('IfcSpace'):
+                    s_shape = get_shape(space_el)
+                    if s_shape and s_shape.geometry.verts:
+                        s_verts = s_shape.geometry.verts
+                        min_x, max_x = min(s_verts[0::3]), max(s_verts[0::3])
+                        min_y, max_y = min(s_verts[1::3]), max(s_verts[1::3])
+                        min_z, max_z = min(s_verts[2::3]), max(s_verts[2::3])
+                        if min_x <= cx <= max_x and min_y <= cy <= max_y and min_z <= cz <= max_z:
+                            space = space_el.Name or space_el.GlobalId
+                            if hasattr(space_el, 'Decomposes'):
+                                for decomp in space_el.Decomposes:
+                                    if decomp.is_a('IfcRelAggregates'):
+                                        parent = decomp.RelatingObject
+                                        if parent.is_a('IfcBuildingStorey'):
+                                            storey = parent.Name or parent.GlobalId
+                                            break
+                            break
+        except Exception as e:
+            print(f"⚠ Error buscando espacio para elemento {el.id()}: {e}")
+
+    if space == "SIN ESPACIO" and container is not None:
+        while container is not None:
+            if container.is_a('IfcBuildingStorey'):
+                storey = container.Name or container.GlobalId
+            elif container.is_a('IfcSpace'):
+                space = container.Name or container.GlobalId
+            if hasattr(container, 'Decomposes') and container.Decomposes:
+                container = container.Decomposes[0].RelatingObject
+            else:
+                break
+    return storey, space
+
+
+def get_openings(el):
+    openings = []
+    if hasattr(el, 'HasOpenings'):
+        for rel in el.HasOpenings:
+            if rel.is_a('IfcRelVoidsElement'):
+                openings.append(rel.RelatedOpeningElement)
+    return openings
+
+
+def extraer_element_id(el):
+    """Obtiene el ElementID de Revit desde el atributo Tag del IFC."""
+    tag = getattr(el, 'Tag', None)
+    if tag and tag.strip():
+        return tag.strip()
+    name = getattr(el, 'Name', '')
+    if not name:
+        return None
+    match = re.search(r'(\d{6,})', name)
+    if match:
+        return match.group(1)
+    return None

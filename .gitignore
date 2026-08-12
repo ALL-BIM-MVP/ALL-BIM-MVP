@@ -22,6 +22,14 @@ jspm_packages/
 .pnpm-store/
 
 # builds
+# processing/ifc/** (el módulo de procesamiento) y el stub de FastAPI
+# (main.py/api//service/) SÍ se trackean — solo lo pesado/descartable
+# queda afuera: proceso-metrados-base/ (venv + .ifc de prueba de hasta
+# 45MB cada uno, va a desaparecer) y cualquier venv/__pycache__ suelto.
+processing/proceso-metrados-base/
+processing/**/.venv/
+processing/**/__pycache__/
+docs/
 test/
 dist/
 build/
