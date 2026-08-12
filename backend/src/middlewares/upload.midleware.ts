@@ -7,7 +7,10 @@ import type { Request } from "express";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, "..", "..", "uploads");
+// Exportado: ifc-processing-runner.ts lo reusa para validar que el
+// filePath que le pasan quede dentro de este directorio antes de
+// mandarlo a un subprocess.
+export const UPLOADS_DIR = process.env.UPLOADS_DIR || path.join(__dirname, "..", "..", "uploads");
 
 const MAX_FILE_SIZE_BYTES = 200 * 1024 * 1024;
 

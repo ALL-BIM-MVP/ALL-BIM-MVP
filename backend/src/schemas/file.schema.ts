@@ -15,7 +15,8 @@ export const FileIdParamSchema = z.object({
 
 export type FileIdParam = z.infer<typeof FileIdParamSchema>;
 
-const optionalBooleanFlag = z.enum(["true", "false"])
+// Exportado: ifc-metrados.schema.ts reusa el mismo patrón para `force`.
+export const optionalBooleanFlag = z.enum(["true", "false"])
     .optional()
     .transform((value) => value === undefined ? undefined : value === "true");
 

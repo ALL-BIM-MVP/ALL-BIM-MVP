@@ -8,8 +8,8 @@ POST {{baseUrl}}/auth/login
 Content-Type: application/json
 
 {
-  "email": "ismael@gmail.com",
-  "password": "hash_de_prueba"
+  "email": "ismael@email.com",
+  "password": "Test1234!"
 }
 
 ###
@@ -221,4 +221,116 @@ Authorization: Bearer {{accessToken}}
 ### 8. Eliminar el rol de proyecto personalizado creado (Caso Exitoso)
 DELETE {{baseUrl}}/project-roles/{{createdProjectRoleId}}
 Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### MÓDULO DE ARCHIVOS
+### (requiere haber corrido antes "1. Crear un proyecto nuevo" de arriba,
+### para que {{createdProjectId}} exista)
+### =========================================================================
+
+### 1. Subir un archivo cualquiera al proyecto (acá un .ifc de prueba)
+# @name uploadFile
+POST {{baseUrl}}/projects/{{createdProjectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="desenlazado.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/desenlazado.ifc
+--WebAppBoundary--
+
+### Capturar el file_id subido
+@uploadedFileId = {{uploadFile.response.body.file_id}}
+
+
+### 2. Listar archivos del proyecto (todos)
+GET {{baseUrl}}/projects/{{createdProjectId}}/files
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Listar solo IFC pendientes de procesar (el picker)
+GET {{baseUrl}}/projects/{{createdProjectId}}/files?file_type=ifc&processed=false
+Authorization: Bearer {{accessToken}}
+
+
+### 4. Ver/descargar el contenido de un archivo (inline, para el visor)
+GET {{baseUrl}}/files/{{uploadedFileId}}/content
+Authorization: Bearer {{accessToken}}
+
+
+### 5. Descargar forzando attachment
+GET {{baseUrl}}/files/{{uploadedFileId}}/content?download=true
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### MÓDULO DE METRADOS IFC
+### =========================================================================
+
+### 1. Procesar un IFC nuevo (multipart: sube + procesa en un solo paso)
+### Responde 202 casi al instante con status="processing" — el procesamiento
+### real sigue corriendo en background (puede tardar ~1 min con este archivo).
+# @name processIfcUpload
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="desenlazado.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/desenlazado.ifc
+--WebAppBoundary--
+
+### Capturar el ifc_file_id devuelto
+@processedIfcFileId = {{processIfcUpload.response.body.ifc_file_id}}
+
+
+### 2. Consultar el estado del procesamiento (polling)
+### Volvé a ejecutar este request cada pocos segundos hasta que
+### status pase de "processing" a "done" (o "error").
+GET {{baseUrl}}/ifc-files/{{processedIfcFileId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Procesar un archivo YA subido, por file_id (variante JSON, sin multipart)
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "file_id": {{uploadedFileId}}
+}
+
+
+### 4. Forzar reproceso de uno que ya terminó (done) — sin esto, el paso 3
+### de arriba repetido solo devuelve 200 con el estado actual, sin relanzar.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process?force=true
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "file_id": {{uploadedFileId}}
+}
+
+
+### 5. Caso de error: ni archivo (multipart) ni file_id en el body -> 400
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{}
+
+
+### 6. Caso de error: file_id de un archivo que no es .ifc -> 422
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "file_id": 99999
+}
 

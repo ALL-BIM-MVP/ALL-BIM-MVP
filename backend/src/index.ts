@@ -10,7 +10,9 @@ import routerProjectRoles from './routes/project-roles.routes.js';
 import routerProjectInvitations from './routes/project-invitations.routes.js';
 import routerProjectMembers from './routes/project-members.routes.js';
 import routerFiles, { fileContentRouter } from './routes/files.routes.js';
+import routerIfcMetrados, { ifcFilesRouter } from './routes/ifc-metrados.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
+import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
 const app = express();
 
 app.use(corsConfig);
@@ -27,12 +29,19 @@ app.use('/api/projects', routerProjectInvitations );
 app.use('/api/projects', routerProjectMembers );
 app.use('/api/projects', routerFiles );
 app.use('/api/files', fileContentRouter );
+app.use('/api/projects', routerIfcMetrados );
+app.use('/api/ifc-files', ifcFilesRouter );
 
 
 app.use(errorHandler)
 const PORT = Number(process.env.PORT) || 4000;
+
+// Cualquier ifc_files en status='processing' al arrancar es huérfano
+// (ningún proceso Node vivo lo está corriendo todavía) — se marca error
+// antes de aceptar tráfico nuevo, así queda reintentable.
+await recoverStaleProcessingRows();
+
 app.listen(PORT, () => {
   console.log(`\nServidor corriendo en http://localhost:${PORT}\n`);
-  
-});
 
+});

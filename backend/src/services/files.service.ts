@@ -39,8 +39,9 @@ const computeChecksum = (filePath : string) : Promise<string> => {
 };
 
 // Dueño del proyecto o miembro — mismo criterio para subir, listar y
-// descargar archivos, factorizado para no repetir la query.
-const assertProjectAccess = async (projectId : number, userId : number) : Promise<void> => {
+// descargar archivos, factorizado para no repetir la query. Exportada
+// porque ifc-metrados.service.ts la reusa tal cual.
+export const assertProjectAccess = async (projectId : number, userId : number) : Promise<void> => {
     const result = await pool.query(
         `SELECT 1 FROM projects p
             WHERE p.project_id = $1 AND (
