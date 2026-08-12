@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { uploadSingleFile } from '../middlewares/upload.midleware.js';
 import { getIfcFileStatusController, processIfcMetradosController } from '../controllers/ifc-metrados.controller.js';
+import { getPartidaElementsController, getPartidasTreeController } from '../controllers/metrado-partidas.controller.js';
 import { requireAuth, requireRolePrivileges } from '../middlewares/auth.middleware.js';
 import { ROLES } from '../constants/roles.js';
 
@@ -15,3 +16,12 @@ export default router;
 export const ifcFilesRouter = Router();
 
 ifcFilesRouter.get('/:ifcFileId', requireAuth, getIfcFileStatusController);
+
+// Árbol liviano (Resumido) — sin estructura de columnas, siempre los
+// mismos campos fijos.
+ifcFilesRouter.get('/:ifcFileId/partidas', requireAuth, getPartidasTreeController);
+
+// Detalle de una partida (Detallado) — agrupado por nivel/espacio/tag.
+// Todavía no hay sistema de plantillas: siempre usa el set de columnas
+// por defecto (ver comentario en ifc-metrados.schema.ts).
+ifcFilesRouter.post('/:ifcFileId/partidas/:partidaId/elements', requireAuth, getPartidaElementsController);

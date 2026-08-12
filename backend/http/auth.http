@@ -279,10 +279,10 @@ Authorization: Bearer {{accessToken}}
 Content-Type: multipart/form-data; boundary=WebAppBoundary
 
 --WebAppBoundary
-Content-Disposition: form-data; name="file"; filename="desenlazado.ifc"
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
 Content-Type: application/octet-stream
 
-< ../../processing/proceso-metrados-base/archives/desenlazado.ifc
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
 --WebAppBoundary--
 
 ### Capturar el ifc_file_id devuelto
@@ -333,4 +333,45 @@ Content-Type: application/json
 {
   "file_id": 99999
 }
+
+
+### =========================================================================
+### MÓDULO DE PARTIDAS (árbol + detalle)
+### (requiere que {{processedIfcFileId}} ya esté en status "done" — correr
+### primero "2. Consultar el estado del procesamiento" de arriba hasta
+### confirmarlo)
+### =========================================================================
+
+### 1. Árbol liviano de partidas (Resumido) — sin estructura de columnas
+# @name getPartidasTree
+GET {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas
+Authorization: Bearer {{accessToken}}
+
+
+### 2. Detalle de una partida (Detallado), agrupado por nivel/espacio/tag
+### ⚠️ partidaId es dinámico (depende del IFC que hayas procesado) — copiá
+### del JSON de arriba un "partida_id" que tenga "unit" y "element_count" > 0
+### (una hoja, no una carpeta) y reemplazalo acá.
+POST {{baseUrl}}/ifc-files/5/partidas/160/elements
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Mismo detalle, pero agrupando solo por tag (sin separar por nivel/espacio)
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/128/elements
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "group_by": ["tag"]
+}
+
+
+### 4. Caso de error: partida_id que no existe (o no pertenece a este ifc_file) -> 404
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/999999/elements
+Authorization: Bearer {{accessToken}}
+
+
+### 5. Caso de error: ifc_file_id inexistente -> 404
+GET {{baseUrl}}/ifc-files/999999/partidas
+Authorization: Bearer {{accessToken}}
 

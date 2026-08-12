@@ -168,10 +168,20 @@ CREATE INDEX idx_metrado_elements_partida ON metrado_elements (partida_id);
 -- ------------------------------------------------------------
 -- TOTALES PRECALCULADOS POR PARTIDA
 -- ------------------------------------------------------------
+-- Solo existe fila para partidas HOJA (unit IS NOT NULL en
+-- metrado_partidas) — las carpetas/categorías no tienen fila acá, no
+-- se precalcula ningún rollup hacia arriba (eso, si hace falta, se
+-- resuelve con una query aparte más adelante, no guardado).
+--
+-- No hay columna sub_total: la única noción de "subtotal" real del
+-- dominio es la de un GRUPO de elementos con el mismo tag/dimensiones
+-- (metrado de un elemento × cantidad de repeticiones), que es un
+-- concepto de la vista de detalle (agrupar metrado_elements por tag),
+-- no de esta tabla — no se puede precalcular acá sin la lógica de
+-- agrupamiento por tag, que todavía no existe.
 CREATE TABLE metrado_partida_totals (
     partida_id BIGINT PRIMARY KEY REFERENCES metrado_partidas(partida_id) ON DELETE CASCADE,
     element_count INT NOT NULL DEFAULT 0,
-    sub_total NUMERIC(18,6),
     total NUMERIC(18,6),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

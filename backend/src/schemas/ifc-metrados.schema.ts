@@ -21,3 +21,24 @@ export const ProcessIfcMetradosQuerySchema = z.object({
 });
 
 export type ProcessIfcMetradosQuery = z.infer<typeof ProcessIfcMetradosQuerySchema>;
+
+export const PartidaIdParamSchema = IfcFileIdParamSchema.extend({
+    partidaId: z.coerce.number(),
+});
+
+export type PartidaIdParam = z.infer<typeof PartidaIdParamSchema>;
+
+// Por ahora no hay sistema de plantillas (metrado_templates) armado —
+// el detalle de una partida siempre usa el set fijo de columnas de
+// metrado_elements, agrupado por estos 3 campos por defecto. Si el
+// cliente manda template_id/columns igual (adelantándose a cuando sí
+// exista), Zod los descarta en silencio en vez de fallar el request —
+// no rompe nada cuando se implemente de verdad.
+export const GROUP_BY_FIELDS = ["level_name", "space_name", "tag"] as const;
+export type GroupByField = (typeof GROUP_BY_FIELDS)[number];
+
+export const PartidaElementsBodySchema = z.object({
+    group_by: z.array(z.enum(GROUP_BY_FIELDS)).optional(),
+});
+
+export type PartidaElementsBody = z.infer<typeof PartidaElementsBodySchema>;
