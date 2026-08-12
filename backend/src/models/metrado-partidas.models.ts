@@ -75,9 +75,16 @@ export interface PartidaElementRow {
     level_name : string | null;
     space_name : string | null;
     tag : string | null;
+    // length/width/height = dimensiones BRUTAS de la caja envolvente
+    // (Largo/Ancho/Alto), sin prioridad revit.
     length : string | number | null;
     width : string | number | null;
     height : string | number | null;
+    // run_length = metrado "Longitud" (prioridad revit>geométrico) — NO
+    // es lo mismo que length, aunque el fallback geométrico use el
+    // mismo valor cuando revit no trae una IfcQuantityLength propia. Un
+    // elemento curvo puede tener run_length > length.
+    run_length : string | number | null;
     quantity : string | number | null;
     area : string | number | null;
     volume : string | number | null;
@@ -89,6 +96,7 @@ interface PartidaElementItem {
     express_id : number;
     name : string | null;
     length : number | null;
+    run_length : number | null;
     width : number | null;
     height : number | null;
     quantity : number | null;
@@ -102,11 +110,12 @@ export interface PartidaElementGroup {
     space_name : string | null;
     tag : string | null;
     element_count : number;
-    // Estos 7 campos son los de UN elemento representativo del grupo
+    // Estos 8 campos son los de UN elemento representativo del grupo
     // (no la suma) — ver comentario de groupPartidaElements.
+    length : number | null;
+    run_length : number | null;
     width : number | null;
     height : number | null;
-    length : number | null;
     quantity : number | null;
     area : number | null;
     volume : number | null;
@@ -132,6 +141,7 @@ const toElementItem = (row : PartidaElementRow) : PartidaElementItem => ({
     express_id: row.express_id,
     name: row.name,
     length: toNumberOrNull(row.length),
+    run_length: toNumberOrNull(row.run_length),
     width: toNumberOrNull(row.width),
     height: toNumberOrNull(row.height),
     quantity: toNumberOrNull(row.quantity),
@@ -142,10 +152,12 @@ const toElementItem = (row : PartidaElementRow) : PartidaElementItem => ({
 
 // Mismo criterio que ifc-processing-runner.ts (UNIT_TO_METRADO_KEY) —
 // qué metrado le corresponde mostrar a cada unidad de partida. Se repite
-// acá (4 líneas) en vez de importarlo del runner para no acoplar el
-// modelo de partidas al service de procesamiento.
+// acá (5 líneas) en vez de importarlo del runner para no acoplar el
+// modelo de partidas al service de procesamiento. 'm' -> run_length
+// (Longitud, el metrado real), NUNCA "length" (que es la dimensión
+// bruta Largo).
 const METRADO_KEY_POR_UNIDAD: Record<string, keyof PartidaElementItem> = {
-    m: "length",
+    m: "run_length",
     m2: "area",
     m3: "volume",
     kg: "weight",
@@ -156,26 +168,30 @@ const round4 = (value : string | number | null) : number => {
     return Math.round(n * 10000) / 10000;
 };
 
-// Clave de agrupamiento: SIEMPRE incluye las dimensiones (Largo/Ancho/
-// Alto, redondeadas) además de los campos pedidos en group_by. Mismo
-// tag pero medidas distintas NO es el mismo grupo — si no, el "valor
-// representativo de un solo elemento" que se usa más abajo no sería
-// válido para todo el grupo (caso real: un mismo tag con varios juegos
-// de medidas distintas en el mismo nivel/espacio, cada uno su propia
-// fila en el Excel de referencia).
+// Clave de agrupamiento: SIEMPRE incluye las dimensiones brutas (Largo/
+// Ancho/Alto, redondeadas) además de los campos pedidos en group_by.
+// Mismo tag pero medidas distintas NO es el mismo grupo — si no, el
+// "valor representativo de un solo elemento" que se usa más abajo no
+// sería válido para todo el grupo (caso real: un mismo tag con varios
+// juegos de medidas distintas en el mismo nivel/espacio, cada uno su
+// propia fila en el Excel de referencia). Usa las dimensiones brutas
+// (length/width/height), no run_length — dos elementos pueden compartir
+// caja envolvente pero tener una Longitud medida distinta (o viceversa),
+// lo que define si son "el mismo elemento repetido" es la geometría.
 const dimsKey = (row : PartidaElementRow) : string =>
     `${round4(row.length)}|${round4(row.width)}|${round4(row.height)}`;
 
 // Agrupa filas de elementos por los campos pedidos (nivel/espacio/tag,
 // por defecto los 3) + dimensiones. Elementos con el mismo tag y las
 // mismas medidas se asumen físicamente idénticos (misma familia/tipo
-// repetida) — por eso los 7 campos de metrado que se muestran por grupo
-// son los de UN solo elemento representativo, NO la suma de todos
-// (sumarlos duplicaría el valor real — 9 barras de 2.14m no sumaban
-// "19.28m" de largo, eso no significa nada). Lo único que sí se
-// multiplica por la cantidad es sub_total, y solo con el metrado que
-// corresponde a la unidad de la partida (m→length, m2→area, m3→volume,
-// kg→weight, resto→quantity) — igual que en el Excel de referencia.
+// repetida) — por eso los 8 campos de metrado/dimensión que se muestran
+// por grupo son los de UN solo elemento representativo, NO la suma de
+// todos (sumarlos duplicaría el valor real — 9 barras de 2.14m no
+// sumaban "19.28m" de longitud, eso no significa nada). Lo único que sí
+// se multiplica por la cantidad es sub_total, y solo con el metrado que
+// corresponde a la unidad de la partida (m→run_length, m2→area,
+// m3→volume, kg→weight, resto→quantity) — igual que en el Excel de
+// referencia.
 export const groupPartidaElements = (
     rows : PartidaElementRow[], groupBy : readonly GroupByField[], partidaUnit : string | null
 ) : PartidaElementGroup[] => {
@@ -201,6 +217,7 @@ export const groupPartidaElements = (
             tag: groupBy.includes("tag") ? primero.tag : null,
             element_count: elementos.length,
             length: representativo.length,
+            run_length: representativo.run_length,
             width: representativo.width,
             height: representativo.height,
             quantity: representativo.quantity,

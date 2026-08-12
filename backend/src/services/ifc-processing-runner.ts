@@ -130,7 +130,11 @@ interface PipelinePartida {
 interface PipelineMetradoElement {
     partida_code: string;
     express_id: number;
+    // length/width/height = dimensiones brutas de la caja envolvente.
+    // run_length = metrado "Longitud" (prioridad revit>geométrico) —
+    // NO es lo mismo que length, ver comentario en database/schema.sql.
     length: number | null;
+    run_length: number | null;
     width: number | null;
     height: number | null;
     quantity: number | null;
@@ -152,7 +156,7 @@ interface PipelineResult {
 }
 
 const UNIT_TO_METRADO_KEY: Partial<Record<string, keyof PipelineMetradoElement>> = {
-    m: "length",
+    m: "run_length", // el metrado de una partida 'm' es la Longitud, no la dimensión bruta "length"
     m2: "area",
     m3: "volume",
     kg: "weight",
@@ -292,9 +296,9 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
             const elementId = expressIdToElementId.get(me.express_id);
             if (partidaId === undefined || elementId === undefined) continue;
             await client.query(
-                `INSERT INTO metrado_elements (partida_id, element_id, length, width, height, quantity, area, volume, weight)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-                [partidaId, elementId, me.length, me.width, me.height, me.quantity, me.area, me.volume, me.weight]
+                `INSERT INTO metrado_elements (partida_id, element_id, length, run_length, width, height, quantity, area, volume, weight)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+                [partidaId, elementId, me.length, me.run_length, me.width, me.height, me.quantity, me.area, me.volume, me.weight]
             );
         }
 

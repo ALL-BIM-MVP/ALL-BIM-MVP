@@ -352,12 +352,12 @@ Authorization: Bearer {{accessToken}}
 ### ⚠️ partidaId es dinámico (depende del IFC que hayas procesado) — copiá
 ### del JSON de arriba un "partida_id" que tenga "unit" y "element_count" > 0
 ### (una hoja, no una carpeta) y reemplazalo acá.
-POST {{baseUrl}}/ifc-files/5/partidas/160/elements
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/160/elements
 Authorization: Bearer {{accessToken}}
 
 
 ### 3. Mismo detalle, pero agrupando solo por tag (sin separar por nivel/espacio)
-POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/128/elements
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/162/elements
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -373,5 +373,122 @@ Authorization: Bearer {{accessToken}}
 
 ### 5. Caso de error: ifc_file_id inexistente -> 404
 GET {{baseUrl}}/ifc-files/999999/partidas
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### MÓDULO DE PLANTILLAS (metrado_templates)
+### No son por proyecto: del sistema (is_system=true, cualquiera lee) o
+### personales (created_by=dueño, solo el dueño lee/edita). ⚠️ el
+### template_id=6 de abajo es el de la "Detallado (default)" sembrada en
+### system-data.sql EN ESTA BD LOCAL — si reseteaste la BD puede haber
+### cambiado, and confirmá con la request 1 de abajo antes de asumirlo.
+### =========================================================================
+
+### 1. Listar plantillas visibles (default: propias + del sistema)
+GET {{baseUrl}}/templates
+Authorization: Bearer {{accessToken}}
+
+### 1b. Solo las del sistema
+GET {{baseUrl}}/templates?scope=system
+Authorization: Bearer {{accessToken}}
+
+### 1c. Solo las propias
+GET {{baseUrl}}/templates?scope=mine
+Authorization: Bearer {{accessToken}}
+
+
+### 2. Traer una plantilla completa (anidada: sets + columnas)
+GET {{baseUrl}}/templates/6
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Guardar una plantilla nueva (siempre personal, nunca pisa la del sistema)
+# @name createTemplate
+POST {{baseUrl}}/templates
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Mi plantilla de prueba",
+  "description": "template armado desde auth.http",
+  "sets": [
+    {
+      "name": "PRINCIPAL",
+      "sort_order": 1,
+      "columns": [
+        { "name": "ITEM", "source_type": "builtin", "builtin_field": "code", "column_order": 1 },
+        { "name": "Longitud", "source_type": "builtin", "builtin_field": "run_length", "column_order": 2 },
+        { "name": "Kg.", "source_type": "builtin", "builtin_field": "weight", "column_order": 3 }
+      ]
+    }
+  ]
+}
+
+### Capturar el template_id recién creado (para las requests 4 y 5)
+@myTemplateId = {{createTemplate.response.body.template_id}}
+
+
+### 4. Guardar cambios de una plantilla propia (reemplaza TODA la
+### estructura de sets+columnas, no es un merge/diff)
+PUT {{baseUrl}}/templates/{{myTemplateId}}/columns
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sets": [
+    {
+      "name": "DIMENSIONES",
+      "sort_order": 1,
+      "columns": [
+        { "name": "Largo", "source_type": "builtin", "builtin_field": "length", "column_order": 1 },
+        { "name": "Ancho", "source_type": "builtin", "builtin_field": "width", "column_order": 2 }
+      ]
+    }
+  ]
+}
+
+
+### 5. Ocultar/mostrar una columna puntual (⚠️ copiá un template_column_id
+### real de la respuesta de la request 4 y reemplazalo acá)
+PATCH {{baseUrl}}/templates/{{myTemplateId}}/columns/1
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "is_visible": false
+}
+
+
+### 6. Caso de error: editar la plantilla del sistema -> 404 (nunca editable por acá)
+PUT {{baseUrl}}/templates/6/columns
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sets": [
+    { "name": "X", "sort_order": 1, "columns": [
+      { "name": "Y", "source_type": "builtin", "builtin_field": "code", "column_order": 1 }
+    ]}
+  ]
+}
+
+
+### 7. Caso de error: builtin_field que no existe en el catálogo -> 400
+PUT {{baseUrl}}/templates/{{myTemplateId}}/columns
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "sets": [
+    { "name": "X", "sort_order": 1, "columns": [
+      { "name": "Y", "source_type": "builtin", "builtin_field": "no_existe", "column_order": 1 }
+    ]}
+  ]
+}
+
+
+### 8. Caso de error: template_id inexistente -> 404
+GET {{baseUrl}}/templates/999999
 Authorization: Bearer {{accessToken}}
 

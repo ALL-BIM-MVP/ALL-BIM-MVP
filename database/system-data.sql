@@ -35,37 +35,96 @@ VALUES
 -- Catálogo fijo de campos "de fábrica" que cualquier plantilla de
 -- metrado puede usar como columna (ver metrado_template_columns).
 -- No depende de ningún IFC procesado ni de ningún proyecto.
+--
+-- Cada builtin_field tiene que ser un campo que de verdad exista en la
+-- respuesta de POST /ifc-files/:id/partidas/:partidaId/elements — si
+-- no, una plantilla podría pedir una columna que el backend nunca
+-- puede resolver. Por eso son exactamente los campos de
+-- PartidaElementGroup (backend/src/models/metrado-partidas.models.ts):
+-- level_name/space_name/tag + los 8 de metrado_elements (length,
+-- run_length, width, height, quantity, area, volume, weight) +
+-- sub_total/total (calculados, no columnas propias de ninguna tabla).
+-- code/description/unit vienen de metrado_partidas.
+--
+-- length ("Largo") es la dimensión BRUTA de la caja envolvente — NO es
+-- el metrado. run_length ("Longitud") sí es el metrado (prioridad
+-- revit>geométrico, ver processing/ifc/metrados.py) — son conceptos
+-- distintos a propósito: un elemento curvo (tubería, conducto, acero
+-- doblado) puede medir más por su recorrido real que por su caja
+-- envolvente en línea recta. quantity SÍ sigue siendo el único campo
+-- para "Und." (el metrado de las partidas 'und'), no hace falta uno
+-- aparte ahí.
 INSERT INTO builtin_field_catalog
     (builtin_field, label_default, data_type, is_aggregate, applies_to_group, sort_order) VALUES
-    ('code',             'ITEM',        'text',    FALSE, 'identificacion', 1),
-    ('description',      'DESCRIPCIÓN', 'text',    FALSE, 'identificacion', 2),
-    ('unit',             'UND',         'text',    FALSE, 'identificacion', 3),
-    ('level_name',       'NIVEL',       'text',    FALSE, 'identificacion', 4),
-    ('space_name',       'ESPACIO',     'text',    FALSE, 'identificacion', 5),
-    ('tag',              'TAG',         'text',    FALSE, 'identificacion', 6),
-    ('length',           'Largo',       'numeric', FALSE, 'dimensiones',    1),
-    ('width',            'Ancho',       'numeric', FALSE, 'dimensiones',    2),
-    ('height',           'Altura',      'numeric', FALSE, 'dimensiones',    3),
-    ('quantity',         'Cant.',       'numeric', FALSE, 'metrado',        1),
-    ('length_total',     'Lon.',        'numeric', FALSE, 'metrado',        2),
-    ('area_total',       'Área',        'numeric', FALSE, 'metrado',        3),
-    ('volume_total',     'Vol.',        'numeric', FALSE, 'metrado',        4),
-    ('weight_total',     'Kg.',         'numeric', FALSE, 'metrado',        5),
-    ('unit_count_total', 'Und.',        'numeric', FALSE, 'metrado',        6),
-    ('sub_total',        'Sub Total',   'numeric', TRUE,  'totales',        1),
-    ('total',            'TOTAL',       'numeric', TRUE,  'totales',        2);
+    ('code',        'ITEM',        'text',    FALSE, 'identificacion', 1),
+    ('description', 'DESCRIPCIÓN', 'text',    FALSE, 'identificacion', 2),
+    ('unit',        'UND',         'text',    FALSE, 'identificacion', 3),
+    ('level_name',  'NIVEL',       'text',    FALSE, 'identificacion', 4),
+    ('space_name',  'ESPACIO',     'text',    FALSE, 'identificacion', 5),
+    ('tag',         'TAG',         'text',    FALSE, 'identificacion', 6),
+    ('length',      'Largo',       'numeric', FALSE, 'dimensiones',    1),
+    ('width',       'Ancho',       'numeric', FALSE, 'dimensiones',    2),
+    ('height',      'Altura',      'numeric', FALSE, 'dimensiones',    3),
+    ('run_length',  'Longitud',    'numeric', FALSE, 'metrado',        1),
+    ('quantity',    'Cant.',       'numeric', FALSE, 'metrado',        2),
+    ('area',        'Área',        'numeric', FALSE, 'metrado',        3),
+    ('volume',      'Vol.',        'numeric', FALSE, 'metrado',        4),
+    ('weight',      'Kg.',         'numeric', FALSE, 'metrado',        5),
+    ('sub_total',   'Sub Total',   'numeric', TRUE,  'totales',        1),
+    ('total',       'TOTAL',       'numeric', TRUE,  'totales',        2);
 
 
 -- ------------------------------------------------------------
 -- PLANTILLA DE METRADO "DEL SISTEMA" (metrado_templates.is_system)
 -- ------------------------------------------------------------
--- Acá va, a futuro, el INSERT de la plantilla base que trae el
--- producto de fábrica (is_system=true, is_default=true) con sus
--- metrado_template_sets / metrado_template_columns. Es un ejemplo
--- exacto de lo que menciona el header de este archivo: cambia según
--- la organización (pueden crear las suyas), pero la base la define el
--- sistema — no es dato de prueba descartable como seed-test.sql.
---
--- Todavía no se agrega acá porque no está definida la norma/plantilla
--- base real (eso depende de norma.json, ver processing/). Cuando
--- exista, va en este archivo, no en seed-test.sql.
+-- Sin esto, GET /templates/{id} nunca encuentra una fila con
+-- is_default=true en una base recién creada, y el frontend no tiene
+-- qué auto-cargar al entrar a la sección de metrados. created_by=NULL
+-- identifica que es del sistema, no de un usuario (coherente con
+-- is_system=TRUE). Replica el layout "Detallado" del Excel de
+-- referencia, con los builtin_field reales de arriba (no los _total
+-- especulativos de una ronda de diseño anterior a que existiera el
+-- schema real). Idempotente: si ya hay una default, no hace nada.
+DO $$
+DECLARE
+    v_template_id BIGINT;
+    v_set_identificacion BIGINT;
+    v_set_dimensiones BIGINT;
+    v_set_metrado BIGINT;
+BEGIN
+    IF EXISTS (SELECT 1 FROM metrado_templates WHERE is_default) THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO metrado_templates (name, description, is_system, is_default, created_by)
+    VALUES ('Detallado (default)', 'Plantilla estándar del sistema, replica el layout del Excel de referencia.', TRUE, TRUE, NULL)
+    RETURNING template_id INTO v_template_id;
+
+    INSERT INTO metrado_template_sets (template_id, name, sort_order)
+    VALUES (v_template_id, 'IDENTIFICACION', 1) RETURNING template_set_id INTO v_set_identificacion;
+
+    INSERT INTO metrado_template_sets (template_id, name, sort_order)
+    VALUES (v_template_id, 'DIMENSIONES', 2) RETURNING template_set_id INTO v_set_dimensiones;
+
+    INSERT INTO metrado_template_sets (template_id, name, sort_order)
+    VALUES (v_template_id, 'METRADO', 3) RETURNING template_set_id INTO v_set_metrado;
+
+    INSERT INTO metrado_template_columns (template_set_id, name, source_type, builtin_field, column_order) VALUES
+        (v_set_identificacion, 'ITEM',        'builtin', 'code',        1),
+        (v_set_identificacion, 'DESCRIPCIÓN', 'builtin', 'description', 2),
+        (v_set_identificacion, 'UND',         'builtin', 'unit',        3);
+
+    INSERT INTO metrado_template_columns (template_set_id, name, source_type, builtin_field, column_order) VALUES
+        (v_set_dimensiones, 'Largo',  'builtin', 'length', 1),
+        (v_set_dimensiones, 'Ancho',  'builtin', 'width',  2),
+        (v_set_dimensiones, 'Altura', 'builtin', 'height', 3);
+
+    INSERT INTO metrado_template_columns (template_set_id, name, source_type, builtin_field, column_order) VALUES
+        (v_set_metrado, 'Longitud',  'builtin', 'run_length', 1),
+        (v_set_metrado, 'Cant.',     'builtin', 'quantity',   2),
+        (v_set_metrado, 'Área',      'builtin', 'area',       3),
+        (v_set_metrado, 'Vol.',      'builtin', 'volume',     4),
+        (v_set_metrado, 'Kg.',       'builtin', 'weight',     5),
+        (v_set_metrado, 'Sub Total', 'builtin', 'sub_total',  6),
+        (v_set_metrado, 'TOTAL',     'builtin', 'total',      7);
+END $$;

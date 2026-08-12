@@ -130,7 +130,14 @@ def normalizar(elementos, norma_index, schema_version):
         metrado_elements.append({
             "partida_code": elem["codigo_reporte"],
             "express_id": express_id,
-            "length": met["lon"],
+            # length/width/height = dimensiones BRUTAS de la caja
+            # envolvente (sin prioridad revit) — igual tratamiento para
+            # las 3. run_length = metrado "Longitud" (met["lon"], con
+            # prioridad revit>geométrico) — NO es lo mismo que length,
+            # aunque el fallback geométrico de met["lon"] use el mismo
+            # dims["Largo"] cuando revit no trae un valor propio.
+            "length": dims.get("Largo"),
+            "run_length": met["lon"],
             "width": dims.get("Ancho"),
             "height": dims.get("Alto"),
             "quantity": met["count"],
