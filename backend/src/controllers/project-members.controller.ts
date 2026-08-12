@@ -1,9 +1,12 @@
 import type { Request, Response } from "express";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../models/errors/app-error.js";
-import type { ProjectMemberFull } from "../models/project-members.models.js";
+import type { CurrentUserProjectRole, ProjectMemberFull, ProjectMemberListItem } from "../models/project-members.models.js";
 import { AUTH_ERRORS } from "../models/errors/auth.errors.js";
-import { getListProjectMembersService, removeProjectMemberService, updateProjectMemberRoleService } from "../services/project-members.service.js";
+import {
+    getCurrentUserProjectRoleService, getListProjectMembersService,
+    removeProjectMemberService, updateProjectMemberRoleService
+} from "../services/project-members.service.js";
 import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 import { ProjectIdParamSchema } from "../schemas/projects.schema.js";
 import { ProjectMemberIdParamSchema, ProjectMemberUserParamSchema, UpdateProjectMemberRoleSchema } from "../schemas/project-members.schema.js";
@@ -21,9 +24,27 @@ export const getListProjectMembersController = asyncHandler (
             throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
         }
 
-        const membersOfProject : ProjectMemberFull[] = await getListProjectMembersService(req.user, projectParam.data);
+        const membersOfProject : ProjectMemberListItem[] = await getListProjectMembersService(req.user, projectParam.data);
 
         res.status(200).json(membersOfProject);
+});
+
+export const getCurrentUserProjectRoleController = asyncHandler (
+    async (req : Request, res : Response) : Promise<void> =>{
+
+        if (!req.user) {
+            throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+        }
+
+        const projectParam = ProjectIdParamSchema.safeParse(req.params);
+
+        if (!projectParam.success) {
+            throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+        }
+
+        const userRole : CurrentUserProjectRole = await getCurrentUserProjectRoleService(req.user, projectParam.data);
+
+        res.status(200).json(userRole);
 });
 
 export const updateProjectMemberRoleController = asyncHandler (

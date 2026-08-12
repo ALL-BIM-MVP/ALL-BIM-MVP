@@ -2,17 +2,21 @@ import pool from "../db/database.js";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { ProjectIdParam } from "../schemas/projects.schema.js";
 import type { ProjectMemberIdParam, ProjectMemberUserParam, UpdateProjectMemberRoleData } from "../schemas/project-members.schema.js";
-import { transformMemberToFull, type ProjectMemberFull, type ProjectMemberRow } from "../models/project-members.models.js";
+import {
+    transformMemberToFull, transformMemberToListItem, transformToCurrentUserProjectRole,
+    type CurrentUserProjectRole, type ProjectMemberFull, type ProjectMemberListItem, type ProjectMemberRow
+} from "../models/project-members.models.js";
 import { AppError } from "../models/errors/app-error.js";
 import { PROJECT_MEMBER_ERRORS } from "../models/errors/project-members.errors.js";
+import { PROJECT_INVITATION_ERRORS } from "../models/errors/project-invitations.errors.js";
 
 export const getListProjectMembersService = async (
     {user_id : ownerId} : DecodedToken, { projectId } : ProjectIdParam
-) : Promise<ProjectMemberFull[]> => {
+) : Promise<ProjectMemberListItem[]> => {
 
-    const result = await pool.query<ProjectMemberRow>(
-        `SELECT pm.project_member_id, pm.joined_at, pm.project_id,
-            u.user_id, u.name AS user_name, u.email AS user_email,
+    const result = await pool.query<ProjectMemberListItem>(
+        `SELECT pm.project_member_id,
+            u.user_id, u.name AS user_name, u.email,
             pr.project_role_id, pr.name AS project_role_name
         FROM project_members pm
         INNER JOIN projects p
@@ -26,7 +30,37 @@ export const getListProjectMembersService = async (
         [projectId, ownerId]
     );
 
-    return result.rows.map( pm => transformMemberToFull(pm));
+    return result.rows.map( pm => transformMemberToListItem(pm));
+};
+
+// Rol del usuario autenticado dentro de un proyecto — dueño o miembro,
+// para que el frontend sepa qué puede hacer sin tener que adivinarlo
+// a partir del listado completo de miembros (que además es owner-only).
+export const getCurrentUserProjectRoleService = async (
+    { user_id : userId } : DecodedToken, { projectId } : ProjectIdParam
+) : Promise<CurrentUserProjectRole> => {
+
+    const result = await pool.query<{ is_owner : boolean; role_id : number | null; role_name : string | null }>(
+        `SELECT
+            (p.owner_id = $2) AS is_owner,
+            pr.project_role_id AS role_id,
+            pr.name AS role_name
+        FROM projects p
+        LEFT JOIN project_members pm
+            ON pm.project_id = p.project_id AND pm.user_id = $2
+        LEFT JOIN project_roles pr
+            ON pr.project_role_id = pm.project_role_id
+        WHERE p.project_id = $1
+            AND (p.owner_id = $2 OR pm.user_id = $2)
+        LIMIT 1`,
+        [projectId, userId]
+    );
+
+    const row = result.rows[0];
+
+    if (!row) throw new AppError(PROJECT_INVITATION_ERRORS.UNAUTHORIZED);
+
+    return transformToCurrentUserProjectRole(row);
 };
 
 export const updateProjectMemberRoleService = async (
