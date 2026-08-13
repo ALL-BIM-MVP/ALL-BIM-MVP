@@ -1,5 +1,6 @@
 import z from 'zod';
 import { optionalBooleanFlag } from './file.schema.js';
+import { TemplateColumnInputSchema } from './templates.schema.js';
 
 export const IfcFileIdParamSchema = z.object({
     ifcFileId: z.coerce.number(),
@@ -28,17 +29,25 @@ export const PartidaIdParamSchema = IfcFileIdParamSchema.extend({
 
 export type PartidaIdParam = z.infer<typeof PartidaIdParamSchema>;
 
-// Por ahora no hay sistema de plantillas (metrado_templates) armado —
-// el detalle de una partida siempre usa el set fijo de columnas de
-// metrado_elements, agrupado por estos 3 campos por defecto. Si el
-// cliente manda template_id/columns igual (adelantándose a cuando sí
-// exista), Zod los descarta en silencio en vez de fallar el request —
-// no rompe nada cuando se implemente de verdad.
 export const GROUP_BY_FIELDS = ["level_name", "space_name", "tag"] as const;
 export type GroupByField = (typeof GROUP_BY_FIELDS)[number];
 
+// template_id y columns son mutuamente excluyentes — los dos apuntan a
+// "qué columnas de propiedad IFC hay que resolver", uno por referencia
+// (una plantilla ya guardada) y el otro inline (la "plantilla en
+// ejecución" que el frontend arma en memoria sin guardar todavía). Las
+// columnas "builtin" de cualquiera de los dos NO necesitan resolución:
+// ya son exactamente los campos fijos que este endpoint siempre
+// devuelve (ver metrado-partidas.models.ts) — lo único que hay que
+// resolver de verdad son las "ifc_property" (ver
+// metrado-partidas.service.ts, resolvePropertyRefs/resolvePropertyValues).
 export const PartidaElementsBodySchema = z.object({
     group_by: z.array(z.enum(GROUP_BY_FIELDS)).optional(),
-});
+    template_id: z.coerce.number().optional(),
+    columns: z.array(TemplateColumnInputSchema).optional(),
+}).refine(
+    (body) => !(body.template_id !== undefined && body.columns !== undefined),
+    { message: "No se puede mandar template_id y columns al mismo tiempo — elegí uno.", path: ["columns"] }
+);
 
 export type PartidaElementsBody = z.infer<typeof PartidaElementsBodySchema>;

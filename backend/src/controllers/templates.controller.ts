@@ -6,11 +6,12 @@ import {
     CreateTemplateBodySchema, ListTemplatesQuerySchema, TemplateColumnIdParamSchema,
     TemplateIdParamSchema, ToggleColumnVisibilityBodySchema, UpdateTemplateColumnsBodySchema
 } from "../schemas/templates.schema.js";
+import { IfcFileIdParamSchema } from "../schemas/ifc-metrados.schema.js";
 import {
-    createTemplateService, getTemplateByIdService, listTemplatesService,
+    createTemplateService, getAvailableColumnsService, getTemplateByIdService, listTemplatesService,
     toggleTemplateColumnVisibilityService, updateTemplateColumnsService
 } from "../services/templates.service.js";
-import type { TemplateColumn, TemplateFull, TemplateRow } from "../models/templates.models.js";
+import type { AvailableColumnsCatalog, TemplateColumn, TemplateFull, TemplateRow } from "../models/templates.models.js";
 import type { Request, Response } from "express";
 
 
@@ -114,4 +115,25 @@ export const toggleTemplateColumnVisibilityController = asyncHandler (
         const column : TemplateColumn = await toggleTemplateColumnVisibilityService(req.user, params.data, body.data);
 
         res.status(200).json(column);
+});
+
+// Mapea a GET /ifc-files/:ifcFileId/available-columns (se monta en
+// ifcFilesRouter, no en el router de /api/templates) — vive acá porque
+// el catálogo que arma es 100% del dominio de plantillas.
+export const getAvailableColumnsController = asyncHandler (
+    async (req : Request, res : Response) : Promise<void> =>{
+
+        if (!req.user) {
+            throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+        }
+
+        const params = IfcFileIdParamSchema.safeParse(req.params);
+
+        if (!params.success) {
+            throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+        }
+
+        const catalog : AvailableColumnsCatalog = await getAvailableColumnsService(req.user, params.data);
+
+        res.status(200).json(catalog);
 });

@@ -37,6 +37,42 @@ export interface TemplateFull extends TemplateRow {
     sets : TemplateSet[];
 };
 
+// Para GET /ifc-files/:id/available-columns — el catálogo con el que el
+// frontend arma/edita columnas de plantilla "en vivo" para un IFC dado:
+// los builtin (fijos, iguales para cualquier archivo) + las
+// property_set/property_name que ESE archivo realmente trae (source_type
+// "ifc_property" en metrado_template_columns).
+export interface BuiltinFieldCatalogRow {
+    builtin_field : string;
+    label_default : string;
+    data_type : "text" | "numeric" | "integer";
+    is_aggregate : boolean;
+    applies_to_group : "identificacion" | "dimensiones" | "metrado" | "totales";
+    sort_order : number;
+};
+
+export interface IfcPropertyCatalogRow {
+    property_set : string;
+    property_name : string;
+    data_type : string | null;
+};
+
+export interface AvailableColumnsCatalog {
+    builtin : BuiltinFieldCatalogRow[];
+    ifc_properties : IfcPropertyCatalogRow[];
+};
+
+// Lo que necesita metrado-partidas.service.ts de una plantilla guardada
+// para resolver el detalle de una partida (POST .../elements con
+// template_id): solo las columnas source_type='ifc_property', con su
+// "name" de display — las builtin no se piden acá porque no necesitan
+// resolución (ver comentario en ifc-metrados.schema.ts).
+export interface TemplatePropertyColumnRef {
+    name : string;
+    property_set_name : string;
+    property_name : string;
+};
+
 // Arma sets + columnas anidados a partir de las dos listas planas —
 // mismo patrón que buildPartidaTree (metrado-partidas.models.ts).
 // Incluye columnas con is_visible=false a propósito (el caller nunca

@@ -376,13 +376,73 @@ GET {{baseUrl}}/ifc-files/999999/partidas
 Authorization: Bearer {{accessToken}}
 
 
+### 6. Catálogo de columnas disponibles para ESTE ifc_file (builtin fijos
+### + property_set/property_name que este archivo realmente trajo) — es
+### lo que arma la UI de "agregar columna" al editar/armar una plantilla.
+### Ver MÓDULO DE PLANTILLAS más abajo para el resto del CRUD de plantillas.
+GET {{baseUrl}}/ifc-files/{{processedIfcFileId}}/available-columns
+Authorization: Bearer {{accessToken}}
+
+
+### 7. Detalle CON columnas de propiedad IFC resueltas — "columns" inline
+### (la "plantilla en ejecución" armada en memoria, sin guardar). ⚠️ copiá
+### un property_set/property_name real de la respuesta del punto 6 y
+### reemplazalo acá (dejé "" como property_set porque en el archivo de
+### prueba local las propiedades vienen sueltas, sin Pset).
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/162/elements
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "columns": [
+    { "name": "ITEM", "source_type": "builtin", "builtin_field": "code", "column_order": 1 },
+    { "name": "Ancho (prop)", "source_type": "ifc_property", "property_set_name": "", "property_name": "ANCHURA", "column_order": 2 }
+  ]
+}
+
+
+### 8. Mismo detalle, pero resolviendo las columnas de UNA PLANTILLA YA
+### GUARDADA (template_id) en vez de mandarlas inline — mutuamente
+### excluyente con "columns". ⚠️ templateId dinámico, ver MÓDULO DE
+### PLANTILLAS más abajo para conseguir uno (tiene que tener al menos
+### una columna source_type="ifc_property" para que se note el efecto).
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/162/elements
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "template_id": 6
+}
+
+
+### 9. Caso de error: template_id y columns juntos -> 400 (elegí uno)
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/162/elements
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "template_id": 6,
+  "columns": []
+}
+
+
+### 10. Caso de error: template_id que no existe (o no es tuyo ni del sistema) -> 404
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/partidas/162/elements
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "template_id": 999999
+}
+
+
 ### =========================================================================
 ### MÓDULO DE PLANTILLAS (metrado_templates)
 ### No son por proyecto: del sistema (is_system=true, cualquiera lee) o
 ### personales (created_by=dueño, solo el dueño lee/edita). ⚠️ el
 ### template_id=6 de abajo es el de la "Detallado (default)" sembrada en
 ### system-data.sql EN ESTA BD LOCAL — si reseteaste la BD puede haber
-### cambiado, and confirmá con la request 1 de abajo antes de asumirlo.
+### cambiado, confirmá con la request 1 de abajo antes de asumirlo.
 ### =========================================================================
 
 ### 1. Listar plantillas visibles (default: propias + del sistema)
@@ -399,7 +459,7 @@ Authorization: Bearer {{accessToken}}
 
 
 ### 2. Traer una plantilla completa (anidada: sets + columnas)
-GET {{baseUrl}}/templates/6
+GET {{baseUrl}}/templates/1
 Authorization: Bearer {{accessToken}}
 
 
@@ -432,6 +492,7 @@ Content-Type: application/json
 ### 4. Guardar cambios de una plantilla propia (reemplaza TODA la
 ### estructura de sets+columnas, no es un merge/diff)
 PUT {{baseUrl}}/templates/{{myTemplateId}}/columns
+
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 

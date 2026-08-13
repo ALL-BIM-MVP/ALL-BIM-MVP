@@ -17,7 +17,15 @@ const BuiltinColumnInputSchema = z.object({
 const IfcPropertyColumnInputSchema = z.object({
     name: z.string().min(1),
     source_type: z.literal("ifc_property"),
-    property_set_name: z.string().min(1),
+    // property_set_name puede ser "" (string vacío) a propósito — es un
+    // caso real, no inválido: pasa cuando el IFC tiene la propiedad
+    // suelta, sin agruparla bajo ningún Pset (ver GET
+    // /ifc-files/:id/available-columns). El CHECK de la tabla real
+    // (metrado_template_columns) solo exige NOT NULL, no longitud
+    // mínima — este schema tiene que espejar exactamente eso, si no
+    // hay propiedades legítimas que nunca se pueden referenciar en
+    // ninguna plantilla.
+    property_set_name: z.string(),
     property_name: z.string().min(1),
     column_order: z.coerce.number(),
     is_visible: z.boolean().optional(),

@@ -7,9 +7,13 @@ import type {
     CreateTemplateBody, ListTemplatesQuery, TemplateColumnIdParam, TemplateIdParam,
     ToggleColumnVisibilityBody, UpdateTemplateColumnsBody
 } from "../schemas/templates.schema.js";
+import type { IfcFileIdParam } from "../schemas/ifc-metrados.schema.js";
 import {
-    buildTemplateSets, type TemplateColumn, type TemplateColumnRow, type TemplateFull, type TemplateRow, type TemplateSetRow
+    type AvailableColumnsCatalog, buildTemplateSets, type BuiltinFieldCatalogRow, type IfcPropertyCatalogRow,
+    type TemplateColumn, type TemplateColumnRow, type TemplateFull, type TemplatePropertyColumnRef,
+    type TemplateRow, type TemplateSetRow
 } from "../models/templates.models.js";
+import { assertIfcFileAccess } from "./ifc-metrados.service.js";
 
 const UNIQUE_VIOLATION = "23505";
 const FOREIGN_KEY_VIOLATION = "23503";
@@ -272,4 +276,64 @@ export const toggleTemplateColumnVisibilityService = async (
     } finally {
         client.release();
     }
+};
+
+// Catálogo con el que el frontend arma/edita columnas para un IFC
+// puntual: los builtin (fijos, no dependen del archivo) + las
+// property_set/property_name que ESE ifc_file realmente tiene en
+// ifc_properties (quedaron ahí durante el procesamiento — ver
+// ifc-processing-runner.ts). No filtra por plantilla ni por usuario,
+// solo requiere acceso al proyecto dueño del archivo.
+export const getAvailableColumnsService = async (
+    user : DecodedToken, { ifcFileId } : IfcFileIdParam
+) : Promise<AvailableColumnsCatalog> => {
+
+    await assertIfcFileAccess(ifcFileId, user.user_id);
+
+    const builtinResult = await pool.query<BuiltinFieldCatalogRow>(
+        `SELECT builtin_field, label_default, data_type, is_aggregate, applies_to_group, sort_order
+        FROM builtin_field_catalog
+        ORDER BY applies_to_group, sort_order`
+    );
+
+    const propertiesResult = await pool.query<IfcPropertyCatalogRow>(
+        `SELECT property_set, property_name, data_type
+        FROM ifc_properties
+        WHERE ifc_file_id = $1
+        ORDER BY property_set, property_name`,
+        [ifcFileId]
+    );
+
+    return { builtin: builtinResult.rows, ifc_properties: propertiesResult.rows };
+};
+
+// Usado por metrado-partidas.service.ts (POST .../elements con
+// template_id) para resolver qué columnas de propiedad IFC hay que
+// pivotear. Solo trae las 'ifc_property' — las 'builtin' no necesitan
+// resolución, ya son campos fijos de la respuesta (ver comentario en
+// ifc-metrados.schema.ts). Dos queries en vez de un JOIN con el mismo
+// chequeo de acceso de siempre (is_system OR created_by) porque si
+// solo filtrara por source_type, un template_id inexistente o ajeno
+// devolvería [] en silencio en vez de un 404 — indistinguible de "esta
+// plantilla no tiene columnas de propiedad".
+export const getTemplatePropertyColumnsService = async (
+    user : DecodedToken, templateId : number
+) : Promise<TemplatePropertyColumnRef[]> => {
+
+    const existsResult = await pool.query(
+        `SELECT 1 FROM metrado_templates WHERE template_id = $1 AND (is_system = true OR created_by = $2)`,
+        [templateId, user.user_id]
+    );
+
+    if (existsResult.rowCount === 0) throw new AppError(TEMPLATE_ERRORS.NOT_FOUND);
+
+    const result = await pool.query<TemplatePropertyColumnRef>(
+        `SELECT c.name, c.property_set_name, c.property_name
+        FROM metrado_template_columns c
+        INNER JOIN metrado_template_sets s USING(template_set_id)
+        WHERE s.template_id = $1 AND c.source_type = 'ifc_property'`,
+        [templateId]
+    );
+
+    return result.rows;
 };

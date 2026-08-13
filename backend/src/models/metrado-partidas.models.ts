@@ -103,6 +103,26 @@ interface PartidaElementItem {
     area : number | null;
     volume : number | null;
     weight : number | null;
+    // Una entrada por cada columna "ifc_property" pedida (template_id o
+    // columns inline), keyeada por "<property_set>::<property_name>" —
+    // ver ResolvedPropertyColumn/resolvePropertyValues en el service.
+    // Vacío {} si no se pidió ninguna. El valor SIEMPRE viaja como
+    // string|null (así se guarda en ifc_property_values — sin casteo,
+    // el frontend decide cómo mostrarlo/parsearlo).
+    properties : Record<string, string | null>;
+};
+
+// Eco de qué columna de propiedad se pidió y si existe de verdad en
+// ESTE archivo — found=false es la señal explícita de "la plantilla
+// pide una propiedad que este IFC no tiene" (no se puede distinguir
+// de otra forma un valor null "genuino" de un valor null "la
+// propiedad no existe acá").
+export interface ResolvedPropertyColumn {
+    key : string;
+    name : string;
+    property_set_name : string;
+    property_name : string;
+    found : boolean;
 };
 
 export interface PartidaElementGroup {
@@ -124,6 +144,13 @@ export interface PartidaElementGroup {
     // partida) × element_count — el único valor que sí se multiplica
     // por la cantidad de elementos del grupo.
     sub_total : number;
+    // Valor representativo del grupo para cada columna de propiedad
+    // pedida = la MODA entre los elementos del grupo (el valor no-nulo
+    // más frecuente) — mismo criterio de "representar sin sumar/perder
+    // info" que ya se usa para length/width/etc, pero acá con moda en
+    // vez de "el primer elemento" porque una propiedad de texto no
+    // tiene un orden natural del que tomar "el primero" con sentido.
+    properties : Record<string, string | null>;
     elements : PartidaElementItem[];
 };
 
@@ -133,22 +160,82 @@ export interface PartidaElementsDetail {
     // suma de sub_total de todos los grupos — en teoría coincide con el
     // total ya guardado en metrado_partida_totals para esta partida.
     total : number;
+    // Qué columnas de propiedad se pidieron (vacío [] si ninguna) — el
+    // frontend usa .key para leer group.properties[key]/element.properties[key],
+    // y .found para saber si vale la pena pedirle a este archivo esa
+    // columna en particular.
+    resolved_properties : ResolvedPropertyColumn[];
     groups : PartidaElementGroup[];
 };
 
-const toElementItem = (row : PartidaElementRow) : PartidaElementItem => ({
-    element_id: row.element_id,
-    express_id: row.express_id,
-    name: row.name,
-    length: toNumberOrNull(row.length),
-    run_length: toNumberOrNull(row.run_length),
-    width: toNumberOrNull(row.width),
-    height: toNumberOrNull(row.height),
-    quantity: toNumberOrNull(row.quantity),
-    area: toNumberOrNull(row.area),
-    volume: toNumberOrNull(row.volume),
-    weight: toNumberOrNull(row.weight),
-});
+// propertyValuesByElement: element_id (como string — BIGINT viaja como
+// string desde el driver) -> key de propiedad -> valor. Viene ya
+// pivoteado desde el service (QUERY 3 + Map en memoria), acá solo se
+// lee.
+type PropertyValuesByElement = Map<string, Map<string, string | null>>;
+
+const toElementItem = (
+    row : PartidaElementRow, propertyValuesByElement : PropertyValuesByElement, propertyKeys : readonly string[]
+) : PartidaElementItem => {
+    const valuesForElement = propertyValuesByElement.get(String(row.element_id));
+    const properties : Record<string, string | null> = {};
+    for (const key of propertyKeys) properties[key] = valuesForElement?.get(key) ?? null;
+
+    return {
+        element_id: row.element_id,
+        express_id: row.express_id,
+        name: row.name,
+        length: toNumberOrNull(row.length),
+        run_length: toNumberOrNull(row.run_length),
+        width: toNumberOrNull(row.width),
+        height: toNumberOrNull(row.height),
+        quantity: toNumberOrNull(row.quantity),
+        area: toNumberOrNull(row.area),
+        volume: toNumberOrNull(row.volume),
+        weight: toNumberOrNull(row.weight),
+        properties,
+    };
+};
+
+// Moda (valor no-nulo más frecuente) de cada propiedad entre los
+// elementos de un grupo — desempate por orden de aparición (los
+// elementos ya vienen ordenados por la query, así que es determinístico).
+// Si todos son null, la moda es null.
+const modaProperties = (
+    elementos : readonly PartidaElementItem[], propertyKeys : readonly string[]
+) : Record<string, string | null> => {
+    const result : Record<string, string | null> = {};
+
+    for (const key of propertyKeys) {
+        const counts = new Map<string, number>();
+        const ordenDeAparicion : string[] = [];
+
+        for (const el of elementos) {
+            const value = el.properties[key] ?? null;
+            if (value === null) continue;
+            if (!counts.has(value)) ordenDeAparicion.push(value);
+            counts.set(value, (counts.get(value) ?? 0) + 1);
+        }
+
+        if (ordenDeAparicion.length === 0) {
+            result[key] = null;
+            continue;
+        }
+
+        let moda = ordenDeAparicion[0]!;
+        let mejorConteo = counts.get(moda)!;
+        for (const value of ordenDeAparicion) {
+            const conteo = counts.get(value)!;
+            if (conteo > mejorConteo) {
+                moda = value;
+                mejorConteo = conteo;
+            }
+        }
+        result[key] = moda;
+    }
+
+    return result;
+};
 
 // Mismo criterio que ifc-processing-runner.ts (UNIT_TO_METRADO_KEY) —
 // qué metrado le corresponde mostrar a cada unidad de partida. Se repite
@@ -193,7 +280,8 @@ const dimsKey = (row : PartidaElementRow) : string =>
 // m3→volume, kg→weight, resto→quantity) — igual que en el Excel de
 // referencia.
 export const groupPartidaElements = (
-    rows : PartidaElementRow[], groupBy : readonly GroupByField[], partidaUnit : string | null
+    rows : PartidaElementRow[], groupBy : readonly GroupByField[], partidaUnit : string | null,
+    propertyValuesByElement : PropertyValuesByElement = new Map(), propertyKeys : readonly string[] = []
 ) : PartidaElementGroup[] => {
     const metradoKey = partidaUnit ? (METRADO_KEY_POR_UNIDAD[partidaUnit] ?? "quantity") : "quantity";
 
@@ -207,7 +295,7 @@ export const groupPartidaElements = (
 
     return [...buckets.values()].map((rowsDelGrupo) => {
         const primero = rowsDelGrupo[0]!;
-        const elementos = rowsDelGrupo.map(toElementItem);
+        const elementos = rowsDelGrupo.map((row) => toElementItem(row, propertyValuesByElement, propertyKeys));
         const representativo = elementos[0]!;
         const valorMetrado = representativo[metradoKey] ?? 0;
 
@@ -225,6 +313,7 @@ export const groupPartidaElements = (
             volume: representativo.volume,
             weight: representativo.weight,
             sub_total: (valorMetrado as number) * elementos.length,
+            properties: modaProperties(elementos, propertyKeys),
             elements: elementos,
         };
     });

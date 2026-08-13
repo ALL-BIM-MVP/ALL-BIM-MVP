@@ -81,6 +81,7 @@ export const saveFileService = async (
                 ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
                 file_id, project_id, file_type, name, file_size, checksum, mime_type, uploaded_at,
+                NULL AS ifc_status, NULL AS ifc_error_message,
                 uploaded_by AS user_id,
                 (SELECT name FROM users WHERE user_id = uploaded_by) AS user_name,
                 (SELECT email FROM users WHERE user_id = uploaded_by) AS user_email`,
@@ -108,6 +109,7 @@ export const getProjectFilesService = async (
     const result = await pool.query<FileRow>(
         `SELECT
             f.file_id, f.project_id, f.file_type, f.name, f.file_size, f.checksum, f.mime_type, f.uploaded_at,
+            i.status AS ifc_status, i.error_message AS ifc_error_message,
             u.user_id, u.name AS user_name, u.email AS user_email
         FROM files f
         LEFT JOIN ifc_files i ON i.ifc_file_id = f.file_id
