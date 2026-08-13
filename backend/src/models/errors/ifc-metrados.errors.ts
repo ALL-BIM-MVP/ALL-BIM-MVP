@@ -22,5 +22,12 @@ export const IFC_METRADOS_ERRORS = {
             code: "IFC_STATUS_NOT_FOUND",
             message: "No existe información de procesamiento para ese archivo."
         }
+    },
+    PARTIDA_NOT_FOUND: {
+        statusCode: 404,
+        response: {
+            code: "IFC_PARTIDA_NOT_FOUND",
+            message: "La partida solicitada no existe o no pertenece a este archivo IFC."
+        }
     }
 } satisfies Record<string, ErrorFormat>;

@@ -130,7 +130,11 @@ interface PipelinePartida {
 interface PipelineMetradoElement {
     partida_code: string;
     express_id: number;
+    // length/width/height = dimensiones brutas de la caja envolvente.
+    // run_length = metrado "Longitud" (prioridad revit>geométrico) —
+    // NO es lo mismo que length, ver comentario en database/schema.sql.
     length: number | null;
+    run_length: number | null;
     width: number | null;
     height: number | null;
     quantity: number | null;
@@ -152,7 +156,7 @@ interface PipelineResult {
 }
 
 const UNIT_TO_METRADO_KEY: Partial<Record<string, keyof PipelineMetradoElement>> = {
-    m: "length",
+    m: "run_length", // el metrado de una partida 'm' es la Longitud, no la dimensión bruta "length"
     m2: "area",
     m3: "volume",
     kg: "weight",
@@ -160,66 +164,42 @@ const UNIT_TO_METRADO_KEY: Partial<Record<string, keyof PipelineMetradoElement>>
 
 interface PartidaTotal {
     elementCount: number;
-    subTotal: number | null;
     total: number;
 }
 
-// Bottom-up en JS (no en SQL puro — mismo criterio que ya deja anotado
-// database/queries.sql): sub_total = suma directa de los elementos de
-// esa partida (según la columna que corresponda a su unidad); total =
-// sub_total + suma de total() de los hijos directos, de las hojas hacia
-// la raíz.
-const calcularTotalesBottomUp = (
+// Solo para partidas HOJA (unit != null) — las carpetas/categorías no
+// llevan fila en metrado_partida_totals, no hay rollup hacia arriba acá
+// (ver comentario en database/schema.sql). total = suma directa de los
+// metrado_elements de esa partida, según la columna que corresponde a
+// su unidad (m->length, m2->area, m3->volume, kg->weight, el resto
+// ->quantity). Nada de "sub_total": ese concepto es de agrupar
+// elementos por tag en la vista de detalle, no de esta tabla.
+const calcularTotalesPorPartida = (
     partidas: PipelinePartida[],
     metradoElements: PipelineMetradoElement[],
     codeToPartidaId: Map<string, number>
 ): Map<number, PartidaTotal> => {
     const porCode = new Map(partidas.map((p) => [p.code, p]));
 
-    const acumulado = new Map<string, { elementCount: number; subTotal: number }>();
+    const acumulado = new Map<string, PartidaTotal>();
     for (const p of partidas) {
-        acumulado.set(p.code, { elementCount: 0, subTotal: 0 });
+        if (p.unit) acumulado.set(p.code, { elementCount: 0, total: 0 });
     }
     for (const me of metradoElements) {
         const partida = porCode.get(me.partida_code);
         const acc = acumulado.get(me.partida_code);
-        if (!partida || !acc) continue;
+        if (!partida || !acc) continue; // partida sin unit (carpeta) -> no se acumula
         const key = partida.unit ? UNIT_TO_METRADO_KEY[partida.unit] ?? "quantity" : "quantity";
         const valor = me[key];
-        acc.subTotal += typeof valor === "number" ? valor : 0;
+        acc.total += typeof valor === "number" ? valor : 0;
         acc.elementCount += 1;
     }
 
-    const hijosDe = new Map<string, string[]>();
-    for (const p of partidas) {
-        if (p.parent_code) {
-            const arr = hijosDe.get(p.parent_code) ?? [];
-            arr.push(p.code);
-            hijosDe.set(p.parent_code, arr);
-        }
-    }
-
-    const totalPorCode = new Map<string, number>();
-    const ordenProfundidadDesc = [...partidas].sort(
-        (a, b) => b.code.split(".").length - a.code.split(".").length
-    );
-    for (const p of ordenProfundidadDesc) {
-        const propio = acumulado.get(p.code)?.subTotal ?? 0;
-        const hijos = hijosDe.get(p.code) ?? [];
-        const sumaHijos = hijos.reduce((acc, code) => acc + (totalPorCode.get(code) ?? 0), 0);
-        totalPorCode.set(p.code, propio + sumaHijos);
-    }
-
     const resultado = new Map<number, PartidaTotal>();
-    for (const p of partidas) {
-        const partidaId = codeToPartidaId.get(p.code);
+    for (const [code, acc] of acumulado) {
+        const partidaId = codeToPartidaId.get(code);
         if (partidaId === undefined) continue;
-        const acc = acumulado.get(p.code)!;
-        resultado.set(partidaId, {
-            elementCount: acc.elementCount,
-            subTotal: p.unit ? acc.subTotal : null,
-            total: totalPorCode.get(p.code) ?? 0,
-        });
+        resultado.set(partidaId, acc);
     }
     return resultado;
 };
@@ -316,18 +296,18 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
             const elementId = expressIdToElementId.get(me.express_id);
             if (partidaId === undefined || elementId === undefined) continue;
             await client.query(
-                `INSERT INTO metrado_elements (partida_id, element_id, length, width, height, quantity, area, volume, weight)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-                [partidaId, elementId, me.length, me.width, me.height, me.quantity, me.area, me.volume, me.weight]
+                `INSERT INTO metrado_elements (partida_id, element_id, length, run_length, width, height, quantity, area, volume, weight)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+                [partidaId, elementId, me.length, me.run_length, me.width, me.height, me.quantity, me.area, me.volume, me.weight]
             );
         }
 
-        const totales = calcularTotalesBottomUp(resultado.partidas, resultado.metrado_elements, codeToPartidaId);
+        const totales = calcularTotalesPorPartida(resultado.partidas, resultado.metrado_elements, codeToPartidaId);
         for (const [partidaId, t] of totales) {
             await client.query(
-                `INSERT INTO metrado_partida_totals (partida_id, element_count, sub_total, total)
-                VALUES ($1,$2,$3,$4)`,
-                [partidaId, t.elementCount, t.subTotal, t.total]
+                `INSERT INTO metrado_partida_totals (partida_id, element_count, total)
+                VALUES ($1,$2,$3)`,
+                [partidaId, t.elementCount, t.total]
             );
         }
 

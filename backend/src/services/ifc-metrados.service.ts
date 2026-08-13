@@ -159,3 +159,23 @@ export const getIfcFileStatusService = async (
     const { project_id: _projectId, ...status } = row;
     return transformIfcFileStatus(status);
 };
+
+// Confirma que el ifc_file_id exista y que el usuario tenga acceso al
+// proyecto dueño de ese archivo — mismo JOIN que getIfcFileStatusService,
+// factorizado para que lo reusen los endpoints de partidas/elementos
+// (metrado-partidas.service.ts), que no necesitan el resto de columnas
+// de ifc_files, solo confirmar el acceso.
+export const assertIfcFileAccess = async (ifcFileId: number, userId: number): Promise<void> => {
+    const { rows } = await pool.query<{ project_id: number }>(
+        `SELECT f.project_id
+        FROM ifc_files i
+        INNER JOIN files f ON f.file_id = i.ifc_file_id
+        WHERE i.ifc_file_id = $1`,
+        [ifcFileId]
+    );
+
+    const row = rows[0];
+    if (!row) throw new AppError(IFC_METRADOS_ERRORS.STATUS_NOT_FOUND);
+
+    await assertProjectAccess(row.project_id, userId);
+};

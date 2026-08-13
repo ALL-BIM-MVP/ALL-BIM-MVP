@@ -11,6 +11,7 @@ import routerProjectInvitations from './routes/project-invitations.routes.js';
 import routerProjectMembers from './routes/project-members.routes.js';
 import routerFiles, { fileContentRouter } from './routes/files.routes.js';
 import routerIfcMetrados, { ifcFilesRouter } from './routes/ifc-metrados.routes.js';
+import routerTemplates from './routes/templates.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
 const app = express();
@@ -31,6 +32,7 @@ app.use('/api/projects', routerFiles );
 app.use('/api/files', fileContentRouter );
 app.use('/api/projects', routerIfcMetrados );
 app.use('/api/ifc-files', ifcFilesRouter );
+app.use('/api/templates', routerTemplates );
 
 
 app.use(errorHandler)
