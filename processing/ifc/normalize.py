@@ -12,6 +12,10 @@ from .extraction import normalizar_codigo
 def _registrar_partida(partidas, code, parent_code, description, unit):
     existente = partidas.get(code)
     if existente is None:
+        # sort_order provisorio = orden de registro (depende del orden en
+        # que ifcopenshell recorre los elementos, básicamente arbitrario)
+        # — se recalcula al final en _ordenar_partidas() según el código,
+        # no queda así.
         partidas[code] = {
             "code": code,
             "parent_code": parent_code,
@@ -48,6 +52,29 @@ _DESCRIPCION_CONTENEDOR = {
     CLAVE_SIN_ESPECIALIDAD: "Elementos sin especialidad activa",
     CLAVE_FUERA_DE_NORMA: "Elementos fuera de norma",
 }
+
+
+def _clave_orden(code):
+    """OE.1 antes que OE.1.1, OE.1.1 antes que OE.1.2, OE.1.2 antes que
+    OE.2 — comparar tuplas de enteros logra esto solo: (1,) < (1,1) <
+    (1,2) < (2,), porque una tupla más corta que es prefijo de otra
+    siempre es "menor". Los contenedores especiales (sin especialidad/
+    fuera de norma) no tienen formato OE.x.x, van al final, ordenados
+    entre ellos por su código."""
+    tup = normalizar_codigo(code)
+    if tup:
+        return (0, tup, "")
+    return (1, (), code)
+
+
+def _ordenar_partidas(partidas):
+    """Reordena por código (jerárquico, no por orden de aparición en el
+    IFC, que es básicamente arbitrario) y reasigna sort_order 0..n-1 en
+    ese orden."""
+    ordenadas = sorted(partidas.values(), key=lambda p: _clave_orden(p["code"]))
+    for i, p in enumerate(ordenadas):
+        p["sort_order"] = i
+    return ordenadas
 
 
 def normalizar(elementos, norma_index, schema_version):
@@ -103,7 +130,14 @@ def normalizar(elementos, norma_index, schema_version):
         metrado_elements.append({
             "partida_code": elem["codigo_reporte"],
             "express_id": express_id,
-            "length": met["lon"],
+            # length/width/height = dimensiones BRUTAS de la caja
+            # envolvente (sin prioridad revit) — igual tratamiento para
+            # las 3. run_length = metrado "Longitud" (met["lon"], con
+            # prioridad revit>geométrico) — NO es lo mismo que length,
+            # aunque el fallback geométrico de met["lon"] use el mismo
+            # dims["Largo"] cuando revit no trae un valor propio.
+            "length": dims.get("Largo"),
+            "run_length": met["lon"],
             "width": dims.get("Ancho"),
             "height": dims.get("Alto"),
             "quantity": met["count"],
@@ -123,6 +157,6 @@ def normalizar(elementos, norma_index, schema_version):
         "schema_version": schema_version,
         "elements": elements,
         "properties": {"definitions": definitions, "values": values, "relations": relations},
-        "partidas": list(partidas.values()),
+        "partidas": _ordenar_partidas(partidas),
         "metrado_elements": metrado_elements,
     }

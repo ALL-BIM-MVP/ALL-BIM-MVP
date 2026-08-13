@@ -150,9 +150,21 @@ CREATE TABLE metrado_elements (
     metrado_element_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     partida_id BIGINT NOT NULL REFERENCES metrado_partidas(partida_id) ON DELETE CASCADE,
     element_id BIGINT NOT NULL REFERENCES ifc_elements(element_id) ON DELETE CASCADE,
+
+    -- Dimensiones brutas de la caja envolvente (Largo/Ancho/Alto),
+    -- directo de la geometría, sin prioridad revit. Informativas, NO
+    -- son el metrado — un elemento curvo (tubería, conducto, acero
+    -- doblado) puede tener un run_length mayor que su length en línea
+    -- recta.
     length NUMERIC(18,6),
     width NUMERIC(18,6),
     height NUMERIC(18,6),
+
+    -- run_length = "Longitud", el metrado lineal real (prioridad revit
+    -- > geométrico como fallback — ver processing/ifc/metrados.py). Es
+    -- el valor que se usa cuando la partida es de unidad 'm', distinto
+    -- de "length" de arriba.
+    run_length NUMERIC(18,6),
 
     quantity NUMERIC(18,6),
 
@@ -168,10 +180,20 @@ CREATE INDEX idx_metrado_elements_partida ON metrado_elements (partida_id);
 -- ------------------------------------------------------------
 -- TOTALES PRECALCULADOS POR PARTIDA
 -- ------------------------------------------------------------
+-- Solo existe fila para partidas HOJA (unit IS NOT NULL en
+-- metrado_partidas) — las carpetas/categorías no tienen fila acá, no
+-- se precalcula ningún rollup hacia arriba (eso, si hace falta, se
+-- resuelve con una query aparte más adelante, no guardado).
+--
+-- No hay columna sub_total: la única noción de "subtotal" real del
+-- dominio es la de un GRUPO de elementos con el mismo tag/dimensiones
+-- (metrado de un elemento × cantidad de repeticiones), que es un
+-- concepto de la vista de detalle (agrupar metrado_elements por tag),
+-- no de esta tabla — no se puede precalcular acá sin la lógica de
+-- agrupamiento por tag, que todavía no existe.
 CREATE TABLE metrado_partida_totals (
     partida_id BIGINT PRIMARY KEY REFERENCES metrado_partidas(partida_id) ON DELETE CASCADE,
     element_count INT NOT NULL DEFAULT 0,
-    sub_total NUMERIC(18,6),
     total NUMERIC(18,6),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
