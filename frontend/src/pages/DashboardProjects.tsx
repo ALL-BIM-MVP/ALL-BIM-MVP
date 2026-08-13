@@ -22,6 +22,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatDate, formatFileSize } from '../utils/dateUtils';
 import InicioTab from '../components/tabs/InicioTab';
 import ColaboradoresTab from "../components/tabs/ColaboradoresTab";
+import ArchivosTab from "../components/tabs/ArchivosTab";
 import Visor3DTab from "../components/tabs/Visor3DTab";
 
 const DashboardProjects: React.FC = () => {
@@ -260,10 +261,11 @@ const DashboardProjects: React.FC = () => {
 
       {/* CONTENIDO */}
       {activeTab === 'visor3d' ? (
-        <div className="fixed left-0 right-0 bottom-0 top-14 z-0">
-          <Visor3DTab />
-        </div>
-      ) : (
+  <div className="fixed left-0 right-0 bottom-0 top-14 z-0">
+    <Visor3DTab projectId={project?.project_id || 0} />
+  </div>
+       ) 
+       : (
       <div className="max-w-9xl mx-auto p-6 pb-32 pl-16 relative isolate">
             
         {/* TAB: INICIO */}
@@ -286,7 +288,9 @@ const DashboardProjects: React.FC = () => {
     }}
   />
 )}
-
+    {activeTab === 'archivos' && (
+  <ArchivosTab />
+)}
         {activeTab === 'colaboradores' && isOwner && (
           <ColaboradoresTab onClose={() => setActiveTab('inicio')} 
           projectId={project?.project_id || 0} 

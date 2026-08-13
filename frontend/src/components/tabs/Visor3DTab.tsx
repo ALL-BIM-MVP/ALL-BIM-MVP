@@ -1,11 +1,31 @@
-import React, { useState, useRef } from 'react';
-import { 
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import {
   Upload, FileText, X, Maximize2, Minimize2, FileSearch, Box,
-  ChevronLeft, ChevronRight, Search, RefreshCw, FileDown
+  ChevronLeft, ChevronRight, Search, RefreshCw, FileDown,
+  HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2,
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
 import { UploadSimple, X as XIcon } from '@phosphor-icons/react';
+import PartidasTree from './PartidasTree';
+import {
+  IfcFile,
+  IfcStatus,
+  listProjectIfcFiles,
+  getFileContentArrayBuffer,
+  uploadAndProcessIfcFile,
+  processExistingIfcFile,
+  pollIfcProcessStatus,
+} from '../../services/ifcfiles.service';
+
+interface Visor3DTabProps {
+  projectId: number;
+}
+
+// Estado de procesamiento del archivo actualmente cargado en el visor.
+// 'unprocessed' cubre tanto "nunca se subió" (cargado con Solo graficar)
+// como "está subido pero ifc_status todavía es null".
+type PanelStatus = 'unprocessed' | 'processing' | 'done' | 'error';
 
 const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <div>
@@ -14,12 +34,55 @@ const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) =
   </div>
 );
 
-const Visor3DTab: React.FC = () => {
+function formatBytes(bytesStr: string): string {
+  const bytes = Number(bytesStr);
+  if (!Number.isFinite(bytes)) return '—';
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function ifcStatusToPanelStatus(status: IfcStatus): PanelStatus {
+  if (status === 'done') return 'done';
+  if (status === 'processing') return 'processing';
+  if (status === 'error') return 'error';
+  return 'unprocessed';
+}
+
+// Insignia de estado — usada en la lista del modal "Ya cargado" (doc sección 1.2)
+const IfcStatusBadge: React.FC<{ status: IfcFile['ifc_status'] }> = ({ status }) => {
+  if (status === 'done') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+        <CheckCircle2 size={11} /> Procesado
+      </span>
+    );
+  }
+  if (status === 'processing') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+        <Loader2 size={11} className="animate-spin" /> Procesando
+      </span>
+    );
+  }
+  if (status === 'error') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-50 text-red-700 border border-red-200">
+        <AlertTriangle size={11} /> Error
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+      Sin procesar
+    </span>
+  );
+};
+
+const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const [ifcFile, setIfcFile] = useState<File | null>(null);
   const [ifcArrayBuffer, setIfcArrayBuffer] = useState<ArrayBuffer | null>(null);
   const [ifcLoading, setIfcLoading] = useState(false);
   const [ifcInfo, setIfcInfo] = useState<IfcFileInfo | null>(null);
-  const [activeModuleTab, setActiveModuleTab] = useState("Resumen");
+  const [activePanelTab, setActivePanelTab] = useState<'resumen' | 'metrados'>('resumen');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -28,21 +91,109 @@ const Visor3DTab: React.FC = () => {
   const [searchError, setSearchError] = useState<string | null>(null);
   const viewerRef = useRef<IFCViewerHandle>(null);
 
+  // ============ ESTADO DE PROCESAMIENTO del archivo cargado ============
+  // currentFileId: file_id en el backend, si el archivo ya está subido
+  // (viene de "Ya cargado", o de haber elegido "Procesar" alguna vez).
+  // null = todavía nunca se subió (cargado 100% local con "Solo graficar").
+  const [currentFileId, setCurrentFileId] = useState<string | null>(null);
+  const [panelStatus, setPanelStatus] = useState<PanelStatus>('unprocessed');
+  const [panelErrorMessage, setPanelErrorMessage] = useState<string | null>(null);
+
+  // ============ ENTRADA: Local / Ya cargado ============
+  const [showEntryPopover, setShowEntryPopover] = useState<'center' | 'floating' | null>(null);
+  const entryPopoverRef = useRef<HTMLDivElement>(null);
+  const localInputRef = useRef<HTMLInputElement>(null);
+
+  // ============ POPUP: Solo graficar / Procesar (tras elegir Local) ============
+  const [pendingLocalFile, setPendingLocalFile] = useState<File | null>(null);
+  const [pendingLocalBuffer, setPendingLocalBuffer] = useState<ArrayBuffer | null>(null);
+
+  // ============ MODAL: Ya cargado ============
+  const [showLoadedModal, setShowLoadedModal] = useState(false);
+  const [loadedTab, setLoadedTab] = useState<'procesados' | 'no_procesados'>('procesados');
+  const [loadedFiles, setLoadedFiles] = useState<IfcFile[]>([]);
+  const [loadedLoading, setLoadedLoading] = useState(false);
+  const [loadedError, setLoadedError] = useState<string | null>(null);
+  const [loadedSearch, setLoadedSearch] = useState('');
+  const [selectedLoadedFileId, setSelectedLoadedFileId] = useState<string | null>(null);
+  const [applyingSelection, setApplyingSelection] = useState(false);
+
+  const closeSearchOnInteract = () => {
+    if (searchOpen) setSearchOpen(false);
+  };
+
   const PANEL_WIDTH = 'w-96';
   const PANEL_WIDTH_REM = '24rem';
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  // Cierra el popover de entrada si se hace click afuera
+  useEffect(() => {
+    if (!showEntryPopover) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (entryPopoverRef.current && !entryPopoverRef.current.contains(event.target as Node)) {
+        setShowEntryPopover(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEntryPopover]);
+
+  const loadBufferIntoViewer = (buffer: ArrayBuffer, sourceFile: File | null) => {
+    setIfcArrayBuffer(buffer);
+    setIfcInfo(parseIfcHeader(buffer));
+    setIfcFile(sourceFile);
+  };
+
+  // ---------- Núcleo compartido: subir+procesar / procesar existente + polling ----------
+  // Se usa tanto desde el popup de "Local" (botón Procesar) como desde el
+  // botón "Procesar archivo" de la tab Metrados — un solo lugar con la
+  // lógica real, para no duplicar el manejo de estado/errores.
+  const runProcessing = useCallback(
+    async ({ file, existingFileId }: { file: File | null; existingFileId: string | null }) => {
+      setPanelStatus('processing');
+      setPanelErrorMessage(null);
+      try {
+        let ifcFileId: string;
+        if (existingFileId) {
+          const initial = await processExistingIfcFile(projectId, existingFileId);
+          ifcFileId = String(initial.ifc_file_id ?? existingFileId);
+        } else if (file) {
+          const initial = await uploadAndProcessIfcFile(projectId, file);
+          ifcFileId = String(initial.ifc_file_id);
+        } else {
+          throw new Error('No hay archivo para procesar.');
+        }
+        setCurrentFileId(ifcFileId);
+
+        const final = await pollIfcProcessStatus(ifcFileId);
+        setPanelStatus(final.status === 'done' ? 'done' : 'error');
+        if (final.status === 'error') {
+          setPanelErrorMessage(final.error_message || 'Error al procesar el archivo.');
+        }
+      } catch (err: any) {
+        console.error('Error al procesar el archivo IFC:', err);
+        setPanelStatus('error');
+        setPanelErrorMessage(err.message || 'Error al subir/procesar el archivo.');
+      }
+    },
+    [projectId]
+  );
+
+  // ---------- Flujo LOCAL ----------
+  const openLocalPicker = () => {
+    setShowEntryPopover(null);
+    localInputRef.current?.click();
+  };
+
+  const handleLocalFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
+    event.target.value = ''; // permite re-seleccionar el mismo archivo después
     if (!file) return;
 
     setIfcLoading(true);
-    setIfcFile(file);
-
     try {
       const buffer = await file.arrayBuffer();
-      setIfcArrayBuffer(buffer);
-      setIfcInfo(parseIfcHeader(buffer));
-      console.log('Archivo IFC cargado:', file.name, `${(file.size / 1024 / 1024).toFixed(2)} MB`);
+      setPendingLocalFile(file);
+      setPendingLocalBuffer(buffer);
     } catch (err) {
       console.error('Error al leer el archivo IFC:', err);
     } finally {
@@ -50,24 +201,177 @@ const Visor3DTab: React.FC = () => {
     }
   };
 
+  const handleChooseSoloGraficar = () => {
+    if (!pendingLocalFile || !pendingLocalBuffer) return;
+    loadBufferIntoViewer(pendingLocalBuffer, pendingLocalFile);
+    setCurrentFileId(null);
+    setPanelStatus('unprocessed');
+    setPanelErrorMessage(null);
+    setActivePanelTab('resumen');
+    setPendingLocalFile(null);
+    setPendingLocalBuffer(null);
+  };
+
+  const handleChooseProcesar = async () => {
+    if (!pendingLocalFile || !pendingLocalBuffer) return;
+
+    // Graficamos de inmediato con el buffer local — no hace falta
+    // esperar al backend para poder ver el modelo.
+    loadBufferIntoViewer(pendingLocalBuffer, pendingLocalFile);
+    setActivePanelTab('metrados');
+
+    const fileToProcess = pendingLocalFile;
+    setPendingLocalFile(null);
+    setPendingLocalBuffer(null);
+
+    await runProcessing({ file: fileToProcess, existingFileId: null });
+  };
+
+  const cancelPendingLocal = () => {
+    setPendingLocalFile(null);
+    setPendingLocalBuffer(null);
+  };
+
+  // Botón "Procesar archivo" dentro de la tab Metrados: si el archivo
+  // cargado ya tiene file_id en el backend (vino de "Ya cargado"), se
+  // reprocesa ese id; si es 100% local (Solo graficar), se sube recién ahora.
+  const handleProcesarDesdeMetrados = () => {
+    if (currentFileId) {
+      runProcessing({ file: null, existingFileId: currentFileId });
+    } else if (ifcFile) {
+      runProcessing({ file: ifcFile, existingFileId: null });
+    }
+  };
+
+  // ---------- Flujo YA CARGADO ----------
+  const fetchLoadedFiles = useCallback(async () => {
+    setLoadedLoading(true);
+    setLoadedError(null);
+    try {
+      const processed = loadedTab === 'procesados';
+      const files = await listProjectIfcFiles(projectId, processed);
+      setLoadedFiles(files);
+    } catch (err: any) {
+      setLoadedError(err.message || 'Error al cargar los archivos del proyecto');
+    } finally {
+      setLoadedLoading(false);
+    }
+  }, [projectId, loadedTab]);
+
+  useEffect(() => {
+    if (showLoadedModal) {
+      fetchLoadedFiles();
+    }
+  }, [showLoadedModal, fetchLoadedFiles]);
+
+  const openLoadedModal = () => {
+    setShowEntryPopover(null);
+    setSelectedLoadedFileId(null);
+    setLoadedSearch('');
+    setLoadedTab('procesados');
+    setShowLoadedModal(true);
+  };
+
+  const filteredLoadedFiles = loadedFiles.filter((f) =>
+    f.name.toLowerCase().includes(loadedSearch.trim().toLowerCase())
+  );
+
+  const handleApplyLoadedSelection = async () => {
+    if (!selectedLoadedFileId) return;
+    const selected = loadedFiles.find((f) => f.file_id === selectedLoadedFileId);
+    setApplyingSelection(true);
+    try {
+      const buffer = await getFileContentArrayBuffer(selectedLoadedFileId);
+      loadBufferIntoViewer(buffer, selected ? new File([buffer], selected.name, { type: selected.mime_type }) : null);
+
+      setCurrentFileId(selectedLoadedFileId);
+      const initialStatus = ifcStatusToPanelStatus(selected?.ifc_status ?? null);
+      setPanelStatus(initialStatus);
+      setPanelErrorMessage(selected?.ifc_error_message ?? null);
+      setActivePanelTab('resumen');
+      setShowLoadedModal(false);
+
+      // Si justo estaba procesando cuando lo elegimos, seguimos el
+      // polling para que el panel se actualice solo cuando termine.
+      if (initialStatus === 'processing') {
+        try {
+          const final = await pollIfcProcessStatus(selectedLoadedFileId);
+          setPanelStatus(final.status === 'done' ? 'done' : 'error');
+          if (final.status === 'error') {
+            setPanelErrorMessage(final.error_message || 'Error al procesar el archivo.');
+          }
+        } catch (err: any) {
+          setPanelStatus('error');
+          setPanelErrorMessage(err.message || 'Error al consultar el estado del procesamiento.');
+        }
+      }
+    } catch (err: any) {
+      console.error('Error al cargar el archivo seleccionado:', err);
+      setLoadedError(err.message || 'No se pudo cargar el archivo seleccionado.');
+    } finally {
+      setApplyingSelection(false);
+    }
+  };
+
   const clearIFC = () => {
     setIfcFile(null);
     setIfcArrayBuffer(null);
     setIfcInfo(null);
+    setCurrentFileId(null);
+    setPanelStatus('unprocessed');
+    setPanelErrorMessage(null);
+    setActivePanelTab('resumen');
   };
 
-  const handleSearchById = () => {
-    const id = parseInt(searchId.trim(), 10);
-    if (isNaN(id)) {
-      setSearchError('Ingresá un número de ID válido');
+  const handleSearchById = async () => {
+    const value = searchId.trim();
+    if (!value) {
+      setSearchError('Ingresá un ID numérico o un GUID IFC');
       return;
     }
     setSearchError(null);
-    viewerRef.current?.selectEntityById(id);
+    const found = await viewerRef.current?.selectByIdOrGuid(value);
+    if (!found) {
+      setSearchError('No se encontró ningún elemento con ese ID o GUID');
+    }
   };
+
+  // ---------- Sub-componentes de UI reutilizados en los dos triggers ----------
+  const EntryPopover: React.FC<{ align?: 'center' | 'up' }> = ({ align = 'center' }) => (
+    <div
+      ref={entryPopoverRef}
+      className={`absolute z-[10100] bg-white rounded-xl shadow-2xl border border-gray-200 p-2 w-52 ${
+        align === 'up' ? 'bottom-full mb-2 left-1/2 -translate-x-1/2' : 'top-full mt-2 left-1/2 -translate-x-1/2'
+      }`}
+    >
+      <button
+        onClick={openLocalPicker}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors text-left"
+      >
+        <HardDrive size={16} className="text-[#0056b3]" />
+        Local
+      </button>
+      <button
+        onClick={openLoadedModal}
+        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors text-left"
+      >
+        <CloudDownload size={16} className="text-[#0056b3]" />
+        Ya está cargado
+      </button>
+    </div>
+  );
 
   return (
     <div className="h-full">
+      {/* input file oculto, compartido por ambos triggers de "Local" */}
+      <input
+        ref={localInputRef}
+        type="file"
+        accept=".ifc,.IFC"
+        className="hidden"
+        onChange={handleLocalFileSelected}
+      />
+
       <div
         className={
           isFullscreen
@@ -84,17 +388,16 @@ const Visor3DTab: React.FC = () => {
             {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
           </button>
 
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-700 relative overflow-hidden bg-[#EEEEEE]">
+          <div
+            className="flex-1 flex flex-col items-center justify-center text-gray-700 relative overflow-hidden bg-[#EEEEEE]"
+            onMouseDown={closeSearchOnInteract}
+            onWheel={closeSearchOnInteract}
+          >
             {ifcLoading ? (
               <div className="flex flex-col items-center justify-center h-full">
                 <div className="text-center text-gray-700">
                   <div className="w-12 h-12 border-4 border-[#0056b3] border-t-transparent rounded-full animate-spin mx-auto"></div>
                   <p className="mt-4">Cargando archivo IFC...</p>
-                  {ifcFile && (
-                    <p className="text-sm text-gray-500 mt-2">
-                      {ifcFile.name} ({(ifcFile.size / 1024 / 1024).toFixed(2)} MB)
-                    </p>
-                  )}
                 </div>
               </div>
             ) : ifcArrayBuffer ? (
@@ -110,11 +413,17 @@ const Visor3DTab: React.FC = () => {
                     Carga tu archivo IFC exportado desde Revit para empezar a explorar el modelo en 3D.
                   </p>
                 </div>
-                <label className="cursor-pointer flex items-center gap-2 px-5 py-2.5 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition-colors font-medium text-sm">
-                  <Upload size={16} />
-                  Cargar archivo IFC
-                  <input type="file" accept=".ifc,.IFC" className="hidden" onChange={handleFileUpload} />
-                </label>
+
+                <div className="relative">
+                  <button
+                    onClick={() => setShowEntryPopover(showEntryPopover === 'center' ? null : 'center')}
+                    className="cursor-pointer flex items-center gap-2 px-5 py-2.5 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition-colors font-medium text-sm"
+                  >
+                    <Upload size={16} />
+                    Cargar archivo IFC
+                  </button>
+                  {showEntryPopover === 'center' && <EntryPopover align="center" />}
+                </div>
                 <p className="text-slate-400 text-xs">Formatos soportados: .ifc, .IFC</p>
               </div>
             )}
@@ -135,27 +444,35 @@ const Visor3DTab: React.FC = () => {
             }`}
           >
             <div className="flex-shrink-0">
-              <div className="flex gap-2 overflow-x-auto pb-1 mb-6 scrollbar-hide">
-                {["Resumen", "Arquitectura", "Estructuras", "Sanitarias", "Eléctricas", "Mecánicas", "Comunicaciones"].map((label) => (
-                  <button
-                    key={label}
-                    onClick={() => setActiveModuleTab(label)}
-                    className={`whitespace-nowrap px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                      activeModuleTab === label
-                        ? "bg-[#0056b3] text-white"
-                        : "bg-slate-100/70 text-slate-500 hover:bg-slate-100"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
+              {/* ---------- Tabs del panel: Resumen / Metrados ---------- */}
+              <div className="flex gap-2 mb-6">
+                <button
+                  onClick={() => setActivePanelTab('resumen')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    activePanelTab === 'resumen'
+                      ? "bg-[#0056b3] text-white"
+                      : "bg-slate-100/70 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  Resumen
+                </button>
+                <button
+                  onClick={() => setActivePanelTab('metrados')}
+                  className={`px-4 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                    activePanelTab === 'metrados'
+                      ? "bg-[#0056b3] text-white"
+                      : "bg-slate-100/70 text-slate-500 hover:bg-slate-100"
+                  }`}
+                >
+                  Metrados
+                </button>
               </div>
 
               <div className="flex items-start gap-3 bg-slate-100/60 border border-slate-300/60 rounded-xl p-4 mb-5">
                 <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${ifcFile ? 'bg-green-100' : 'bg-slate-200'}`}>
                   <FileText size={18} className={ifcFile ? 'text-green-600' : 'text-slate-400'} />
                 </div>
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   {ifcFile ? (
                     <>
                       <p className="text-sm font-semibold text-slate-700 truncate">{ifcFile.name}</p>
@@ -173,33 +490,85 @@ const Visor3DTab: React.FC = () => {
             </div>
 
             <div className="flex-1 min-h-0 overflow-y-auto">
-              {activeModuleTab === 'Resumen' && ifcInfo ? (
-                <div className="space-y-3 py-2">
-                  <InfoRow label="Proyecto" value={ifcInfo.projectName} />
-                  <InfoRow label="Descripción" value={ifcInfo.projectDescription} />
-                  <InfoRow label="Nombre largo" value={ifcInfo.projectLongName} />
-                  <InfoRow label="Fecha de exportación" value={ifcInfo.timestamp} />
-                  <InfoRow label="Autor" value={ifcInfo.author} />
-                  <InfoRow label="Organización" value={ifcInfo.organization} />
-                  <InfoRow label="Software de origen" value={ifcInfo.originatingSystem} />
-                  <InfoRow label="Esquema IFC" value={ifcInfo.schema} />
-                </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-8">
-                  <div className="w-12 h-12 rounded-full bg-slate-100/70 flex items-center justify-center">
-                    <FileSearch size={22} className="text-slate-400" />
+              {/* ---------- Tab RESUMEN ---------- */}
+              {activePanelTab === 'resumen' && (
+                ifcInfo ? (
+                  <div className="space-y-3 py-2">
+                    <InfoRow label="Proyecto" value={ifcInfo.projectName} />
+                    <InfoRow label="Descripción" value={ifcInfo.projectDescription} />
+                    <InfoRow label="Nombre largo" value={ifcInfo.projectLongName} />
+                    <InfoRow label="Fecha de exportación" value={ifcInfo.timestamp} />
+                    <InfoRow label="Autor" value={ifcInfo.author} />
+                    <InfoRow label="Organización" value={ifcInfo.organization} />
+                    <InfoRow label="Software de origen" value={ifcInfo.originatingSystem} />
+                    <InfoRow label="Esquema IFC" value={ifcInfo.schema} />
                   </div>
-                  <p className="text-sm font-medium text-slate-500">
-                    {activeModuleTab === 'Resumen'
-                      ? 'Selecciona una disciplina para ver sus metadatos'
-                      : `Metadatos de "${activeModuleTab}"`}
-                  </p>
-                  <p className="text-xs text-slate-400 max-w-[220px]">
-                    {activeModuleTab === 'Resumen'
-                      ? 'La información aparecerá aquí una vez cargues un modelo IFC.'
-                      : 'Aún no disponible para esta disciplina.'}
-                  </p>
-                </div>
+                ) : (
+                  <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-8">
+                    <div className="w-12 h-12 rounded-full bg-slate-100/70 flex items-center justify-center">
+                      <FileSearch size={22} className="text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-500">
+                      Carga un archivo para ver el resumen
+                    </p>
+                    <p className="text-xs text-slate-400 max-w-[220px]">
+                      La información aparecerá aquí una vez cargues un modelo IFC.
+                    </p>
+                  </div>
+                )
+              )}
+
+              {/* ---------- Tab METRADOS ---------- */}
+              {activePanelTab === 'metrados' && (
+                !ifcArrayBuffer ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-8">
+                    <div className="w-12 h-12 rounded-full bg-slate-100/70 flex items-center justify-center">
+                      <FileSearch size={22} className="text-slate-400" />
+                    </div>
+                    <p className="text-sm font-medium text-slate-500">Carga un archivo para ver los metrados</p>
+                  </div>
+                ) : panelStatus === 'unprocessed' ? (
+                  <div className="rounded-xl bg-[#5B21B6] text-white p-6 flex flex-col items-center text-center gap-3">
+                    <p className="text-sm font-bold tracking-wide">ARCHIVO no procesado</p>
+                    <button
+                      onClick={handleProcesarDesdeMetrados}
+                      className="px-4 py-2 bg-white text-[#5B21B6] rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors"
+                    >
+                      Procesar archivo
+                    </button>
+                    <p className="text-xs text-white/80 mt-2">
+                      Se requiere procesar para ver metrados
+                    </p>
+                  </div>
+                ) : panelStatus === 'processing' ? (
+                  <div className="rounded-xl bg-[#5B21B6] text-white p-6 flex flex-col items-center text-center gap-3">
+                    <Loader2 size={22} className="animate-spin" />
+                    <p className="text-sm font-bold tracking-wide">Procesando archivo...</p>
+                    <p className="text-xs text-white/80">
+                      Esto puede tardar unos segundos, dependiendo del tamaño del modelo.
+                    </p>
+                  </div>
+                ) : panelStatus === 'error' ? (
+                  <div className="rounded-xl bg-[#5B21B6] text-white p-6 flex flex-col items-center text-center gap-3">
+                    <AlertTriangle size={22} />
+                    <p className="text-sm font-bold tracking-wide">Error al procesar</p>
+                    <p className="text-xs text-white/80">{panelErrorMessage || 'Ocurrió un error inesperado.'}</p>
+                    <button
+                      onClick={handleProcesarDesdeMetrados}
+                      className="px-4 py-2 bg-white text-[#5B21B6] rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors"
+                    >
+                      Reintentar
+                    </button>
+                  </div>
+                ) : (
+                  <div className="py-1">
+                    <div className="flex items-center gap-2 mb-2 px-1">
+                      <CheckCircle2 size={14} className="text-emerald-600 flex-shrink-0" />
+                      <p className="text-xs font-semibold text-emerald-700">Metrados listos</p>
+                    </div>
+                    {currentFileId && <PartidasTree ifcFileId={currentFileId} />}
+                  </div>
+                )
               )}
             </div>
 
@@ -213,96 +582,290 @@ const Visor3DTab: React.FC = () => {
             )}
           </div>
 
-          {/* --- BARRA FLOTANTE INFERIOR: todo unido en una sola barra continua, compacta --- */}
-<div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[9700] flex items-center bg-white/95 backdrop-blur-md border border-gray-200 rounded-xl shadow-xl px-0.5 py-0.5">
+          {/* --- BARRA FLOTANTE INFERIOR --- */}
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[9700] flex items-center bg-white/95 backdrop-blur-md border border-gray-200 rounded-xl shadow-xl px-0.5 py-0.5">
 
-  {/* Grupo 1: Cargar/Cambiar IFC + Limpiar — FUNCIONAL */}
-  <label className="cursor-pointer flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200">
-    <UploadSimple size={14} weight="regular" />
-    <span className="text-[9px] font-medium whitespace-nowrap">
-      {ifcFile ? 'Cambiar IFC' : 'Cargar IFC'}
-    </span>
-    <input type="file" accept=".ifc,.IFC" className="hidden" onChange={handleFileUpload} />
-  </label>
+            {/* Grupo 1: Cargar/Cambiar IFC + Limpiar */}
+            <div className="relative">
+              <button
+                onClick={() => setShowEntryPopover(showEntryPopover === 'floating' ? null : 'floating')}
+                className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
+              >
+                <UploadSimple size={14} weight="regular" />
+                <span className="text-[9px] font-medium whitespace-nowrap">
+                  {ifcFile ? 'Cambiar IFC' : 'Cargar IFC'}
+                </span>
+              </button>
+              {showEntryPopover === 'floating' && <EntryPopover align="up" />}
+            </div>
 
-  {ifcFile && (
-    <button
-      onClick={clearIFC}
-      className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors duration-200"
-    >
-      <XIcon size={14} weight="regular" />
-      <span className="text-[9px] font-medium whitespace-nowrap">Limpiar</span>
-    </button>
-  )}
+            {ifcFile && (
+              <button
+                onClick={clearIFC}
+                className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-500 hover:bg-red-50 hover:text-red-600 transition-colors duration-200"
+              >
+                <XIcon size={14} weight="regular" />
+                <span className="text-[9px] font-medium whitespace-nowrap">Limpiar</span>
+              </button>
+            )}
 
-  <div className="w-px h-6 bg-gray-200 mx-0.5" />
+            <div className="w-px h-6 bg-gray-200 mx-0.5" />
 
-  {/* Grupo 2: Buscador por ID — FUNCIONAL */}
-  <div className="relative">
-    <button
-      onClick={() => setSearchOpen((prev) => !prev)}
-      disabled={!ifcArrayBuffer}
-      className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition-colors duration-200 ${
-        searchOpen
-          ? 'bg-[#0056b3] text-white'
-          : 'text-gray-700 hover:bg-gray-100 hover:text-[#0056b3]'
-      } ${!ifcArrayBuffer ? 'opacity-40 cursor-not-allowed' : ''}`}
-      title="Buscar elemento por ID IFC"
-    >
-      <Search size={14} />
-      <span className="text-[9px] font-medium whitespace-nowrap">Buscar ID</span>
-    </button>
+            {/* Grupo 2: Buscador por ID o GUID */}
+            <div className="relative">
+              <button
+                onClick={() => setSearchOpen((prev) => !prev)}
+                disabled={!ifcArrayBuffer}
+                className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg transition-colors duration-200 ${
+                  searchOpen
+                    ? 'bg-[#0056b3] text-white'
+                    : 'text-gray-700 hover:bg-gray-100 hover:text-[#0056b3]'
+                } ${!ifcArrayBuffer ? 'opacity-40 cursor-not-allowed' : ''}`}
+                title="Buscar elemento por ID o GUID IFC"
+              >
+                <Search size={14} />
+                <span className="text-[9px] font-medium whitespace-nowrap">Buscar ID</span>
+              </button>
 
-    {searchOpen && (
-      <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-gray-200 p-3 w-56">
-        <p className="text-[11px] font-semibold text-slate-500 mb-1.5">Buscar por ID IFC</p>
-        <div className="flex gap-1.5">
-          <input
-            type="number"
-            value={searchId}
-            onChange={(e) => { setSearchId(e.target.value); setSearchError(null); }}
-            onKeyDown={(e) => e.key === 'Enter' && handleSearchById()}
-            placeholder="Ej: 3584"
-            className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] outline-none"
-            autoFocus
-          />
-          <button
-            onClick={handleSearchById}
-            className="px-3 py-1.5 bg-[#0056b3] text-white text-sm rounded-lg hover:bg-[#004494] transition-colors"
-          >
-            Ir
-          </button>
+              {searchOpen && (
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 bg-white rounded-xl shadow-2xl border border-gray-200 p-3 w-56">
+                  <p className="text-[11px] font-semibold text-slate-500 mb-1.5">Buscar por ID o GUID</p>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={searchId}
+                      onChange={(e) => { setSearchId(e.target.value); setSearchError(null); }}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearchById()}
+                      placeholder=" "
+                      className="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] outline-none"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSearchById}
+                      className="px-3 py-1.5 bg-[#0056b3] text-white text-sm rounded-lg hover:bg-[#004494] transition-colors"
+                    >
+                      Ir
+                    </button>
+                  </div>
+                  {searchError && <p className="text-[11px] text-red-500 mt-1.5">{searchError}</p>}
+                </div>
+              )}
+            </div>
+
+            <div className="w-px h-6 bg-gray-200 mx-0.5" />
+
+            {/* Grupo 3: Sincronizar con Revit — estático */}
+            <button
+              onClick={() => alert('Sincronización con Revit: próximamente disponible.')}
+              className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
+            >
+              <RefreshCw size={14} />
+              <span className="text-[9px] font-medium whitespace-nowrap">Sincronizar</span>
+            </button>
+
+            <div className="w-px h-6 bg-gray-200 mx-0.5" />
+
+            {/* Grupo 4: Descargar datos — estático */}
+            <button
+              onClick={() => alert('Descarga de datos: próximamente disponible.')}
+              className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
+              title="Descargar datos"
+            >
+              <FileDown size={14} />
+              <span className="text-[9px] font-medium whitespace-nowrap">Descargar</span>
+            </button>
+          </div>
         </div>
-        {searchError && <p className="text-[11px] text-red-500 mt-1.5">{searchError}</p>}
       </div>
-    )}
-  </div>
 
-  <div className="w-px h-6 bg-gray-200 mx-0.5" />
+      {/* ============ POPUP: Solo graficar / Procesar (tras elegir archivo Local) ============ */}
+      {pendingLocalFile && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10200]">
+          <div className="bg-white rounded-xl w-[420px] shadow-2xl border border-gray-200 overflow-hidden">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                <FileText size={18} className="text-[#0056b3]" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-800 truncate">{pendingLocalFile.name}</p>
+                <p className="text-xs text-slate-500">{(pendingLocalFile.size / 1024 / 1024).toFixed(2)} MB</p>
+              </div>
+            </div>
 
-  {/* Grupo 3: Sincronizar con Revit — estático */}
-  <button
-    onClick={() => alert('Sincronización con Revit: próximamente disponible.')}
-    className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
-  >
-    <RefreshCw size={14} />
-    <span className="text-[9px] font-medium whitespace-nowrap">Sincronizar</span>
-  </button>
+            <div className="p-5">
+              <p className="text-sm text-slate-600 mb-4">¿Qué querés hacer con este archivo?</p>
 
-  <div className="w-px h-6 bg-gray-200 mx-0.5" />
+              <div className="space-y-2">
+                <button
+                  onClick={handleChooseSoloGraficar}
+                  className="w-full flex items-center gap-3 p-3.5 rounded-lg border border-gray-200 hover:border-[#0056b3] hover:bg-blue-50/40 transition-colors text-left"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                    <Eye size={17} className="text-slate-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Solo graficar</p>
+                    <p className="text-xs text-slate-500">Ver el modelo en el visor 3D, sin enviarlo al servidor.</p>
+                  </div>
+                </button>
 
-  {/* Grupo 4: Descargar datos — estático */}
-  <button
-    onClick={() => alert('Descarga de datos: próximamente disponible.')}
-    className="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
-    title="Descargar datos"
-  >
-    <FileDown size={14} />
-    <span className="text-[9px] font-medium whitespace-nowrap">Descargar</span>
-  </button>
-</div>
+                <button
+                  onClick={handleChooseProcesar}
+                  className="w-full flex items-center gap-3 p-3.5 rounded-lg border border-gray-200 hover:border-[#0056b3] hover:bg-blue-50/40 transition-colors text-left"
+                >
+                  <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                    <Cpu size={17} className="text-[#0056b3]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Procesar</p>
+                    <p className="text-xs text-slate-500">Graficar y enviarlo al servidor para calcular metrados.</p>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-gray-100 bg-gray-50/70 flex justify-end">
+              <button
+                onClick={cancelPendingLocal}
+                className="px-4 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
+
+      {/* ============ MODAL: Ya cargado (Procesados / No procesados) ============ */}
+      {showLoadedModal && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10200]">
+          <div className="bg-white rounded-xl w-[520px] max-h-[80vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <h3 className="text-sm font-bold text-slate-800">Archivos IFC del proyecto</h3>
+              <button
+                onClick={() => setShowLoadedModal(false)}
+                className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div className="px-5 pt-4 flex-shrink-0">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { setLoadedTab('procesados'); setSelectedLoadedFileId(null); }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                    loadedTab === 'procesados'
+                      ? 'bg-[#0056b3] text-white border-[#0056b3]'
+                      : 'bg-white text-slate-600 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  Procesados
+                </button>
+                <button
+                  onClick={() => { setLoadedTab('no_procesados'); setSelectedLoadedFileId(null); }}
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                    loadedTab === 'no_procesados'
+                      ? 'bg-[#0056b3] text-white border-[#0056b3]'
+                      : 'bg-white text-slate-600 border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  No procesados
+                </button>
+              </div>
+            </div>
+
+            {/* Buscador */}
+            <div className="px-5 pt-3 flex-shrink-0">
+              <div className="flex items-center border border-gray-200 rounded-lg px-3 py-2 gap-2 focus-within:ring-2 focus-within:ring-[#0056b3]">
+                <Search size={14} className="text-slate-400" />
+                <input
+                  type="text"
+                  value={loadedSearch}
+                  onChange={(e) => setLoadedSearch(e.target.value)}
+                  placeholder="Buscar por nombre de archivo..."
+                  className="flex-1 text-sm outline-none bg-transparent"
+                />
+                <button
+                  onClick={fetchLoadedFiles}
+                  title="Actualizar"
+                  className="text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <RefreshCw size={14} className={loadedLoading ? 'animate-spin' : ''} />
+                </button>
+              </div>
+            </div>
+
+            {/* Lista */}
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3 space-y-2">
+              {loadedLoading ? (
+                <div className="text-center py-10 text-slate-400">
+                  <RefreshCw size={20} className="animate-spin mx-auto mb-2" />
+                  <p className="text-sm">Cargando archivos...</p>
+                </div>
+              ) : loadedError ? (
+                <div className="text-center py-10 text-red-500">
+                  <AlertTriangle size={20} className="mx-auto mb-2" />
+                  <p className="text-sm">{loadedError}</p>
+                </div>
+              ) : filteredLoadedFiles.length === 0 ? (
+                <div className="text-center py-10 text-slate-400">
+                  <FileSearch size={22} className="mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">
+                    {loadedSearch.trim() ? 'No se encontraron archivos' : 'No hay archivos en esta categoría'}
+                  </p>
+                </div>
+              ) : (
+                filteredLoadedFiles.map((file) => (
+                  <button
+                    key={file.file_id}
+                    onClick={() => setSelectedLoadedFileId(file.file_id)}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors flex items-center gap-3 ${
+                      selectedLoadedFileId === file.file_id
+                        ? 'border-[#0056b3] bg-blue-50/50'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
+                      <FileText size={16} className="text-slate-500" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-700 truncate">{file.name}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {formatBytes(file.file_size)} · {new Date(file.uploaded_at).toLocaleDateString()}
+                      </p>
+                    </div>
+                    <IfcStatusBadge status={file.ifc_status} />
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="px-5 py-3.5 border-t border-gray-100 bg-gray-50/70 flex justify-end gap-2 flex-shrink-0">
+              <button
+                onClick={() => setShowLoadedModal(false)}
+                className="px-4 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleApplyLoadedSelection}
+                disabled={!selectedLoadedFileId || applyingSelection}
+                className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
+                  selectedLoadedFileId && !applyingSelection
+                    ? 'bg-[#0056b3] text-white hover:bg-[#004494]'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                {applyingSelection && <Loader2 size={14} className="animate-spin" />}
+                Cargar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

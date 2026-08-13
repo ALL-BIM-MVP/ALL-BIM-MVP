@@ -68,7 +68,7 @@ export const getCurrentUserProjectRole = async (projectId: number): Promise<{ ro
 export const getMeInvitations = async (
     filter: 'all' | 'pending' | 'completed' = 'pending'
 ): Promise<any[]> => {
-    const response = await api.get(`/api/projects/invitations/me?filter=${filter}`);
+    const response = await api.get(`/api/users/invitations?filter=${filter}`);
     return response || [];
 };
 

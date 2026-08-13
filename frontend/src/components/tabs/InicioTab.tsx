@@ -130,37 +130,45 @@ const InicioTab: React.FC<InicioTabProps> = ({
   const indicadoresPct = 74; // PLACEHOLDER
 
   return (
-    <div className="flex items-start justify-center min-h-[500px] relative py-2">
-      <div className="w-full max-w-4xl">
+    <div className="flex items-start justify-center min-h-[600px] relative py-2">
+      <div className="w-full max-w-5xl">
         <div className="bg-white rounded-md border border-gray-200 shadow-sm overflow-hidden">
 
-          {/* ---------- CABECERA: título + imagen (izq) / fechas (der) ---------- */}
+          {/* ---------- CABECERA: eyebrow + insignia + barra de acento (igual patrón que Archivos/Colaboradores) ---------- */}
           <div className="p-6 pb-0 flex items-start justify-between gap-4 flex-wrap">
-            <div className="min-w-0">
-              {isEditingInfo ? (
-                <input
-                  type="text"
-                  value={editForm.name}
-                  onChange={(e) => onEditChange('name', e.target.value)}
-                  className="text-xl font-bold text-gray-800 border border-gray-300 rounded-[4px] px-2 py-1 outline-none focus:ring-2 focus:ring-[#0056b3]"
-                />
-              ) : (
-                <h2 className="text-xl font-bold text-gray-800">{project.name}</h2>
-              )}
-              <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-[4px] text-[11px] font-semibold border ${
-                project.hasIFC
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-amber-50 text-amber-700 border-amber-200'
-              }`}>
-                {project.hasIFC ? <CheckCircle size={13} weight="fill" /> : <WarningCircle size={13} weight="fill" />}
-                {project.hasIFC ? 'IFC Cargado' : 'Sin IFC'}
-              </span>
+            <div className="flex items-start gap-3.5 border-l-[3px] border-[#0056b3] pl-4 min-w-0">
+              <div className="w-10 h-10 rounded-md bg-[#0056b3] flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Buildings size={18} weight="fill" className="text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[10px] font-bold text-[#0056b3] uppercase tracking-wider mb-0.5">
+                  Resumen del proyecto
+                </p>
+                {isEditingInfo ? (
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => onEditChange('name', e.target.value)}
+                    className="text-xl font-bold text-gray-800 border border-gray-300 rounded-[4px] px-2 py-1 outline-none focus:ring-2 focus:ring-[#0056b3]"
+                  />
+                ) : (
+                  <h2 className="text-xl font-bold text-gray-800 leading-tight truncate">{project.name}</h2>
+                )}
+                <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-[4px] text-[11px] font-semibold border ${
+                  project.hasIFC
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                    : 'bg-amber-50 text-amber-700 border-amber-200'
+                }`}>
+                  {project.hasIFC ? <CheckCircle size={13} weight="fill" /> : <WarningCircle size={13} weight="fill" />}
+                  {project.hasIFC ? 'IFC Cargado' : 'Sin IFC'}
+                </span>
+              </div>
             </div>
 
             {canActuallyEdit && (
               <button
                 onClick={isEditingInfo ? onCancelEditing : onStartEditing}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-[4px] hover:border-gray-300 hover:text-gray-700 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-[4px] hover:border-gray-300 hover:text-gray-700 transition-colors flex-shrink-0"
               >
                 <PencilSimple size={14} weight="bold" />
                 {isEditingInfo ? 'Cancelar' : 'Editar'}

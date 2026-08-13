@@ -21,6 +21,40 @@ interface SearchUserResult {
   email: string;
 }
 
+// Paleta de avatares — se elige de forma estable a partir del nombre/email,
+// así la misma persona siempre tiene el mismo color entre renders.
+const AVATAR_PALETTE = [
+  { bg: 'bg-blue-100', text: 'text-blue-600' },
+  { bg: 'bg-purple-100', text: 'text-purple-600' },
+  { bg: 'bg-emerald-100', text: 'text-emerald-600' },
+  { bg: 'bg-amber-100', text: 'text-amber-600' },
+  { bg: 'bg-pink-100', text: 'text-pink-600' },
+  { bg: 'bg-cyan-100', text: 'text-cyan-600' },
+  { bg: 'bg-indigo-100', text: 'text-indigo-600' },
+  { bg: 'bg-teal-100', text: 'text-teal-600' },
+];
+
+function getInitial(name?: string, email?: string): string {
+  const source = name?.trim() || email?.trim() || '?';
+  return source.charAt(0).toUpperCase();
+}
+
+function getAvatarColor(seed: string): { bg: string; text: string } {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
+  return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+
+const MemberAvatar: React.FC<{ name?: string; email?: string; size?: 'sm' | 'md' }> = ({ name, email, size = 'sm' }) => {
+  const colors = getAvatarColor(name || email || '?');
+  const dims = size === 'md' ? 'w-9 h-9 text-sm' : 'w-8 h-8 text-sm';
+  return (
+    <div className={`${dims} rounded-full ${colors.bg} ${colors.text} flex items-center justify-center font-semibold ring-2 ring-white shadow-sm flex-shrink-0`}>
+      {getInitial(name, email)}
+    </div>
+  );
+};
+
 const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId }) => {
   // ============ HOOK DE INVITACIONES ============
   const {
@@ -200,6 +234,8 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
   }, [searchUserQuery, searchUsers]);
 
   // Cierra el listado de resultados si se hace clic fuera del buscador
+  // (searchBoxRef ahora envuelve TANTO el input como el dropdown de
+  // resultados, así un click dentro de la lista ya no cuenta como "afuera")
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (searchBoxRef.current && !searchBoxRef.current.contains(event.target as Node)) {
@@ -345,8 +381,20 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
   const isInviteButtonEnabled = selectedUser !== null && inviteRoleId > 0 && !submitting;
 
   return (
-    <div className="flex items-center justify-center min-h-[600px] w-full">
-      <div className="relative z-10 bg-white/95 backdrop-blur-md rounded-lg shadow-2xl ring-1 ring-black/5 border border-gray-200/70 p-10 max-w-5xl w-full">
+    <div className="relative flex items-center justify-center min-h-[600px] w-full overflow-hidden">
+      {/* Fondo: grid sutil tipo plano arquitectónico + resplandor de acento.
+          Puramente decorativo — pointer-events-none para no interferir con
+          el contenido que va encima. */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, rgba(0,86,179,0.06) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,86,179,0.06) 1px, transparent 1px)',
+          backgroundSize: '32px 32px',
+        }}
+      />
+
+      <div className="relative z-10 bg-white/95 backdrop-blur-md rounded-md border border-gray-200/70 p-10 max-w-5xl w-full">
 
         {/* ============ ANIMACIONES BÁSICAS ============ */}
         <style>{`
@@ -375,17 +423,26 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
 
         {/* ============ HEADER ============ */}
         <div className="flex items-center justify-between mb-6 pb-5 border-b border-gray-100">
-          <div className="flex items-center gap-3">
-            <span className="hidden sm:flex items-center justify-center w-10 h-10 rounded-md bg-[#0056b3]/10 text-[#0056b3]">
-              <Users size={20} />
-            </span>
-            <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Colaboradores</h2>
-            {isOwner && !checkingOwner && (
-              <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200 rounded-md text-xs font-semibold">
-                <Crown size={13} />
-                Owner
-              </span>
-            )}
+          <div className="flex items-start gap-3.5 border-l-[3px] border-[#0056b3] pl-4">
+            <div className="w-10 h-10 rounded-md bg-[#0056b3] flex items-center justify-center flex-shrink-0 mt-0.5">
+              <Users size={18} className="text-white" />
+            </div>
+            <div>
+              <p className="text-[10px] font-bold text-[#0056b3] uppercase tracking-wider mb-0.5">
+                Gestión de equipo
+              </p>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-xl leading-none">
+                  <span className="font-bold text-gray-800">Colaboradores</span>
+                </h2>
+                {isOwner && !checkingOwner && (
+                  <span className="flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200 rounded-md text-xs font-semibold">
+                    <Crown size={13} />
+                    Owner
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -411,10 +468,12 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
         )}
 
         {/* ============ 🔍 BUSCADOR + ROL + BOTÓN - TODO EN UNA FILA ============ */}
-        <div className="bg-gray-50/70 rounded-lg p-5 mb-6 border border-gray-100 shadow-sm">
+        <div className="bg-gray-50/70 rounded-md p-5 mb-6 border border-gray-100 shadow-sm">
           <div className="flex flex-wrap items-end gap-4">
 
-            {/* Buscar usuario */}
+            {/* Buscar usuario — el ref ahora envuelve INPUT + DROPDOWN,
+                así un click dentro del dropdown ya no se considera "afuera"
+                y no se cierra antes de que el onClick del resultado dispare. */}
             <div className="flex-1 min-w-[200px]" ref={searchBoxRef}>
               <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
                 Buscar usuario <span className="text-red-500">*</span>
@@ -443,6 +502,42 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
                     </button>
                   )}
                 </div>
+
+                {/* 👥 Resultados de búsqueda — ahora DENTRO del div ref'd y
+                    posicionado absoluto para flotar debajo del input sin
+                    salirse del contenedor que el listener de "click afuera"
+                    reconoce como "adentro". */}
+                {showUserSearch && (
+                  <div className="absolute left-0 right-0 mt-2 border border-gray-100 rounded-md max-h-48 overflow-y-auto bg-white shadow-xl ring-1 ring-black/5 z-20">
+                    {searchUserResults.length === 0 ? (
+                      <div className="p-4 text-center text-sm text-gray-400">
+                        {searchUserQuery.trim() ? 'No se encontraron usuarios' : 'Escribe para buscar usuarios'}
+                      </div>
+                    ) : (
+                      searchUserResults.map((user) => (
+                        <button
+                          key={user.user_id}
+                          onClick={() => handleSelectUser(user)}
+                          className={`w-full text-left p-3 hover:bg-blue-50/70 transition-colors border-b border-gray-100 last:border-0 flex items-center gap-3 ${
+                            selectedUser?.user_id === user.user_id ? 'bg-blue-50/70' : ''
+                          }`}
+                        >
+                          <MemberAvatar name={user.name} email={user.email} />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-700">{user.name}</p>
+                            <p className="text-xs text-gray-400 flex items-center gap-1">
+                              <AtSign size={12} />
+                              {user.email}
+                            </p>
+                          </div>
+                          {selectedUser?.user_id === user.user_id && (
+                            <Check size={18} className="text-[#0056b3]" />
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -483,48 +578,11 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
             </div>
           </div>
 
-          {/* 👥 Resultados de búsqueda - debajo de la fila */}
-          {showUserSearch && (
-            <div className="mt-2 border border-gray-100 rounded-md max-h-48 overflow-y-auto bg-white shadow-xl ring-1 ring-black/5">
-              {searchUserResults.length === 0 ? (
-                <div className="p-4 text-center text-sm text-gray-400">
-                  {searchUserQuery.trim() ? 'No se encontraron usuarios' : 'Escribe para buscar usuarios'}
-                </div>
-              ) : (
-                searchUserResults.map((user) => (
-                  <button
-                    key={user.user_id}
-                    onClick={() => handleSelectUser(user)}
-                    className={`w-full text-left p-3 hover:bg-blue-50/70 transition-colors border-b border-gray-100 last:border-0 flex items-center gap-3 ${
-                      selectedUser?.user_id === user.user_id ? 'bg-blue-50/70' : ''
-                    }`}
-                  >
-                    <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-semibold text-sm ring-2 ring-white shadow-sm">
-                      {user.name?.charAt(0).toUpperCase() || '?'}
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-gray-700">{user.name}</p>
-                      <p className="text-xs text-gray-400 flex items-center gap-1">
-                        <AtSign size={12} />
-                        {user.email}
-                      </p>
-                    </div>
-                    {selectedUser?.user_id === user.user_id && (
-                      <Check size={18} className="text-[#0056b3]" />
-                    )}
-                  </button>
-                ))
-              )}
-            </div>
-          )}
-
           {/* ✅ Usuario seleccionado */}
           {selectedUser && (
             <div className="mt-3 p-3 bg-gradient-to-r from-blue-50 to-blue-50/40 border border-blue-100 rounded-md flex items-center justify-between shadow-sm animate-slideDown">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center font-semibold text-sm ring-2 ring-white shadow-sm">
-                  {selectedUser.name?.charAt(0).toUpperCase() || '?'}
-                </div>
+                <MemberAvatar name={selectedUser.name} email={selectedUser.email} />
                 <div>
                   <p className="text-sm font-medium text-gray-700">{selectedUser.name}</p>
                   <p className="text-xs text-gray-500">{selectedUser.email}</p>
@@ -558,7 +616,7 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
         </div>
 
         {/* ============ BARRA DE ACCIONES ============ */}
-        <div className="bg-gray-50/70 rounded-lg p-4 mb-6 border border-gray-100 shadow-sm">
+        <div className="bg-gray-50/70 rounded-md p-4 mb-6 border border-gray-100 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="text-sm text-gray-500">
@@ -588,7 +646,7 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
         </div>
 
         {/* ============ TABLA DE INVITACIONES PENDIENTES ============ */}
-        <div className="bg-white rounded-lg overflow-hidden border border-gray-100 shadow-sm ring-1 ring-black/5 mb-6">
+        <div className="bg-white rounded-md overflow-hidden border border-gray-100 shadow-sm ring-1 ring-black/5 mb-6">
           <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <h3 className="font-semibold text-gray-800">
               Invitaciones Pendientes
@@ -642,7 +700,12 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
                 <tbody className="divide-y divide-gray-100">
                   {invitationsPendientes.map((inv) => (
                     <tr key={inv.invitation_id} className="hover:bg-blue-50/30 transition-colors">
-                      <td className="px-6 py-3 font-medium text-gray-700">{inv.email}</td>
+                      <td className="px-6 py-3 font-medium text-gray-700">
+                        <div className="flex items-center gap-2.5">
+                          <MemberAvatar email={inv.email} />
+                          {inv.email}
+                        </div>
+                      </td>
                       <td className="px-6 py-3">
                         <span className={`px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${getRoleColor(inv.project_role?.project_role_id || 10)}`}>
                           {inv.project_role?.project_role_name || 'Sin rol'}
@@ -677,7 +740,7 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
         </div>
 
         {/* ============ TABLA DE MIEMBROS ============ */}
-        <div className="bg-white rounded-lg overflow-hidden border border-gray-100 shadow-sm ring-1 ring-black/5">
+        <div className="bg-white rounded-md overflow-hidden border border-gray-100 shadow-sm ring-1 ring-black/5">
           <div className="px-6 py-4 border-b border-gray-100">
             <h3 className="font-semibold text-gray-800">
               Lista de Miembros
@@ -706,7 +769,12 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
                 ) : (
                   members.map((member: any) => (
                     <tr key={member.user_id} className="hover:bg-blue-50/30 transition-colors">
-                      <td className="px-6 py-3 font-medium text-gray-700">{member.user_name}</td>
+                      <td className="px-6 py-3 font-medium text-gray-700">
+                        <div className="flex items-center gap-2.5">
+                          <MemberAvatar name={member.user_name} email={member.email} size="md" />
+                          {member.user_name}
+                        </div>
+                      </td>
                       <td className="px-6 py-3">
                         <span className={`px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${getRoleColor(member.project_role_id || 10)}`}>
                           {member.project_role_name}
@@ -724,7 +792,7 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
         {/* ============ MODAL: ETIQUETAS / ROLES ============ */}
         {showTagsModal && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg w-[500px] max-h-[90vh] shadow-2xl ring-1 ring-black/5 border border-gray-100 overflow-hidden">
+            <div className="bg-white rounded-md w-[500px] max-h-[90vh] shadow-2xl ring-1 ring-black/5 border border-gray-100 overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                 <div className="flex items-center gap-3">
                   <span className="flex items-center justify-center w-9 h-9 rounded-md bg-[#0056b3]/10 text-[#0056b3]">

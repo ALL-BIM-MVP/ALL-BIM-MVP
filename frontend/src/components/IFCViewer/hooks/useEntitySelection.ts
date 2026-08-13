@@ -195,10 +195,60 @@ export function useEntitySelection(
       setPopupScreenPos({ x: screen.x / scaleX, y: screen.y / scaleY });
     }
   }, [rendererRef]);
+  // Mapa GlobalId -> expressId, se construye una sola vez por modelo y se cachea
+const guidMapRef = useRef<Map<string, number> | null>(null);
+const guidMapModelIdRef = useRef<number | null>(null);
 
+function buildGuidMap(api: any, modelID: number): Map<string, number> {
+  const map = new Map<string, number>();
+  const maxId = api.GetMaxExpressID(modelID);
+  for (let id = 1; id <= maxId; id++) {
+    try {
+      const line = api.GetLine(modelID, id);
+      const guid = line?.GlobalId?.value;
+      if (guid) map.set(guid, id);
+    } catch {
+      // id sin línea válida, se salta
+    }
+  }
+  return map;
+}
+
+const selectByIdOrGuid = useCallback(async (rawInput: string): Promise<boolean> => {
+  const input = rawInput.trim();
+  if (!input) return false;
+
+  const store = storeRef.current;
+  if (!store?.api || store.modelID === undefined) return false;
+  const { api, modelID } = store;
+
+  // Caso 1: expressId numérico
+  if (/^\d+$/.test(input)) {
+    const expressId = parseInt(input, 10);
+    try {
+      api.GetLine(modelID, expressId); // valida que exista
+    } catch {
+      return false;
+    }
+    await selectEntityById(expressId);
+    return true;
+  }
+
+  // Caso 2: GlobalId (GUID IFC, string base64 de ~22 caracteres)
+  if (guidMapModelIdRef.current !== modelID || !guidMapRef.current) {
+    guidMapRef.current = buildGuidMap(api, modelID);
+    guidMapModelIdRef.current = modelID;
+  }
+  const expressId = guidMapRef.current.get(input);
+  if (expressId === undefined) return false;
+
+  await selectEntityById(expressId);
+  return true;
+}, [selectEntityById, storeRef]);
   return {
     selectedEntity,
     selectEntityById,
+    selectByIdOrGuid,
     clearSelection,
     popupVisible,
     popupScreenPos,

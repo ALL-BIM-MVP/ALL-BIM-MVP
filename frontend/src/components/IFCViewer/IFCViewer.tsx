@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Focus, ChevronDown, Search, Crosshair } from 'lucide-react';
+import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Focus, ChevronDown, Search, Crosshair, Paintbrush } from 'lucide-react';
 import { useIfcModel } from './hooks/useIfcModel';
 import { ViewPreset } from './types';
 import PropertiesPanel from "./PropertiesPanel/PropertiesPanel";
@@ -11,6 +11,7 @@ interface IFCViewerProps {
 
 export interface IFCViewerHandle {
   selectEntityById: (expressId: number) => void;
+  selectByIdOrGuid: (value: string) => Promise<boolean>;
 }
 
 const InfoRow: React.FC<{ label: string; value: string; multiline?: boolean }> = ({ label, value, multiline }) => (
@@ -118,6 +119,8 @@ const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, 
   );
 };
 
+const PAINT_COLORS = ['#ff3b30', '#34c759', '#0056b3', '#ffcc00', '#ffffff'];
+
 const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, ref) => {
   const {
     canvasRef,
@@ -149,6 +152,15 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     crosses,
     clearCross,
     removeCross,
+    // --- Pintar (dibujo libre 3D pegado a la superficie) ---
+    paintMode,
+    togglePaintMode,
+    exitPaintMode,
+    paintColor,
+    setPaintColor,
+    strokes,
+    clearStrokes,
+    removeStroke,
     // --- Sección ---
     sectionAxis,
     sectionPosition,
@@ -168,11 +180,13 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     popupVisible,
     popupScreenPos,
     selectEntityById,
+    selectByIdOrGuid,
     paramIndex,
   } = useIfcModel(fileBuffer);
 
   useImperativeHandle(ref, () => ({
     selectEntityById: (expressId: number) => selectEntityById(expressId),
+    selectByIdOrGuid: (value: string) => selectByIdOrGuid(value),
   }));
 
   // Panel unificado (buscador global + categorías del elemento). Se abre solo
@@ -187,14 +201,26 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
 
   const handleSelectMeasure = () => {
     if (crossMode) exitCrossMode();
+    if (paintMode) exitPaintMode();
     enableAndArmMeasure(); // activa el modo (si no estaba) y arma el punto 1
     setRulerMenuOpen(false);
   };
 
   const handleSelectCross = () => {
     if (measureMode) exitMeasureMode();
+    if (paintMode) exitPaintMode();
     enableAndArm(); // activa el modo (si no estaba) y arma UNA colocación nueva
     setRulerMenuOpen(false);
+  };
+
+  const handleTogglePaint = () => {
+    if (paintMode) {
+      exitPaintMode();
+      return;
+    }
+    if (measureMode) exitMeasureMode();
+    if (crossMode) exitCrossMode();
+    togglePaintMode();
   };
 
   return (
@@ -286,6 +312,17 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
                 )}
               </div>
 
+              {/* Botón Pintar: dibujo libre 3D pegado a la superficie del modelo */}
+              <button
+                onClick={handleTogglePaint}
+                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+                  paintMode ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
+                }`}
+                title={paintMode ? 'Salir de pintar' : 'Pintar sobre el modelo'}
+              >
+                <Paintbrush size={16} />
+              </button>
+
               <button
                 onClick={toggleBackground}
                 className="w-9 h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
@@ -301,6 +338,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
               >
                 <Camera size={16} />
               </button>
+
             </div>
 
             {/* Panel unificado: buscador global o categorías del elemento seleccionado */}
@@ -502,6 +540,39 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
   </div>
 )}
               </>
+            )}
+
+            {/* --- Barra de estado: modo Pintar (paleta de color + borrar) --- */}
+            {paintMode && (
+              <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-black/85 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-3 shadow-xl">
+                <Paintbrush size={14} />
+                <div className="flex items-center gap-1.5">
+                  {PAINT_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setPaintColor(c)}
+                      className="w-5 h-5 rounded-full border-2 transition-colors"
+                      style={{ backgroundColor: c, borderColor: paintColor === c ? '#ffffff' : 'transparent' }}
+                      title={c}
+                    />
+                  ))}
+                </div>
+                {strokes.length > 0 && (
+                  <button
+                    onClick={clearStrokes}
+                    className="text-[11px] text-blue-300 hover:text-blue-200 font-medium"
+                  >
+                    Borrar todo
+                  </button>
+                )}
+                <button
+                  onClick={exitPaintMode}
+                  className="text-gray-400 hover:text-white"
+                  title="Salir de pintar"
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
             )}
 
             {sectionEnabled && (
