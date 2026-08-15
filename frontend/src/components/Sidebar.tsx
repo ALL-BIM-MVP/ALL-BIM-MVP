@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { Users, UserPlus, Folder, PlusCircle, Layers, ChevronLeft, ChevronRight, Mail } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
-import logo from "../assets/logo.png";
+import { Users, UserPlus, FolderKanban, Mail, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import logo from "../assets/logo3.png";
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 
 const Sidebar: React.FC = () => {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { canManageUsers, canInvite } = usePermissions();
   const navigate = useNavigate();
+  const location = useLocation();
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   const handleLogout = () => {
@@ -17,6 +18,17 @@ const Sidebar: React.FC = () => {
   };
 
   const showAdminSection = canManageUsers || canInvite;
+  const isActive = (path: string) => location.pathname.startsWith(path);
+
+  const linkClasses = (path: string) =>
+    `group flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] transition-colors ${
+      isActive(path)
+        ? 'bg-[#E6F0FA] text-[#0056b3] font-medium'
+        : 'text-[#3F4756] font-normal hover:bg-[#EFF6FC] hover:text-[#0056b3]'
+    }`;
+
+  const iconClasses = (path: string) =>
+    isActive(path) ? 'text-[#0056b3]' : 'text-[#8B93A1] group-hover:text-[#0056b3]';
 
   return (
     <>
@@ -32,97 +44,99 @@ const Sidebar: React.FC = () => {
       )}
 
       <aside
-        className={`relative bg-white border-r border-gray-200 flex flex-col justify-between h-screen transition-all duration-300 ease-in-out overflow-hidden ${
-          isCollapsed ? 'w-0 p-0 border-r-0' : 'w-[280px] p-6'
+        className={`relative bg-white border-r border-[#E2E5EA] h-screen transition-all duration-300 ease-in-out overflow-hidden ${
+          isCollapsed ? 'w-0 p-0 border-r-0' : 'w-[272px] p-5'
         }`}
       >
-        {/* Envuelve el contenido para que no se "aplaste" feo mientras colapsa,
-            solo se desvanece y el <aside> se encoge por fuera */}
-        <div className={`transition-opacity duration-200 ${isCollapsed ? 'opacity-0' : 'opacity-100'} w-[232px] shrink-0`}>
-          <div>
-            <div className="mb-10 flex items-center justify-between gap-1">
-              <div className="flex items-center gap-1">
-                <img src={logo} alt="Logo ALL-BIM" className="h-[65px] w-[70px]" />
-                <span className="font-bold text-[28px] text-[#0056b3]">ALL-BIM</span>
-              </div>
-              <button
-                onClick={() => setIsCollapsed(true)}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-                title="Ocultar menú"
-              >
-                <ChevronLeft size={22} />
-              </button>
+        {/* Contenedor flex de alto completo: nav arriba, usuario/logout siempre al fondo */}
+        <div
+          className={`h-full flex flex-col transition-opacity duration-200 ${
+            isCollapsed ? 'opacity-0' : 'opacity-100'
+          } w-[232px] shrink-0`}
+        >
+          {/* Logo */}
+          <div className="-mt-5 -mx-1 flex items-center justify-between shrink-0">
+            <div className="h-14 w-[190px] flex items-center">
+              <img src={logo} alt="Logo ALL-BIM" className="max-h-full max-w-full object-contain" />
             </div>
-
-            <nav className="space-y-8">
-              {showAdminSection && (
-                <div>
-                  <h4 className="text-[22px] font-sans font-bold text-[#0056b3] mb-5 pl-2">Administración</h4>
-                  <ul className="space-y-2 text-[16px] font-sans text-gray-600 pl-2 pr-2">
-                    {canManageUsers && (
-                      <li className="cursor-pointer group rounded-lg hover:bg-blue-100 transition-colors">
-                        <Link
-                          to="/admin/usuarios"
-                          className="flex items-center gap-3 p-3 rounded-lg group-hover:text-blue-700 transition-colors"
-                        >
-                          <Users size={20} className="text-gray-400 text-[#0056b3]" />
-                          <span>Gestión de Usuarios</span>
-                        </Link>
-                      </li>
-                    )}
-                    {canInvite && (
-                      <li className="cursor-pointer group rounded-lg hover:bg-blue-100 transition-colors">
-                        <Link
-                          to="/admin/invitaciones"
-                          className="flex items-center gap-3 p-3 rounded-lg group-hover:text-blue-700 transition-colors"
-                        >
-                          <UserPlus size={20} className="text-gray-400 group-hover:text-blue-600" />
-                          <span>Gestión de Invitaciones</span>
-                        </Link>
-                      </li>
-                    )}
-                  </ul>
-                </div>
-              )}
-
-              <div>
-                <h4 className="text-[22px] font-sans font-bold text-[#0056b3] mb-5 pl-2">Proyectos</h4>
-                <ul className="space-y-2 text-[16px] font-sans text-gray-600 pl-2 pr-2">
-                  <li className="cursor-pointer group rounded-lg hover:bg-blue-100 transition-colors">
-                    <Link
-                      to="/dashboard/projects"
-                      className="flex items-center gap-3 p-3 rounded-lg group-hover:text-blue-700 transition-colors"
-                    >
-                      <PlusCircle size={20} className="text-gray-400 group-hover:text-blue-600" />
-                      <span>proyectos</span>
-                    </Link>
-                  </li>
-                  <li className="cursor-pointer group rounded-lg hover:bg-blue-100 transition-colors">
-                    <Link
-                      to="/mis-invitaciones"
-                      className="flex items-center gap-3 p-3 rounded-lg group-hover:text-blue-700 transition-colors"
-                    >
-                      <Mail size={20} className="text-gray-400 group-hover:text-blue-600" />
-                      <span>Mis invitaciones</span>
-                    </Link>
-                  </li>
-                </ul>
-              </div>
-
-              
-            </nav>
+            <button
+              onClick={() => setIsCollapsed(true)}
+              className="text-[#C2C7CF] hover:text-[#5B6472] transition-colors p-1"
+              title="Ocultar menú"
+            >
+              <ChevronLeft size={20} />
+            </button>
           </div>
 
-          <div className="border-t border-gray-200 pt-4 mt-8">
+          <div className="h-px bg-[#E2E5EA] mt-4 mb-6 shrink-0" />
+
+          {/* Navegación */}
+          <nav className="flex-1 min-h-0 overflow-y-auto">
+            {showAdminSection && (
+              <div className="mb-7">
+                <h4 className="text-[13px] font-semibold uppercase tracking-wide text-[#3F7CB8] mb-3 pl-3">
+                  Administración
+                </h4>
+                <ul className="space-y-3.5">
+                  {canManageUsers && (
+                    <li>
+                      <Link to="/admin/usuarios" className={linkClasses('/admin/usuarios')}>
+                        <Users size={18} className={iconClasses('/admin/usuarios')} />
+                        <span>Gestión de Usuarios</span>
+                      </Link>
+                    </li>
+                  )}
+                  {canInvite && (
+                    <li>
+                      <Link to="/admin/invitaciones" className={linkClasses('/admin/invitaciones')}>
+                        <UserPlus size={18} className={iconClasses('/admin/invitaciones')} />
+                        <span>Gestión de Invitaciones</span>
+                      </Link>
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+
+            <div>
+              <h4 className="text-[13px] font-semibold uppercase tracking-wide text-[#3F7CB8] mb-3 pl-3">
+                Proyectos
+              </h4>
+              <ul className="space-y-3.5">
+                <li>
+                  <Link to="/dashboard/projects" className={linkClasses('/dashboard/projects')}>
+                    <FolderKanban size={18} className={iconClasses('/dashboard/projects')} />
+                    <span>Proyectos</span>
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/mis-invitaciones" className={linkClasses('/mis-invitaciones')}>
+                    <Mail size={18} className={iconClasses('/mis-invitaciones')} />
+                    <span>Mis invitaciones</span>
+                  </Link>
+                </li>
+              </ul>
+            </div>
+          </nav>
+
+          {/* Usuario + cerrar sesión: siempre pegado al fondo */}
+          <div className="border-t border-[#E2E5EA] pt-3 mt-3 shrink-0">
+            {user && (
+              <div className="flex items-center gap-2.5 px-2 py-2 mb-1">
+                <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-[13px] font-semibold shrink-0">
+                  {user?.name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium text-[#1C2430] truncate">{user?.name || 'Usuario'}</p>
+                  <p className="text-[12px] text-[#8B93A1] truncate">{user?.email || ''}</p>
+                </div>
+              </div>
+            )}
             <button
               onClick={handleLogout}
-              className="w-full text-left text-red-500 hover:text-red-700 font-medium p-3 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-3"
+              className="w-full text-left text-[#5B6472] hover:text-red-600 text-[14px] px-3 py-2.5 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-3"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                <polyline points="16 17 21 12 16 7" />
-                <line x1="21" y1="12" x2="9" y2="12" />
-              </svg>
+              <LogOut size={18} className="text-[#8B93A1]" />
               <span>Cerrar sesión</span>
             </button>
           </div>

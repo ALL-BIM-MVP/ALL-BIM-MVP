@@ -8,6 +8,7 @@ import * as WebIFC from 'web-ifc';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TypeGroup, ModelBounds, ViewPreset } from '../types';
 import { ThreeSceneController } from '../utils/ThreeSceneController';
+import { getIfcTypeName } from '../utils/ifcTypeNames';
 
 export interface ParamIndexEntry {
   expressId: number;
@@ -247,7 +248,7 @@ function buildMeshesFromModel(api: WebIFC.IfcAPI, modelID: number) {
     let typeName = 'UNKNOWN';
     try {
       const typeCode = api.GetLineType(modelID, expressId);
-      typeName = (WebIFC as any).IfcElements?.[typeCode] ?? String(typeCode);
+      typeName = getIfcTypeName(api, typeCode);
     } catch { /* si falla, se agrupa como UNKNOWN */ }
     if (!byType.has(typeName)) byType.set(typeName, []);
     byType.get(typeName)!.push(expressId);

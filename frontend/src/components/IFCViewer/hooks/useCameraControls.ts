@@ -1,7 +1,7 @@
 // Controles de cámara (orbit/pan/zoom), selección por click (picking) y modo caminar
 // (mirar con Pointer Lock). Consulta primero a la herramienta de medición, luego al
-// láser: si alguna consume el evento (colocar/arrastrar un punto), la cámara NO
-// orbita/hace pan.
+// láser, luego a pintar: si alguna consume el evento (colocar/arrastrar un punto o
+// trazo), la cámara NO orbita/hace pan.
 import { useEffect } from 'react';
 
 interface UseCameraControlsParams {
@@ -23,6 +23,9 @@ interface UseCameraControlsParams {
   onLaserMouseMove?: (clientX: number, clientY: number) => boolean;
   onLaserMouseUp?: () => boolean;
   onLaserHover?: (clientX: number, clientY: number) => void;
+  onPaintMouseDown?: (clientX: number, clientY: number) => boolean;
+  onPaintMouseMove?: (clientX: number, clientY: number) => boolean;
+  onPaintMouseUp?: () => boolean;
 }
 
 export function useCameraControls(params: UseCameraControlsParams) {
@@ -45,6 +48,9 @@ export function useCameraControls(params: UseCameraControlsParams) {
     onLaserMouseMove,
     onLaserMouseUp,
     onLaserHover,
+    onPaintMouseDown,
+    onPaintMouseMove,
+    onPaintMouseUp,
   } = params;
 
   useEffect(() => {
@@ -64,10 +70,16 @@ export function useCameraControls(params: UseCameraControlsParams) {
     let wheelEndTimeout: number | null = null;
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Prioridad: medición > láser > orbit/pan. Si alguna herramienta coloca o
-      // empieza a arrastrar un punto, no dejamos que además dispare la cámara.
+      // Prioridad: medición > láser > pintar > orbit/pan. Si alguna herramienta
+      // coloca o empieza a arrastrar un punto/trazo, no dejamos que además
+      // dispare la cámara.
       if (onMeasureMouseDown(e.clientX, e.clientY)) return;
       if (onLaserMouseDown?.(e.clientX, e.clientY)) return;
+
+      // Pintar SOLO responde al botón izquierdo (e.button === 0). Así el
+      // click derecho / medio queda libre para seguir moviendo la cámara
+      // (pan) con total normalidad mientras el modo pintar está activo.
+      if (e.button === 0 && onPaintMouseDown?.(e.clientX, e.clientY)) return;
 
       isDragging = true;
       isPanning = e.button === 1 || e.button === 2 || e.shiftKey;
@@ -82,11 +94,13 @@ export function useCameraControls(params: UseCameraControlsParams) {
       onMeasureHover(e.clientX, e.clientY);
       onLaserHover?.(e.clientX, e.clientY);
 
-      // Si hay un punto en arrastre (medición o láser), se re-raycastea y listo: no orbitar.
+      // Si hay un punto/trazo en arrastre (medición, láser o pintar), se
+      // re-raycastea y listo: no orbitar.
       const consumedByMeasure = onMeasureMouseMove(e.clientX, e.clientY);
       const consumedByLaser = !consumedByMeasure && (onLaserMouseMove?.(e.clientX, e.clientY) ?? false);
+      const consumedByPaint = !consumedByMeasure && !consumedByLaser && (onPaintMouseMove?.(e.clientX, e.clientY) ?? false);
 
-      if (consumedByMeasure || consumedByLaser) return;
+      if (consumedByMeasure || consumedByLaser || consumedByPaint) return;
 
       if (isWalkModeRef.current && document.pointerLockElement === canvas) {
         const sensitivity = 0.0022;
@@ -111,6 +125,7 @@ export function useCameraControls(params: UseCameraControlsParams) {
     const handleMouseUp = async (e: MouseEvent) => {
       if (onMeasureMouseUp()) return; // se soltó un punto de medición en arrastre
       if (onLaserMouseUp?.()) return; // se soltó un punto/codo del láser en arrastre
+      if (onPaintMouseUp?.()) return; // se soltó/terminó un trazo de pintado
 
       const wasDragging = isDragging;
       const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
@@ -206,5 +221,8 @@ export function useCameraControls(params: UseCameraControlsParams) {
     onLaserMouseMove,
     onLaserMouseUp,
     onLaserHover,
+    onPaintMouseDown,
+    onPaintMouseMove,
+    onPaintMouseUp,
   ]);
 }

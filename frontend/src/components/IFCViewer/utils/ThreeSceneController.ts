@@ -4,6 +4,14 @@ import type { ModelBounds, ViewPreset } from '../types';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
+// 👇 GROSOR DEL TRAZO DE PINTADO — modificá este valor (en metros/unidades del
+// modelo) para hacerlo más ancho o más fino. 0.008 = 8mm de radio (~16mm de
+// diámetro). Subilo un poco (ej: 0.012) si lo querés más grueso, bajalo (ej:
+// 0.005) si lo querés más fino. No lo subas demasiado o se va a ver como un
+// caño en vez de un marcador.
+const STROKE_RADIUS = 0.015;
+const STROKE_RADIAL_SEGMENTS = 12; // 6 = hexagonal, suficiente y liviano. 8+ = más redondo pero más caro.
+
 class OrbitCameraController {
   camera: THREE.PerspectiveCamera;
   target = new THREE.Vector3(0, 0, 0);
@@ -151,10 +159,15 @@ export class ThreeSceneController {
   private isolatedIds: Set<number> | null = null;
   private selectedIds = new Set<number>();
   private clipPlane: THREE.Plane | null = null;
-private ghostedIds = new Set<number>();
+  private ghostedIds = new Set<number>();
   private lightBgTexture: THREE.CanvasTexture;
   private darkBgTexture: THREE.CanvasTexture;
   private elementMarker: THREE.Box3Helper | null = null;
+
+  // Trazos de pintado: cada uno es un Mesh (tubo), no una Line — así tiene
+  // grosor real que se ve consistente desde cualquier ángulo de cámara.
+  private paintStrokes = new Map<string, THREE.Mesh>();
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -174,6 +187,7 @@ private ghostedIds = new Set<number>();
     this.lightBgTexture = this.buildGradientTexture('#f5f6f8', '#c8ccd1');
     this.darkBgTexture = this.buildGradientTexture('#2a2e33', '#0d0f11');
   }
+
   setGhostedEntities(ids: Set<number>) {
     this.ghostedIds = ids;
     this.applyGhostFlags();
@@ -191,6 +205,7 @@ private ghostedIds = new Set<number>();
       ghostedAttr.needsUpdate = true;
     }
   }
+
   private buildGradientTexture(topColor: string, bottomColor: string): THREE.CanvasTexture {
     const canvas = document.createElement('canvas');
     canvas.width = 2;
@@ -209,6 +224,7 @@ private ghostedIds = new Set<number>();
   async init() {}
 
   getCamera() { return this.cameraController; }
+
   // Marca el elemento con un box outline rojo que ignora el depth buffer —
   // se ve "atravesando" cualquier geometría que esté delante, desde cualquier
   // ángulo, como un láser de contorno. Reemplaza cualquier marcador anterior.
@@ -248,6 +264,7 @@ private ghostedIds = new Set<number>();
     (this.elementMarker.material as THREE.Material).dispose();
     this.elementMarker = null;
   }
+
   loadGeometry(meshes: THREE.Mesh[]) {
     for (const mesh of meshes) {
       this.modelGroup.add(mesh);
@@ -431,6 +448,7 @@ private ghostedIds = new Set<number>();
       result.radius
     );
   }
+
   // Elementos (distintos del buscado) que quedan en la línea entre la
   // posición final de cámara y el centro del elemento — lo que bloquearía
   // la vista una vez que la cámara llegue ahí.
@@ -456,6 +474,7 @@ private ghostedIds = new Set<number>();
     }
     return Array.from(blockingIds);
   }
+
   async pick(x: number, y: number) {
     const ndc = this.ndcFromCanvasPixels(x, y);
     this.raycaster.setFromCamera(ndc, this.cameraController.camera);
@@ -574,19 +593,6 @@ private ghostedIds = new Set<number>();
 
     return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null };
   }
-  // --- Agregar como método de la clase ThreeSceneController, junto a raycastSceneMagnetic ---
-
-  // Cruz de ejes LOCALES de la cara golpeada: dos brazos perpendiculares entre sí
-  // y tangentes a la cara (no alineados a pantalla ni a los ejes del mundo), cada
-  // uno extendido hasta la arista/borde real de esa cara plana del elemento.
-  // --- Agregar como método de la clase ThreeSceneController, junto a raycastSceneMagnetic ---
-  // (Reemplaza la versión anterior de raycastFaceCross)
-
-  // Cruz de ejes LOCALES de la cara golpeada: dos brazos perpendiculares entre sí
-  // y tangentes a la cara (no alineados a pantalla ni a los ejes del mundo), cada
-  // uno extendido hasta la arista/borde real de esa cara plana del elemento.
-  // --- Agregar como método de la clase ThreeSceneController, junto a raycastSceneMagnetic ---
-  // (Reemplaza la versión anterior de raycastFaceCross)
 
   // Cruz de ejes de la cara golpeada: dos brazos tangentes a la cara (u, v) que
   // llegan hasta su borde real, más un tercer brazo perpendicular que sale hacia
@@ -601,7 +607,7 @@ private ghostedIds = new Set<number>();
     vNeg: { x: number; y: number; z: number };
     depthPos: { x: number; y: number; z: number } | null;
     expressId: number | null;
-  } | null {
+   } | null {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
     const scaleY = this.canvas.height / rect.height;
@@ -777,6 +783,84 @@ private ghostedIds = new Set<number>();
       expressId,
     };
   }
+
+  // --- PINTADO (dibujo libre 3D pegado a superficie) ---
+
+  // Raycast puro contra la geometría, sin snap a vértice/arista (para pintar
+  // a mano libre el snap se sentiría raro). Devuelve el punto exacto bajo el
+  // mouse, levantado un poquito sobre la superficie según su normal para
+  // evitar z-fighting (parpadeo) contra la cara del modelo.
+  raycastSurfacePoint(cssX: number, cssY: number): { point: { x: number; y: number; z: number }; normal: { x: number; y: number; z: number } } | null {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = this.canvas.width / rect.width;
+    const scaleY = this.canvas.height / rect.height;
+    const pxX = cssX * scaleX;
+    const pxY = cssY * scaleY;
+
+    const ndc = this.ndcFromCanvasPixels(pxX, pxY);
+    this.raycaster.setFromCamera(ndc, this.cameraController.camera);
+    const rayDirection = this.raycaster.ray.direction.clone();
+
+    const hits = this.raycaster.intersectObjects(this.meshes, false);
+    const hit = hits.find((h) => h.object.visible && h.faceIndex !== undefined);
+    if (!hit) return null;
+
+    const normal = (hit.face?.normal.clone() ?? new THREE.Vector3(0, 1, 0))
+      .transformDirection(hit.object.matrixWorld)
+      .normalize();
+    if (normal.dot(rayDirection) > 0) normal.negate(); // siempre hacia la cámara
+
+    const OFFSET = 0.004; // ~4mm — evita que el trazo parpadee contra la superficie
+    const offsetPoint = hit.point.clone().addScaledVector(normal, OFFSET);
+
+    return {
+      point: { x: offsetPoint.x, y: offsetPoint.y, z: offsetPoint.z },
+      normal: { x: normal.x, y: normal.y, z: normal.z },
+    };
+  }
+
+  // Crea o actualiza un trazo de pintado como un TUBO 3D (no una línea de
+  // 1px) — así tiene grosor real y consistente desde cualquier ángulo. Se
+  // llama en cada mousemove mientras se dibuja: reconstruye la geometría del
+  // tubo completo a partir de todos los puntos acumulados hasta ahora.
+  setPaintStroke(id: string, points: { x: number; y: number; z: number }[], color: string) {
+    if (points.length < 2) return;
+    const vecPoints = points.map((p) => new THREE.Vector3(p.x, p.y, p.z));
+    const curve = new THREE.CatmullRomCurve3(vecPoints, false, 'catmullrom', 0.2);
+
+    // Segmentos a lo largo del tubo: proporcional a la cantidad de puntos,
+    // con un mínimo para que no se vea poligonal en trazos cortos.
+    const tubularSegments = Math.max(vecPoints.length * 2, 8);
+    const geometry = new THREE.TubeGeometry(curve, tubularSegments, STROKE_RADIUS, STROKE_RADIAL_SEGMENTS, false);
+
+    const existing = this.paintStrokes.get(id);
+    if (existing) {
+      existing.geometry.dispose();
+      existing.geometry = geometry;
+      (existing.material as THREE.MeshBasicMaterial).color.set(color);
+      return;
+    }
+
+    const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(color) });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.renderOrder = 10;
+    this.scene.add(mesh);
+    this.paintStrokes.set(id, mesh);
+  }
+
+  removePaintStroke(id: string) {
+    const mesh = this.paintStrokes.get(id);
+    if (!mesh) return;
+    this.scene.remove(mesh);
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+    this.paintStrokes.delete(id);
+  }
+
+  clearPaintStrokes() {
+    for (const id of Array.from(this.paintStrokes.keys())) this.removePaintStroke(id);
+  }
+
   render(opts: { clearColor?: [number, number, number, number]; sectionPlane?: any } = {}) {
     if (opts.clearColor) {
       const [r, g, b] = opts.clearColor;
@@ -839,7 +923,7 @@ private ghostedIds = new Set<number>();
     this.darkBgTexture.dispose();
     this.renderer.dispose();
     this.clearElementMarker();
-    
+    this.clearPaintStrokes();
   }
 }
 

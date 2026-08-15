@@ -11,7 +11,7 @@ import {
   MapPin, CalendarBlank, PencilSimple, CheckCircle, WarningCircle, ClipboardText
 } from '@phosphor-icons/react';
 import fondoImage from '../assets/inicio.jpg';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo3.png';
 import IFCViewer from '../components/IFCViewer/IFCViewer';
 import { MODULOS } from '../constants/modulos';
 import { Project, IFCFile, TabType } from '../types/project.types';
@@ -22,6 +22,7 @@ import { useAuth } from '../context/AuthContext';
 import { formatDate, formatFileSize } from '../utils/dateUtils';
 import InicioTab from '../components/tabs/InicioTab';
 import ColaboradoresTab from "../components/tabs/ColaboradoresTab";
+import ArchivosTab from "../components/tabs/ArchivosTab";
 import Visor3DTab from "../components/tabs/Visor3DTab";
 
 const DashboardProjects: React.FC = () => {
@@ -186,7 +187,7 @@ const DashboardProjects: React.FC = () => {
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <img src={logo} alt="Logo ALL-BIM" className="h-11 w-auto" />
-                <span className="text-2xl font-black text-[#0056b3]">ALL-BIM</span>
+                <span className="text-2xl font-black text-[#0056b3]"></span>
                 <span className="text-sm text-gray-400">|</span>
                 <span className="text-sm font-medium text-gray-600 truncate max-w-xs">{project.name}</span>
                 {!checkingOwner && userRole && (
@@ -260,10 +261,11 @@ const DashboardProjects: React.FC = () => {
 
       {/* CONTENIDO */}
       {activeTab === 'visor3d' ? (
-        <div className="fixed left-0 right-0 bottom-0 top-14 z-0">
-          <Visor3DTab />
-        </div>
-      ) : (
+  <div className="fixed left-0 right-0 bottom-0 top-14 z-0">
+    <Visor3DTab projectId={project?.project_id || 0} />
+  </div>
+       ) 
+       : (
       <div className="max-w-9xl mx-auto p-6 pb-32 pl-16 relative isolate">
             
         {/* TAB: INICIO */}
@@ -286,7 +288,9 @@ const DashboardProjects: React.FC = () => {
     }}
   />
 )}
-
+    {activeTab === 'archivos' && (
+  <ArchivosTab />
+)}
         {activeTab === 'colaboradores' && isOwner && (
           <ColaboradoresTab onClose={() => setActiveTab('inicio')} 
           projectId={project?.project_id || 0} 

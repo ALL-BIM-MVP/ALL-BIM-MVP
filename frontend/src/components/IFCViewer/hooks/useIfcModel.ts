@@ -9,6 +9,7 @@ import { useCrossTool } from './useCrossTool';
 import { useViewerBackground } from './useViewerBackground';
 import { useCameraControls } from './useCameraControls';
 import { useSectionPlane } from './useSectionPlane';
+import { usePaintTool } from './usePaintTool';
 export type { ViewPreset } from '../types';
 
 export function useIfcModel(fileBuffer: ArrayBuffer | null) {
@@ -28,6 +29,7 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
   const section = useSectionPlane(rendererRef);
 
   const selection = useEntitySelection(rendererRef, storeRef);
+  const paint = usePaintTool(rendererRef, canvasRef);
 
   const onFrame = useCallback((dt: number) => {
     walk.updateWalkMovement(dt);
@@ -60,6 +62,9 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     isWalkModeRef: walk.isWalkModeRef,
     walkStateRef: walk.walkStateRef,
     measureModeRef: measure.measureModeRef,
+      onPaintMouseDown: paint.handlePaintMouseDown,
+  onPaintMouseMove: paint.handlePaintMouseMove,
+  onPaintMouseUp: paint.handlePaintMouseUp,
     // useCameraControls.ts sigue nombrando este parámetro "laserModeRef" — le
     // pasamos el ref del modo cruz. Renombrar ahí es opcional.
     laserModeRef: cross.crossModeRef,
@@ -88,5 +93,6 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     ...measure,
     ...cross,
     ...section,
+    ...paint,
   };
 }
