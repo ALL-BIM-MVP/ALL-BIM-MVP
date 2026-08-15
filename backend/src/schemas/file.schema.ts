@@ -15,6 +15,17 @@ export const FileIdParamSchema = z.object({
 
 export type FileIdParam = z.infer<typeof FileIdParamSchema>;
 
+// Para DELETE /projects/:projectId/files/:fileId — a diferencia de
+// FileIdParamSchema (usado por /files/:fileId/content, que no lleva
+// projectId en la URL), este endpoint SÍ cuelga de /projects porque
+// sigue el mismo patrón anidado que POST/GET de arriba.
+export const ProjectFileIdParamSchema = z.object({
+    projectId: z.coerce.number(),
+    fileId: z.coerce.number(),
+});
+
+export type ProjectFileIdParam = z.infer<typeof ProjectFileIdParamSchema>;
+
 // Exportado: ifc-metrados.schema.ts reusa el mismo patrón para `force`.
 export const optionalBooleanFlag = z.enum(["true", "false"])
     .optional()

@@ -109,6 +109,8 @@ Content-Type: application/json
   "name": "12",
   "description": "Modelado de estructura residencial de 5 pisos",
   "location": "Puno, Perú",
+  "client": "Municipalidad de Puno",
+  "contractor": "ALL-BIM Constructora SAC",
   "start_date": "2026-08-01",
   "end_date": "2027-02-28"
 }
@@ -156,6 +158,62 @@ Content-Type: application/json
 
 ### 7. Eliminar un proyecto por ID
 DELETE {{baseUrl}}/projects/{{createdProjectId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 8. Imagen de portada — NO hay GET aparte. Viaja embebida en el
+### "cover_image" de este mismo GET (y en el listado) — sin portada
+### propia, cover_image.url apunta al default
+### (uploads/default/project-deafault.jpg).
+### ⚠️ cover_image.url es pública (SIN Authorization) a propósito — es
+### una ruta relativa tipo "/uploads/covers/2/xxxx-cover.png"; el frontend le
+### antepone su propio baseUrl y la pega directo en un <img src="...">,
+### no hace falta fetch() con token para mostrarla.
+GET {{baseUrl}}/projects/{{createdProjectId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 9. Imagen de portada — subir/reemplazar (multipart, campo "file").
+### PUT, no POST: es un reemplazo idempotente de un slot fijo (siempre
+### hay como máximo una portada), no la creación de un recurso nuevo.
+### Sigue requiriendo auth + ser el DUEÑO del proyecto (esto SÍ muta
+### datos). ⚠️ Ajustá la ruta del archivo de prueba a algo real en tu
+### máquina.
+# @name setCoverImage
+PUT {{baseUrl}}/projects/{{createdProjectId}}/image
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="portada.png"
+Content-Type: image/png
+
+< ./portada-de-prueba.png
+--WebAppBoundary--
+
+### La respuesta del PUT ya trae name/mime_type/url listos para pintar
+### en el frontend sin re-pedir el proyecto — no hace falta el GET de
+### abajo salvo para confirmarlo en esta prueba manual.
+### Capturar la url devuelta, por si querés bajarla directo (sin token)
+@lastCoverUrl = {{setCoverImage.response.body.url}}
+
+
+### 10. Repetir el GET del punto 8 — cover_image.file_id/url ahora
+### deberían ser los del archivo que subiste, no el default.
+GET {{baseUrl}}/projects/{{createdProjectId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 11. Imagen de portada — borrar (vuelve a caer al default).
+### La respuesta YA es el objeto de la imagen default (mismo shape que
+### cover_image en el GET) — no un simple mensaje, para no obligar al
+### frontend a re-pedir el proyecto después de borrar.
+DELETE {{baseUrl}}/projects/{{createdProjectId}}/image
+Authorization: Bearer {{accessToken}}
+
+
+### 12. Caso de error: borrar de nuevo sin portada propia -> 404
+DELETE {{baseUrl}}/projects/{{createdProjectId}}/image
 Authorization: Bearer {{accessToken}}
 
 
@@ -263,6 +321,21 @@ Authorization: Bearer {{accessToken}}
 
 ### 5. Descargar forzando attachment
 GET {{baseUrl}}/files/{{uploadedFileId}}/content?download=true
+Authorization: Bearer {{accessToken}}
+
+
+### 6. Borrar un archivo — solo quien lo subió o el dueño del proyecto.
+### Borra la fila + los derivados (si era un ifc procesado, se lleva
+### puesto todo por ON DELETE CASCADE) + el archivo físico del disco.
+### ⚠️ Después de correr esto {{uploadedFileId}} deja de existir — no
+### uses este request si todavía necesitás ese archivo para otras
+### pruebas de este mismo archivo .http.
+DELETE {{baseUrl}}/projects/{{createdProjectId}}/files/{{uploadedFileId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 7. Caso de error: fileId inexistente (o ya borrado) -> 404
+DELETE {{baseUrl}}/projects/{{createdProjectId}}/files/999999
 Authorization: Bearer {{accessToken}}
 
 
@@ -551,5 +624,18 @@ Content-Type: application/json
 
 ### 8. Caso de error: template_id inexistente -> 404
 GET {{baseUrl}}/templates/999999
+Authorization: Bearer {{accessToken}}
+
+
+### 9. Borrar una plantilla propia (ON DELETE CASCADE se lleva puesto
+### todos sus sets/columnas — no hace falta borrarlos aparte). ⚠️ Después
+### de correr esto {{myTemplateId}} deja de existir.
+DELETE {{baseUrl}}/templates/{{myTemplateId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 10. Caso de error: borrar la plantilla del sistema -> 404 (nunca
+### editable/borrable por acá, mismo criterio que el PUT de columnas)
+DELETE {{baseUrl}}/templates/6
 Authorization: Bearer {{accessToken}}
 

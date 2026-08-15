@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middlewares/auth.middleware.js';
 import {
-    createTemplateController, getTemplateByIdController, listTemplatesController,
+    createTemplateController, deleteTemplateController, getTemplateByIdController, listTemplatesController,
     toggleTemplateColumnVisibilityController, updateTemplateColumnsController
 } from '../controllers/templates.controller.js';
 
@@ -19,5 +19,6 @@ router.get('/:templateId', requireAuth, getTemplateByIdController);
 router.post('/', requireAuth, createTemplateController);
 router.put('/:templateId/columns', requireAuth, updateTemplateColumnsController);
 router.patch('/:templateId/columns/:columnId', requireAuth, toggleTemplateColumnVisibilityController);
+router.delete('/:templateId', requireAuth, deleteTemplateController);
 
 export default router;

@@ -8,8 +8,8 @@ import {
 } from "../schemas/templates.schema.js";
 import { IfcFileIdParamSchema } from "../schemas/ifc-metrados.schema.js";
 import {
-    createTemplateService, getAvailableColumnsService, getTemplateByIdService, listTemplatesService,
-    toggleTemplateColumnVisibilityService, updateTemplateColumnsService
+    createTemplateService, deleteTemplateService, getAvailableColumnsService, getTemplateByIdService,
+    listTemplatesService, toggleTemplateColumnVisibilityService, updateTemplateColumnsService
 } from "../services/templates.service.js";
 import type { AvailableColumnsCatalog, TemplateColumn, TemplateFull, TemplateRow } from "../models/templates.models.js";
 import type { Request, Response } from "express";
@@ -115,6 +115,24 @@ export const toggleTemplateColumnVisibilityController = asyncHandler (
         const column : TemplateColumn = await toggleTemplateColumnVisibilityService(req.user, params.data, body.data);
 
         res.status(200).json(column);
+});
+
+export const deleteTemplateController = asyncHandler (
+    async (req : Request, res : Response) : Promise<void> =>{
+
+        if (!req.user) {
+            throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+        }
+
+        const params = TemplateIdParamSchema.safeParse(req.params);
+
+        if (!params.success) {
+            throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+        }
+
+        await deleteTemplateService(req.user, params.data);
+
+        res.status(200).json({ message: "La plantilla fue eliminada correctamente." });
 });
 
 // Mapea a GET /ifc-files/:ifcFileId/available-columns (se monta en

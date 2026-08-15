@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import pool from "../db/database.js";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { ProjectIdParam } from "../schemas/projects.schema.js";
-import type { FileIdParam, FileType, GetProjectFilesQuery } from "../schemas/file.schema.js";
+import type { FileIdParam, FileType, GetProjectFilesQuery, ProjectFileIdParam } from "../schemas/file.schema.js";
 import { transformFileToFull, type FileDownload, type FileFull, type FileRow } from "../models/files.models.js";
 import { AppError } from "../models/errors/app-error.js";
 import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
@@ -26,7 +26,10 @@ const inferFileType = (filename : string) : FileType => {
     return EXTENSION_TO_TYPE[extension] ?? "other";
 };
 
-const computeChecksum = (filePath : string) : Promise<string> => {
+// Exportado: project-images.service.ts lo reusa tal cual para la
+// portada de un proyecto (mismo mecanismo de guardado que un archivo
+// cualquiera, solo cambia dónde queda referenciado después).
+export const computeChecksum = (filePath : string) : Promise<string> => {
     // Streaming (no carga el archivo entero en memoria) — importante porque
     // un IFC de un edificio grande puede pesar cientos de MB.
     return new Promise((resolve, reject) => {
@@ -147,4 +150,35 @@ export const getFileForDownloadService = async (
     await assertProjectAccess(file.project_id, userId);
 
     return file;
+};
+
+// Borrar es más restrictivo que leer/listar (assertProjectAccess sola
+// no alcanza): solo quien subió el archivo, o el dueño del proyecto,
+// puede borrarlo — un miembro cualquiera no debería poder voltear
+// archivos ajenos solo por estar en el proyecto. Un único DELETE con
+// USING resuelve "existe + pertenece a este proyecto + tengo permiso"
+// atómicamente; ON DELETE CASCADE (files -> ifc_files -> el resto) se
+// encarga de todo lo derivado en la BD, acá solo queda borrar los
+// bytes del disco aparte.
+export const deleteFileService = async (
+    { user_id : userId } : DecodedToken, { projectId, fileId } : ProjectFileIdParam
+) : Promise<void> => {
+
+    await assertProjectAccess(projectId, userId);
+
+    const result = await pool.query<{ file_path : string }>(
+        `DELETE FROM files f
+        USING projects p
+        WHERE f.project_id = p.project_id
+            AND f.file_id = $1 AND f.project_id = $2
+            AND (f.uploaded_by = $3 OR p.owner_id = $3)
+        RETURNING f.file_path`,
+        [fileId, projectId, userId]
+    );
+
+    const deleted = result.rows[0];
+
+    if (!deleted) throw new AppError(FILE_ERRORS.FILE_NOT_FOUND);
+
+    await fs.promises.rm(deleted.file_path, { force: true });
 };

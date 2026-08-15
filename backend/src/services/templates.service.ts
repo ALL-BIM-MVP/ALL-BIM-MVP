@@ -337,3 +337,21 @@ export const getTemplatePropertyColumnsService = async (
 
     return result.rows;
 };
+
+// Mismo criterio de elegibilidad que assertTemplateEditable (propia,
+// nunca del sistema) — un DELETE es, en el fondo, la edición más
+// extrema posible, así que reusa el mismo error (TEMPLATE_NOT_EDITABLE)
+// en vez de inventar uno nuevo. ON DELETE CASCADE en
+// metrado_template_sets/metrado_template_columns se encarga del resto,
+// no hace falta borrar aparte ni envolver en transacción.
+export const deleteTemplateService = async (
+    user : DecodedToken, { templateId } : TemplateIdParam
+) : Promise<void> => {
+
+    const result = await pool.query(
+        `DELETE FROM metrado_templates WHERE template_id = $1 AND is_system = false AND created_by = $2`,
+        [templateId, user.user_id]
+    );
+
+    if (result.rowCount === 0) throw new AppError(TEMPLATE_ERRORS.NOT_EDITABLE);
+};

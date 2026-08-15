@@ -14,11 +14,24 @@ import routerIfcMetrados, { ifcFilesRouter } from './routes/ifc-metrados.routes.
 import routerTemplates from './routes/templates.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
+import { PUBLIC_UPLOADS_DIR } from './middlewares/upload.midleware.js';
 const app = express();
 
 app.use(corsConfig);
 app.use(express.json());
 app.use(express.urlencoded({extended: false}));
+
+// Público a propósito, SIN requireAuth — pero OJO: monta PUBLIC_UPLOADS_DIR
+// (uploads/public/), NUNCA el UPLOADS_DIR completo. uploads/public/ solo
+// contiene portadas de proyecto + la imagen por defecto (ver
+// project-images.models.ts) — los archivos/documentos reales de un
+// proyecto viven en uploads/<projectId>/, que queda AFUERA de este mount
+// y solo se sirve autenticado vía GET /api/files/:id/content. Si algún
+// día esto se monta directo sobre UPLOADS_DIR por error, cualquier
+// archivo de cualquier proyecto queda descargable por cualquiera que
+// adivine/filtre la URL — separar la carpeta es la protección real, no
+// solo confiar en que el nombre de archivo tenga un UUID.
+app.use('/uploads', express.static(PUBLIC_UPLOADS_DIR));
 
 app.use('/api/auth', routerAuth);
 app.use('/api/roles', routerRoles);

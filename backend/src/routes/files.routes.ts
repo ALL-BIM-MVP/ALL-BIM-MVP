@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { uploadSingleFile } from '../middlewares/upload.midleware.js';
-import { getFileContentController, getProjectFilesController, saveFileController } from '../controllers/files.controller.js';
+import { deleteFileController, getFileContentController, getProjectFilesController, saveFileController } from '../controllers/files.controller.js';
 import { requireAuth, requireRolePrivileges } from '../middlewares/auth.middleware.js';
 import { ROLES } from '../constants/roles.js';
 
@@ -13,6 +13,12 @@ router.post('/:projectId/files', requireAuth,
 router.get('/:projectId/files', requireAuth,
     requireRolePrivileges(ROLES.ADMINISTRADOR, ROLES.MODERADOR, ROLES.SUPERVISOR, ROLES.USUARIO),
     getProjectFilesController);
+
+// Sin requireRolePrivileges extra: el service es más estricto que el
+// rol (solo quien subió el archivo o el dueño del proyecto puede
+// borrarlo, ver deleteFileService) — el rol de proyecto por sí solo no
+// alcanza ni hace falta acá.
+router.delete('/:projectId/files/:fileId', requireAuth, deleteFileController);
 
 export default router;
 
