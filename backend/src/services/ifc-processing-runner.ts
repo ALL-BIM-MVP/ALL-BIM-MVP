@@ -243,12 +243,12 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
                 RETURNING property_id`,
                 [ifcFileId, def.property_set, def.property_name]
             );
-            propKeyToId.set(`${def.property_set} ${def.property_name}`, Number(rows[0]!.property_id));
+            propKeyToId.set(`${def.property_set} ${def.property_name}`, Number(rows[0]!.property_id));
         }
 
         const valueKeyToId = new Map<string, number>();
         for (const val of resultado.properties.values) {
-            const propertyId = propKeyToId.get(`${val.property_set} ${val.property_name}`);
+            const propertyId = propKeyToId.get(`${val.property_set} ${val.property_name}`);
             if (propertyId === undefined) continue;
             const { rows } = await client.query<{ value_id: string }>(
                 `INSERT INTO ifc_property_values (property_id, value)
@@ -256,14 +256,14 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
                 RETURNING value_id`,
                 [propertyId, val.value]
             );
-            valueKeyToId.set(`${propertyId} ${val.value}`, Number(rows[0]!.value_id));
+            valueKeyToId.set(`${propertyId} ${val.value}`, Number(rows[0]!.value_id));
         }
 
         for (const rel of resultado.properties.relations) {
             const elementId = expressIdToElementId.get(rel.express_id);
-            const propertyId = propKeyToId.get(`${rel.property_set} ${rel.property_name}`);
+            const propertyId = propKeyToId.get(`${rel.property_set} ${rel.property_name}`);
             if (elementId === undefined || propertyId === undefined) continue;
-            const valueId = valueKeyToId.get(`${propertyId} ${rel.value}`);
+            const valueId = valueKeyToId.get(`${propertyId} ${rel.value}`);
             if (valueId === undefined) continue;
             await client.query(
                 `INSERT INTO ifc_element_property_values (element_id, property_id, value_id)
