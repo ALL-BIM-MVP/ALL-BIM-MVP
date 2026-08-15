@@ -11,7 +11,7 @@ import {
   MapPin, CalendarBlank, PencilSimple, CheckCircle, WarningCircle, ClipboardText
 } from '@phosphor-icons/react';
 import fondoImage from '../assets/inicio.jpg';
-import logo from '../assets/logo.png';
+import logo from '../assets/logo3.png';
 import IFCViewer from '../components/IFCViewer/IFCViewer';
 import { MODULOS } from '../constants/modulos';
 import { Project, IFCFile, TabType } from '../types/project.types';
@@ -187,7 +187,7 @@ const DashboardProjects: React.FC = () => {
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <img src={logo} alt="Logo ALL-BIM" className="h-11 w-auto" />
-                <span className="text-2xl font-black text-[#0056b3]">ALL-BIM</span>
+                <span className="text-2xl font-black text-[#0056b3]"></span>
                 <span className="text-sm text-gray-400">|</span>
                 <span className="text-sm font-medium text-gray-600 truncate max-w-xs">{project.name}</span>
                 {!checkingOwner && userRole && (

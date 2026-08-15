@@ -1,10 +1,10 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Focus, ChevronDown, Search, Crosshair, Paintbrush } from 'lucide-react';
+import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Focus, ChevronDown, Search, Crosshair, Paintbrush,Layers} from 'lucide-react';
 import { useIfcModel } from './hooks/useIfcModel';
 import { ViewPreset } from './types';
 import PropertiesPanel from "./PropertiesPanel/PropertiesPanel";
 import ViewCube3D from './Viewcube3d';
-
+import CategoryFilterPanel from './CategoryFilterPanel';
 interface IFCViewerProps {
   fileBuffer: ArrayBuffer | null;
 }
@@ -182,6 +182,19 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     selectEntityById,
     selectByIdOrGuid,
     paramIndex,
+    // --- Filtro por categoría ---
+     // --- Filtro por categoría ---
+    typeGroups,
+    selectedTypes,
+    toggleSelectType,
+    clearSelectedTypes,
+    
+    hiddenTypes,
+    isolatedType,
+    toggleHideType,
+    toggleIsolateType,
+    clearAllHidden,
+    clearIsolation,
   } = useIfcModel(fileBuffer);
 
   useImperativeHandle(ref, () => ({
@@ -192,8 +205,11 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
   // Panel unificado (buscador global + categorías del elemento). Se abre solo
   // al clickear un elemento en el 3D, o manualmente con el ícono de lupa.
   const [panelOpen, setPanelOpen] = useState(false);
+  const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
   useEffect(() => {
-    if (selectedEntity) setPanelOpen(true);
+    if (selectedEntity) 
+      setPanelOpen(true);
+    setCategoryPanelOpen(false); 
   }, [selectedEntity]);
 
   // Submenú del botón Regla: elegir entre Medición simple y Láser.
@@ -249,7 +265,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
             {/* Fila horizontal de íconos */}
             <div className="absolute top-2 left-24 z-20 flex flex-row gap-1.5">
               <button
-                onClick={() => setPanelOpen((prev) => !prev)}
+                onClick={() => { setPanelOpen((p) => !p); setCategoryPanelOpen(false); }}
                 className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
                   panelOpen ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
                 }`}
@@ -257,7 +273,15 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
               >
                 <Search size={16} />
               </button>
-
+                <button
+  onClick={() => { setCategoryPanelOpen((p) => !p); setPanelOpen(false); }}
+  className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+    categoryPanelOpen ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
+  }`}
+  title="Filtrar por categoría"
+>
+  <Layers size={16} />
+</button>
               <button
                 onClick={toggleSectionEnabled}
                 className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
@@ -354,6 +378,19 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
                 />
               </div>
             )}
+              
+              {categoryPanelOpen && (
+  <div className="absolute top-14 left-8 z-50">
+    <CategoryFilterPanel
+      isOpen={categoryPanelOpen}
+      onClose={() => setCategoryPanelOpen(false)}
+      typeGroups={typeGroups}
+      selectedTypes={selectedTypes}
+      toggleSelectType={toggleSelectType}
+      clearSelectedTypes={clearSelectedTypes}
+    />
+  </div>
+)}
 
             {isWalkMode && (
               <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-black/70 text-white text-xs px-4 py-2 rounded-lg">
