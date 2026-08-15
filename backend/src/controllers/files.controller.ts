@@ -4,10 +4,13 @@ import { AppError } from "../models/errors/app-error.js";
 import { AUTH_ERRORS } from "../models/errors/auth.errors.js";
 import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 import { FILE_ERRORS } from "../models/errors/files.errors.js";
-import { getFileForDownloadService, getProjectFilesService, saveFileService } from "../services/files.service.js";
+import { deleteFileService, getFileForDownloadService, getProjectFilesService, saveFileService } from "../services/files.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ProjectIdParamSchema } from "../schemas/projects.schema.js";
-import { FileContentQuerySchema, FileIdParamSchema, GetProjectFilesQuerySchema, saveFileBodySchema } from "../schemas/file.schema.js";
+import {
+    FileContentQuerySchema, FileIdParamSchema, GetProjectFilesQuerySchema,
+    ProjectFileIdParamSchema, saveFileBodySchema
+} from "../schemas/file.schema.js";
 import type { FileFull } from "../models/files.models.js";
 import type { Request, Response } from "express";
 
@@ -106,4 +109,22 @@ export const getFileContentController = asyncHandler (
         await new Promise<void>((resolve, reject) => {
             res.sendFile(absolutePath, (err) => err ? reject(err) : resolve());
         });
+});
+
+export const deleteFileController = asyncHandler (
+    async (req : Request, res : Response) : Promise<void> =>{
+
+        if (!req.user) {
+            throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+        }
+
+        const params = ProjectFileIdParamSchema.safeParse(req.params);
+
+        if (!params.success) {
+            throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+        }
+
+        await deleteFileService(req.user, params.data);
+
+        res.status(200).json({ message: "El archivo fue eliminado correctamente." });
 });

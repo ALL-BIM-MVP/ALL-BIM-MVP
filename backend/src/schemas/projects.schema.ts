@@ -7,6 +7,8 @@ export const ProjectCoreSchema = z.object({
 export const ProjectCreateSchema = ProjectCoreSchema.extend({
     description: z.string().nullable(),
     location: z.string().nullable(),
+    client: z.string().nullable(),
+    contractor: z.string().nullable(),
     start_date: z.coerce.date().nullable(),
     end_date: z.coerce.date().nullable(),
 });

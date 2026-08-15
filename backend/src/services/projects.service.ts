@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import pool from "../db/database.js";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { GetProjectsQuery, ProjectCreate, ProjectIdParam, ProjectUpdate } from "../schemas/projects.schema.js";
@@ -5,6 +7,7 @@ import { buildProjectScopeFilter } from "../repositories/projects.repository.js"
 import { transformProjectFull, type ProjectFull, type ProjectRow } from "../models/projects.models.js";
 import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
 import { AppError } from "../models/errors/app-error.js";
+import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import type { UserSuggestion } from "../models/users.models.js";
 import type { SearchUserQuery } from "../schemas/project-invitations.schema.js";
 
@@ -16,11 +19,18 @@ export const getListProjectService = async (
 
     const result = await pool.query<ProjectRow>(
         `SELECT
-            p.project_id, p.name, p.description, p.location, p.start_date, p.end_date, p.created_at,
-            u.user_id, u.name AS user_name, u.role_id
+            p.project_id, p.name, p.description, p.location, p.client, p.contractor,
+            p.start_date, p.end_date, p.created_at,
+            u.user_id, u.name AS user_name, u.role_id,
+            f.file_id AS image_file_id, f.file_path AS image_path,
+            f.name AS image_name, f.mime_type AS image_mime_type
         FROM projects p
         INNER JOIN users u
             ON u.user_id = p.owner_id
+        LEFT JOIN project_images pi
+            ON pi.project_id = p.project_id AND pi.image_type = 'cover'
+        LEFT JOIN files f
+            ON f.file_id = pi.file_id
         ${where}
         ORDER BY p.created_at DESC`,
         params
@@ -35,11 +45,18 @@ export const getProjectByIdService = async (
 
     const result = await pool.query<ProjectRow>(
         `SELECT
-            p.project_id, p.name, p.description, p.location, p.start_date, p.end_date, p.created_at,
-            u.user_id, u.name AS user_name, u.role_id
+            p.project_id, p.name, p.description, p.location, p.client, p.contractor,
+            p.start_date, p.end_date, p.created_at,
+            u.user_id, u.name AS user_name, u.role_id,
+            f.file_id AS image_file_id, f.file_path AS image_path,
+            f.name AS image_name, f.mime_type AS image_mime_type
         FROM projects p
         INNER JOIN users u
             ON u.user_id = p.owner_id
+        LEFT JOIN project_images pi
+            ON pi.project_id = p.project_id AND pi.image_type = 'cover'
+        LEFT JOIN files f
+            ON f.file_id = pi.file_id
         WHERE p.project_id = $1 AND (
                 p.owner_id = $2 
                 OR EXISTS (        
@@ -62,16 +79,16 @@ export const createProjectService = async (
 ) : Promise<ProjectFull> => {
 
     const result = await pool.query<ProjectRow>(
-        `INSERT INTO 
-            projects(name, description, location, start_date, end_date, created_by, owner_id)
+        `INSERT INTO
+            projects(name, description, location, client, contractor, start_date, end_date, created_by, owner_id)
         VALUES
-            ($1, $2, $3, $4, $5, $6, $6)
-        RETURNING 
-            project_id, name, description, location, start_date, end_date, created_at,
+            ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+        RETURNING
+            project_id, name, description, location, client, contractor, start_date, end_date, created_at,
             owner_id AS user_id,
             (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
             (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
-        [data.name, data.description, data.location, data.start_date, data.end_date, userId]
+        [data.name, data.description, data.location, data.client, data.contractor, data.start_date, data.end_date, userId]
     );
 
     const p = result.rows[0] ;
@@ -87,9 +104,8 @@ export const updateProjectService = async(
 
     const dataFiltered  = Object.entries(data)
         .filter( ([key, value]) => value !== undefined);
-    console.log(dataFiltered)
 
-    if (dataFiltered.length === 0) throw new AppError(PROJECT_ERRORS.NO_FIELDS_TO_UPDATE); 
+    if (dataFiltered.length === 0) throw new AppError(PROJECT_ERRORS.NO_FIELDS_TO_UPDATE);
 
     const querySet = dataFiltered
         .map( ([key, _], i) => `${key} = $${i + 1}`)
@@ -103,9 +119,9 @@ export const updateProjectService = async(
     const result = await pool.query<ProjectRow>(
         `UPDATE projects
         SET ${querySet}
-        WHERE project_id = $${lengthParams + 1} AND owner_id = $${lengthParams + 2} 
-        RETURNING 
-            project_id, name, description, location, start_date, end_date, created_at,
+        WHERE project_id = $${lengthParams + 1} AND owner_id = $${lengthParams + 2}
+        RETURNING
+            project_id, name, description, location, client, contractor, start_date, end_date, created_at,
             owner_id AS user_id,
             (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
             (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
@@ -130,4 +146,15 @@ export const deleteProjectByIdService = async(
     );
 
     if (result.rowCount === 0) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
+
+    // El DELETE de arriba ya se llevó puestas todas las filas relacionadas
+    // en la BD vía ON DELETE CASCADE (files, ifc_files y todo lo de
+    // metrados colgado de ahí, project_images, project_members,
+    // project_invitations) — pero eso no borra los BYTES reales del
+    // disco, ninguna de esas cascadas toca el filesystem. Todo archivo
+    // de este proyecto (subidas normales Y la imagen de portada) vive
+    // bajo uploads/<projectId>/ porque así arma la ruta multer en
+    // upload.midleware.ts, así que borrar esa carpeta entera de una
+    // cubre todo sin tener que enumerar cada file_path a mano.
+    await fs.promises.rm(path.join(UPLOADS_DIR, String(projectId)), { recursive: true, force: true });
 };
