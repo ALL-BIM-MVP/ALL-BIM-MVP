@@ -1,7 +1,11 @@
 import { Router } from 'express';
 import { uploadSingleFile } from '../middlewares/upload.midleware.js';
-import { deleteFileController, getFileContentController, getProjectFilesController, saveFileController } from '../controllers/files.controller.js';
+import {
+    deleteFileController, getFileContentController, getFileThumbnailController,
+    getProjectFilesController, saveFileController
+} from '../controllers/files.controller.js';
 import { requireAuth, requireRolePrivileges } from '../middlewares/auth.middleware.js';
+import { authorizeFileAccess } from '../middlewares/file-access.middleware.js';
 import { ROLES } from '../constants/roles.js';
 
 const router = Router();
@@ -24,4 +28,8 @@ export default router;
 
 export const fileContentRouter = Router();
 
-fileContentRouter.get('/:fileId/content', requireAuth, getFileContentController);
+// authorizeFileAccess acepta ?token= firmado (para <img src="...">
+// directo, sin Authorization) O Authorization: Bearer normal — ver
+// middlewares/file-access.middleware.ts.
+fileContentRouter.get('/:fileId/content', authorizeFileAccess('content'), getFileContentController);
+fileContentRouter.get('/:fileId/thumbnail', authorizeFileAccess('thumbnail'), getFileThumbnailController);

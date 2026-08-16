@@ -1,12 +1,17 @@
 import { sendInvitation } from "../utils/resend.js";
 import pool from "../db/database.js";
 import type { InvitationResponse, ValidateResponse } from "../models/auth.models.js";
-import type { InvitationRequest } from "../schemas/auth.schema.js";
+import type { GetUserInvitationsQuery, InvitationRequest } from "../schemas/auth.schema.js";
 import { generateRandomToken, hashToken } from "../utils/hashing.js";
 import { USER_ERRORS } from "../models/errors/user.errors.js";
 import { ROLE_ERRORS } from "../models/errors/role.errors.js";
 import { INVITATION_ERRRORS } from "../models/errors/invitation.errors.js";
 import { AppError } from "../models/errors/app-error.js";
+import {
+    transformUserInvitationToHistoryItem,
+    type UserInvitationHistoryItem,
+    type UserInvitationHistoryRow,
+} from "../models/user-invitations.models.js";
 
 export const createInvitationService = async ({role_id, email} : InvitationRequest) : Promise<InvitationResponse> => {
 
@@ -60,4 +65,34 @@ export const validateInvitationService = async (queryToken : string) : Promise< 
     if (!validateData) throw new AppError(INVITATION_ERRRORS.INVITATION_INVALID);
 
     return validateData;
+};
+
+// Techo server-side: aunque el cliente no mande ?limit, nunca se manda
+// la tabla entera; y aunque pida un limit gigante, se lo recorta acá.
+const DEFAULT_INVITATIONS_LIMIT = 50;
+const MAX_INVITATIONS_LIMIT = 100;
+
+export const getUserInvitationsHistoryService = async (
+    { limit } : GetUserInvitationsQuery
+) : Promise<UserInvitationHistoryItem[]> => {
+
+    const appliedLimit = Math.min(limit ?? DEFAULT_INVITATIONS_LIMIT, MAX_INVITATIONS_LIMIT);
+
+    const result = await pool.query<UserInvitationHistoryRow>(
+        `SELECT
+            i.invitation_id, i.email, i.created_at, i.expires_at, i.used,
+            CASE
+                WHEN i.used THEN 'usado'
+                WHEN i.expires_at < NOW() THEN 'vencido'
+                ELSE 'pendiente'
+            END AS status,
+            r.role_id, r.name AS role_name
+        FROM user_invitations i
+        INNER JOIN roles r USING(role_id)
+        ORDER BY i.created_at DESC
+        LIMIT $1`,
+        [appliedLimit]
+    );
+
+    return result.rows.map(transformUserInvitationToHistoryItem);
 };

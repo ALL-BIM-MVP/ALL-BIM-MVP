@@ -49,6 +49,14 @@ export const AUTH_ERRORS = {
         }
     },
 
+    SIGNED_URL_INVALID_OR_EXPIRED: {
+        statusCode: 401,
+        response: {
+            code: "AUTH_SIGNED_URL_INVALID_OR_EXPIRED",
+            message: "El enlace venció o no es válido. Volvé a pedir el archivo."
+        }
+    },
+
     USER_INVITATION_ALREADY_EXISTS: {
         statusCode: 409,
         response: {

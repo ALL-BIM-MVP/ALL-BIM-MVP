@@ -1,5 +1,6 @@
 import type { FileType } from "../schemas/file.schema.js";
 import type { IfcProcessingStatus } from "./ifc-files.models.js";
+import { buildSignedFileUrl } from "../utils/file-signing.js";
 
 interface FileUploader {
     user_id : number;
@@ -26,12 +27,26 @@ export interface FileBase {
     // sanitizado que devuelve GET /ifc-files/:id, nunca el stack trace).
     ifc_status : IfcProcessingStatus | null;
     ifc_error_message : string | null;
+    // Solo relevante para file_type='image' — null si no se pudo generar
+    // la miniatura al subir (ver utils/thumbnail.ts) o si el archivo no
+    // es una imagen. Cuando no es null, es una URL FIRMADA de corta
+    // duración (ver utils/file-signing.ts) lista para pintar directo en
+    // <img src="...">, sin Authorization — se recalcula en cada GET de
+    // la lista (no se guarda, no tiene sentido cachearla server-side
+    // porque vence a los pocos minutos). El path físico real
+    // (thumbnail_path) nunca sale de acá.
+    thumbnail_url : string | null;
 };
 
-export interface FileRow extends FileBase {
+// thumbnail_path viaja crudo desde la BD hasta acá (no forma parte de
+// FileBase a propósito, es interno) — transformFileToFull lo convierte
+// en la URL firmada (thumbnail_url) antes de que el dato salga al
+// cliente.
+export interface FileRow extends Omit<FileBase, "thumbnail_url"> {
     user_id : number;
     user_name : string;
     user_email : string;
+    thumbnail_path : string | null;
 };
 
 export interface FileFull extends FileBase {
@@ -50,6 +65,7 @@ export const transformFileToFull = (f : FileRow) : FileFull => {
         uploaded_at: f.uploaded_at,
         ifc_status: f.ifc_status,
         ifc_error_message: f.ifc_error_message,
+        thumbnail_url: f.thumbnail_path !== null ? buildSignedFileUrl(f.file_id, "thumbnail") : null,
         uploaded_by: {
             user_id: f.user_id,
             user_name: f.user_name,
@@ -67,4 +83,13 @@ export interface FileDownload {
     name : string;
     file_path : string;
     mime_type : string | null;
+};
+
+// Análogo a FileDownload pero para la miniatura — thumbnail_path nunca
+// es null acá (getFileThumbnailService ya filtró ese caso con
+// THUMBNAIL_NOT_AVAILABLE antes de devolver esto).
+export interface FileThumbnailDownload {
+    file_id : number;
+    project_id : number;
+    thumbnail_path : string;
 };
