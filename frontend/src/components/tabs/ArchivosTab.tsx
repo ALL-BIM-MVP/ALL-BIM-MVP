@@ -1,31 +1,21 @@
-import React, { useState, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Search, Upload, FileText, FileSpreadsheet, Trash2, Download, X,
-  ArrowUpDown, Check, FolderOpen,
+  ArrowUpDown, Check, FolderOpen, AlertCircle, RefreshCw,
 } from 'lucide-react';
-
-// Solo visual por ahora: no hay backend conectado para Excel, y la lista de
-// IFC tampoco persiste — cuando se conecte el backend real, esto se reemplaza
-// por el estado que venga de useProjects()/un hook nuevo para Excel.
-
-interface LocalFile {
-  id: string;
-  name: string;
-  sizeBytes: number;
-  uploadedAt: number; // timestamp
-}
+import { ProjectFile } from '../../types/project.types';
+import { projectService } from '../../services/project.service';
+import { useProjects } from '../../hooks/useProjects';
 
 type SortKey = 'name' | 'date' | 'size';
-
-let fileIdCounter = 0;
-const nextFileId = () => `file_${++fileIdCounter}`;
 
 function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function formatRelativeDate(timestamp: number): string {
+function formatRelativeDate(iso: string): string {
+  const timestamp = new Date(iso).getTime();
   const diffMs = Date.now() - timestamp;
   const diffMin = Math.floor(diffMs / 60000);
   if (diffMin < 1) return 'Hace un momento';
@@ -38,12 +28,12 @@ function formatRelativeDate(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-function sortFiles(files: LocalFile[], key: SortKey): LocalFile[] {
+function sortFiles(files: ProjectFile[], key: SortKey): ProjectFile[] {
   const copy = [...files];
   switch (key) {
     case 'name': return copy.sort((a, b) => a.name.localeCompare(b.name));
-    case 'size': return copy.sort((a, b) => b.sizeBytes - a.sizeBytes);
-    case 'date': default: return copy.sort((a, b) => b.uploadedAt - a.uploadedAt);
+    case 'size': return copy.sort((a, b) => parseInt(b.file_size, 10) - parseInt(a.file_size, 10));
+    case 'date': default: return copy.sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime());
   }
 }
 
@@ -54,56 +44,48 @@ interface FileListSectionProps {
   icon: React.ReactNode;
   accentColor: string;
   accentText: string;
-  accept: string;
   emptyLabel: string;
-  files: LocalFile[];
-  filteredFiles: LocalFile[];
+  files: ProjectFile[];
+  filteredFiles: ProjectFile[];
   isSearching: boolean;
-  onUpload: (fileList: FileList) => void;
-  onRemove: (id: string) => void;
+  currentUserId?: number | null;
+  isProjectOwner: boolean;
+  onDelete: (file: ProjectFile) => void;
+  onDownload: (file: ProjectFile) => void;
+  deletingId: string | null;
+  downloadingId: string | null;
 }
 
 const FileListSection: React.FC<FileListSectionProps> = ({
-  title, icon, accentColor, accentText, accept, emptyLabel, files, filteredFiles, isSearching, onUpload, onRemove,
+  title, icon, accentColor, accentText, emptyLabel, files, filteredFiles, isSearching,
+  currentUserId, isProjectOwner, onDelete, onDownload, deletingId, downloadingId,
 }) => {
-  const inputRef = useRef<HTMLInputElement>(null);
   const [sortKey, setSortKey] = useState<SortKey>('date');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [isDragOver, setIsDragOver] = useState(false);
-  const [justAddedId, setJustAddedId] = useState<string | null>(null);
 
   const sorted = useMemo(() => sortFiles(filteredFiles, sortKey), [filteredFiles, sortKey]);
+  const totalSize = useMemo(
+    () => files.reduce((sum, f) => sum + parseInt(f.file_size, 10), 0),
+    [files]
+  );
 
-  const totalSize = useMemo(() => files.reduce((sum, f) => sum + f.sizeBytes, 0), [files]);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) onUpload(e.target.files);
-    e.target.value = '';
-  };
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(false);
-    if (e.dataTransfer.files.length > 0) onUpload(e.dataTransfer.files);
-  }, [onUpload]);
-
-  const handleRemoveClick = (id: string) => {
-    if (confirmDeleteId === id) {
-      onRemove(id);
+  const handleRemoveClick = (file: ProjectFile) => {
+    if (confirmDeleteId === file.file_id) {
+      onDelete(file);
       setConfirmDeleteId(null);
     } else {
-      setConfirmDeleteId(id);
+      setConfirmDeleteId(file.file_id);
     }
   };
 
+  // Solo quien subió el archivo, o el dueño del proyecto, puede borrarlo
+  // (mismo criterio que aplica el backend).
+  const canDelete = (file: ProjectFile) =>
+    isProjectOwner || file.uploaded_by?.user_id === currentUserId;
+
   return (
-    <div
-      className="flex flex-col overflow-hidden relative"
-      onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-      onDragLeave={() => setIsDragOver(false)}
-      onDrop={handleDrop}
-    >
+    <div className="flex flex-col overflow-hidden relative">
       {/* Encabezado */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-slate-50/60">
         <div className="flex items-center gap-2.5">
@@ -118,38 +100,29 @@ const FileListSection: React.FC<FileListSectionProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {/* Ordenar */}
-          <div className="relative">
-            <button
-              onClick={() => setSortMenuOpen((prev) => !prev)}
-              className="flex items-center gap-1 px-2 py-1.5 bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 rounded-md text-xs font-medium transition-colors shadow-sm"
-              title="Ordenar"
-            >
-              <ArrowUpDown size={12} />
-              <span className="hidden sm:inline">{SORT_LABELS[sortKey]}</span>
-            </button>
-            {sortMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1 min-w-[150px]">
-                {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-                  <button
-                    key={key}
-                    onClick={() => { setSortKey(key); setSortMenuOpen(false); }}
-                    className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-left text-gray-600 hover:bg-gray-50"
-                  >
-                    {SORT_LABELS[key]}
-                    {sortKey === key && <Check size={12} className={accentText} />}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <label className="cursor-pointer flex items-center gap-1.5 px-3 py-1.5 bg-[#0056b3] text-white rounded-md hover:bg-[#004494] transition-colors text-xs font-semibold shadow-sm">
-            <Upload size={13} />
-            Subir
-            <input ref={inputRef} type="file" accept={accept} multiple className="hidden" onChange={handleFileChange} />
-          </label>
+        <div className="relative">
+          <button
+            onClick={() => setSortMenuOpen((prev) => !prev)}
+            className="flex items-center gap-1 px-2 py-1.5 bg-white border border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700 rounded-md text-xs font-medium transition-colors shadow-sm"
+            title="Ordenar"
+          >
+            <ArrowUpDown size={12} />
+            <span className="hidden sm:inline">{SORT_LABELS[sortKey]}</span>
+          </button>
+          {sortMenuOpen && (
+            <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-md shadow-lg py-1 min-w-[150px]">
+              {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => { setSortKey(key); setSortMenuOpen(false); }}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-left text-gray-600 hover:bg-gray-50"
+                >
+                  {SORT_LABELS[key]}
+                  {sortKey === key && <Check size={12} className={accentText} />}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -163,35 +136,36 @@ const FileListSection: React.FC<FileListSectionProps> = ({
             <p className="text-xs text-gray-400">
               {files.length === 0 ? emptyLabel : (isSearching ? 'Sin resultados para tu búsqueda' : emptyLabel)}
             </p>
-            {files.length === 0 && (
-              <p className="text-[11px] text-gray-300 mt-1">Arrastrá un archivo aquí o usá el botón Subir</p>
-            )}
           </div>
         ) : (
           <div className="space-y-1">
             {sorted.map((file) => {
-              const isConfirming = confirmDeleteId === file.id;
-              const isNew = justAddedId === file.id;
+              const isConfirming = confirmDeleteId === file.file_id;
+              const isDeleting = deletingId === file.file_id;
+              const isDownloading = downloadingId === file.file_id;
               return (
                 <div
-                  key={file.id}
+                  key={file.file_id}
                   className={`group flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors ${
-                    isConfirming ? 'bg-red-50' : isNew ? 'bg-blue-50' : 'hover:bg-slate-50'
-                  }`}
+                    isConfirming ? 'bg-red-50' : 'hover:bg-slate-50'
+                  } ${isDeleting ? 'opacity-50 pointer-events-none' : ''}`}
                 >
                   <div className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 ${accentColor}`}>
                     {icon}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-gray-700 truncate">{file.name}</p>
-                    <p className="text-[11px] text-gray-400">{formatSize(file.sizeBytes)} · {formatRelativeDate(file.uploadedAt)}</p>
+                    <p className="text-[11px] text-gray-400">
+                      {formatSize(parseInt(file.file_size, 10))} · {formatRelativeDate(file.uploaded_at)}
+                      {file.uploaded_by?.user_name && <> · Subido por {file.uploaded_by.user_name}</>}
+                    </p>
                   </div>
 
                   {isConfirming ? (
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="text-[11px] text-red-500 font-medium whitespace-nowrap">¿Eliminar?</span>
                       <button
-                        onClick={() => handleRemoveClick(file.id)}
+                        onClick={() => handleRemoveClick(file)}
                         className="px-2 py-1 rounded-md bg-red-500 text-white text-[11px] font-semibold hover:bg-red-600"
                       >
                         Sí
@@ -206,18 +180,22 @@ const FileListSection: React.FC<FileListSectionProps> = ({
                   ) : (
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
                       <button
-                        className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-white hover:text-[#0056b3]"
+                        onClick={() => onDownload(file)}
+                        disabled={isDownloading}
+                        className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-white hover:text-[#0056b3] disabled:opacity-50"
                         title="Descargar"
                       >
-                        <Download size={14} />
+                        {isDownloading ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
                       </button>
-                      <button
-                        onClick={() => handleRemoveClick(file.id)}
-                        className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-500"
-                        title="Eliminar"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {canDelete(file) && (
+                        <button
+                          onClick={() => handleRemoveClick(file)}
+                          className="w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-500"
+                          title="Eliminar"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -226,58 +204,86 @@ const FileListSection: React.FC<FileListSectionProps> = ({
           </div>
         )}
       </div>
-
-      {/* Overlay de drag & drop */}
-      {isDragOver && (
-        <div className="absolute inset-0 bg-[#0056b3]/5 border-2 border-dashed border-[#0056b3] rounded-md flex items-center justify-center pointer-events-none z-10">
-          <div className="flex flex-col items-center gap-2 text-[#0056b3]">
-            <Upload size={28} />
-            <p className="text-sm font-semibold">Soltá el archivo para subirlo</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
 
-const ArchivosTab: React.FC = () => {
-  const [ifcFiles, setIfcFiles] = useState<LocalFile[]>([]);
-  const [excelFiles, setExcelFiles] = useState<LocalFile[]>([]);
+interface ArchivosTabProps {
+  projectId: number;
+  currentUserId?: number | null;
+  isProjectOwner: boolean;
+}
+
+const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isProjectOwner }) => {
+  const [files, setFiles] = useState<ProjectFile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
+  const loadFiles = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await projectService.getProjectFiles(projectId);
+      setFiles(data);
+    } catch (err: any) {
+      setError(err.message || 'No se pudieron cargar los archivos.');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadFiles();
+  }, [loadFiles]);
 
   const term = searchTerm.trim().toLowerCase();
   const isSearching = term.length > 0;
+
+  // "ifc" va a la columna de IFC; cualquier otro tipo (xlsx, csv, etc.) va
+  // a "Otros archivos" — no asumimos un único tipo fijo para no romper si
+  // el backend maneja más de un formato ahí.
+  const ifcFiles = useMemo(() => files.filter((f) => f.file_type?.toLowerCase() === 'ifc'), [files]);
+  const otherFiles = useMemo(() => files.filter((f) => f.file_type?.toLowerCase() !== 'ifc'), [files]);
 
   const filteredIfc = useMemo(
     () => (isSearching ? ifcFiles.filter((f) => f.name.toLowerCase().includes(term)) : ifcFiles),
     [ifcFiles, term, isSearching]
   );
-  const filteredExcel = useMemo(
-    () => (isSearching ? excelFiles.filter((f) => f.name.toLowerCase().includes(term)) : excelFiles),
-    [excelFiles, term, isSearching]
+  const filteredOther = useMemo(
+    () => (isSearching ? otherFiles.filter((f) => f.name.toLowerCase().includes(term)) : otherFiles),
+    [otherFiles, term, isSearching]
   );
 
-  const handleUploadIfc = (fileList: FileList) => {
-    const now = Date.now();
-    const entries: LocalFile[] = Array.from(fileList).map((f) => ({
-      id: nextFileId(), name: f.name, sizeBytes: f.size, uploadedAt: now,
-    }));
-    setIfcFiles((prev) => [...entries, ...prev]);
-  };
-
-  const handleUploadExcel = (fileList: FileList) => {
-    const now = Date.now();
-    const entries: LocalFile[] = Array.from(fileList).map((f) => ({
-      id: nextFileId(), name: f.name, sizeBytes: f.size, uploadedAt: now,
-    }));
-    setExcelFiles((prev) => [...entries, ...prev]);
-  };
-
-  const totalFiles = ifcFiles.length + excelFiles.length;
   const totalSize = useMemo(
-    () => [...ifcFiles, ...excelFiles].reduce((sum, f) => sum + f.sizeBytes, 0),
-    [ifcFiles, excelFiles]
+    () => files.reduce((sum, f) => sum + parseInt(f.file_size, 10), 0),
+    [files]
   );
+
+  const handleDelete = async (file: ProjectFile) => {
+    setDeletingId(file.file_id);
+    try {
+      await projectService.deleteProjectFile(projectId, file.file_id);
+      setFiles((prev) => prev.filter((f) => f.file_id !== file.file_id));
+    } catch (err: any) {
+      alert(err.message || 'No se pudo eliminar el archivo.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleDownload = async (file: ProjectFile) => {
+    setDownloadingId(file.file_id);
+    try {
+      await projectService.downloadFile(file.file_id, file.name);
+    } catch (err: any) {
+      alert(err.message || 'No se pudo descargar el archivo.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   return (
     <div className="flex flex-col overflow-hidden bg-white border border-gray-200 rounded-md shadow-sm h-full min-h-[600px] max-w-5xl mx-auto w-full">
@@ -294,12 +300,12 @@ const ArchivosTab: React.FC = () => {
               <span className="font-bold text-gray-800">Archivos</span>{' '}
               <span className="font-normal text-gray-400">del proyecto</span>
             </h2>
-            <p className="text-sm text-gray-500 mt-1.5">Modelos IFC y planillas Excel asociadas a este proyecto.</p>
+            <p className="text-sm text-gray-500 mt-1.5">Modelos IFC y otros archivos asociados a este proyecto.</p>
           </div>
         </div>
-        {totalFiles > 0 && (
+        {files.length > 0 && (
           <p className="text-xs text-gray-400 font-medium whitespace-nowrap">
-            {totalFiles} archivo{totalFiles !== 1 ? 's' : ''} en total · {formatSize(totalSize)}
+            {files.length} archivo{files.length !== 1 ? 's' : ''} en total · {formatSize(totalSize)}
           </p>
         )}
       </div>
@@ -326,35 +332,56 @@ const ArchivosTab: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
-        <FileListSection
-          title="Archivos IFC"
-          icon={<FileText size={16} className="text-[#0056b3]" />}
-          accentColor="bg-blue-50"
-          accentText="text-[#0056b3]"
-          accept=".ifc,.IFC"
-          emptyLabel="Todavía no hay archivos IFC en este proyecto"
-          files={ifcFiles}
-          filteredFiles={filteredIfc}
-          isSearching={isSearching}
-          onUpload={handleUploadIfc}
-          onRemove={(id) => setIfcFiles((prev) => prev.filter((f) => f.id !== id))}
-        />
+      {loading ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-gray-400">
+          <RefreshCw size={22} className="animate-spin" />
+          <p className="text-sm">Cargando archivos...</p>
+        </div>
+      ) : error ? (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-red-500 px-6 text-center">
+          <AlertCircle size={22} />
+          <p className="text-sm">{error}</p>
+          <button onClick={loadFiles} className="text-xs font-semibold text-[#0056b3] hover:underline mt-1">
+            Reintentar
+          </button>
+        </div>
+      ) : (
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-gray-100">
+          <FileListSection
+            title="Archivos IFC"
+            icon={<FileText size={16} className="text-[#0056b3]" />}
+            accentColor="bg-blue-50"
+            accentText="text-[#0056b3]"
+            emptyLabel="Todavía no hay archivos IFC en este proyecto"
+            files={ifcFiles}
+            filteredFiles={filteredIfc}
+            isSearching={isSearching}
+            currentUserId={currentUserId}
+            isProjectOwner={isProjectOwner}
+            onDelete={handleDelete}
+            onDownload={handleDownload}
+            deletingId={deletingId}
+            downloadingId={downloadingId}
+          />
 
-        <FileListSection
-          title="Archivos Excel"
-          icon={<FileSpreadsheet size={16} className="text-green-600" />}
-          accentColor="bg-green-50"
-          accentText="text-green-600"
-          accept=".xlsx,.xls,.csv"
-          emptyLabel="Todavía no hay archivos Excel en este proyecto"
-          files={excelFiles}
-          filteredFiles={filteredExcel}
-          isSearching={isSearching}
-          onUpload={handleUploadExcel}
-          onRemove={(id) => setExcelFiles((prev) => prev.filter((f) => f.id !== id))}
-        />
-      </div>
+          <FileListSection
+            title="Otros archivos"
+            icon={<FileSpreadsheet size={16} className="text-green-600" />}
+            accentColor="bg-green-50"
+            accentText="text-green-600"
+            emptyLabel="Todavía no hay otros archivos en este proyecto"
+            files={otherFiles}
+            filteredFiles={filteredOther}
+            isSearching={isSearching}
+            currentUserId={currentUserId}
+            isProjectOwner={isProjectOwner}
+            onDelete={handleDelete}
+            onDownload={handleDownload}
+            deletingId={deletingId}
+            downloadingId={downloadingId}
+          />
+        </div>
+      )}
     </div>
   );
 };

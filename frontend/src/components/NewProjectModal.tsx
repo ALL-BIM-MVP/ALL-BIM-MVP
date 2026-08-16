@@ -17,13 +17,21 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({
     location: '',
     startDate: '',
     endDate: '',
-    description: ''
+    description: '',
+    client: '',
+    contractor: ''
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onCreate(newProject);
-    setNewProject({ name: '', location: '', startDate: '', endDate: '', description: '' });
+    onCreate({
+      ...newProject,
+      // Campos opcionales: si quedaron vacíos, mandamos null en vez de
+      // string vacío (el backend acepta null, y así no guardamos "" como dato).
+      client: newProject.client?.trim() ? newProject.client.trim() : null,
+      contractor: newProject.contractor?.trim() ? newProject.contractor.trim() : null,
+    });
+    setNewProject({ name: '', location: '', startDate: '', endDate: '', description: '', client: '', contractor: '' });
   };
 
   if (!isOpen) return null;
@@ -67,6 +75,33 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({
               onChange={(e) => setNewProject({...newProject, location: e.target.value})}
               className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none transition"
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Cliente
+              </label>
+              <input
+                type="text"
+                placeholder="Ej. Municipalidad de Puno"
+                value={newProject.client ?? ''}
+                onChange={(e) => setNewProject({...newProject, client: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Contratista
+              </label>
+              <input
+                type="text"
+                placeholder="Ej. ALL-BIM Constructora SAC"
+                value={newProject.contractor ?? ''}
+                onChange={(e) => setNewProject({...newProject, contractor: e.target.value})}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#0056b3] focus:border-transparent outline-none transition"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

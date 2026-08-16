@@ -8,6 +8,7 @@ import { Project, ProjectScope } from '../types/project.types';
 import { useProjects } from '../hooks/useProjects';
 import { useAuth } from '../context/AuthContext';
 import { ROLE_IDS } from '../utils/roles';
+import { resolveMediaUrl } from '../utils/media';
 
 const ProjectRegistration: React.FC = () => {
   const navigate = useNavigate();
@@ -41,7 +42,9 @@ const ProjectRegistration: React.FC = () => {
         location: projectData.location,
         startDate: projectData.startDate,
         endDate: projectData.endDate,
-        description: projectData.description
+        description: projectData.description,
+        client: projectData.client ?? null,
+        contractor: projectData.contractor ?? null
       });
 
       console.log('Proyecto creado:', newProject);
@@ -169,43 +172,54 @@ const ProjectRegistration: React.FC = () => {
               <div
                 key={project.project_id}
                 onClick={() => handleProjectClick(project)}
-                className="bg-white rounded-xl border border-gray-200 p-4 hover:shadow-lg hover:border-[#0056b3] transition-all duration-200 flex flex-col cursor-pointer"
+                className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-[#0056b3] transition-all duration-200 flex flex-col cursor-pointer"
               >
-                <div className="flex-1">
-                  <div className="flex items-start justify-between mb-2">
-                    <h3 className="text-base font-bold text-gray-800 line-clamp-2">
-                      {project.name}
-                    </h3>
-                    {project.hasIFC && (
-                      <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded flex-shrink-0 ml-2">
-                        IFC
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
-                    <MapPin size={14} className="text-gray-400" />
-                    <span>{project.location}</span>
-                  </div>
-
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusColor(project.estado)}`}>
-                      {project.estado}
-                    </span>
-                  </div>
-
-                  <p className="text-xs text-gray-500 line-clamp-2 mb-3">
-                    {project.description}
-                  </p>
+                <div className="aspect-video w-full bg-gray-100 overflow-hidden">
+                  <img
+                    src={resolveMediaUrl(project.cover_image.url)}
+                    alt={`Portada de ${project.name}`}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
                 </div>
 
-                <button
-                  onClick={(e) => handleViewDetails(project, e)}
-                  className="w-full mt-2 px-3 py-1.5 text-[#0056b3] border border-[#0056b3] rounded-lg hover:bg-[#0056b3] hover:text-white transition-colors text-xs font-semibold flex items-center justify-center gap-1"
-                >
-                  <Eye size={14} />
-                  Ver Detalles
-                </button>
+                <div className="p-4 flex-1 flex flex-col">
+                  <div className="flex-1">
+                    <div className="flex items-start justify-between mb-2">
+                      <h3 className="text-base font-bold text-gray-800 line-clamp-2">
+                        {project.name}
+                      </h3>
+                      {project.hasIFC && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded flex-shrink-0 ml-2">
+                          IFC
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1 text-xs text-gray-500 mb-2">
+                      <MapPin size={14} className="text-gray-400" />
+                      <span>{project.location}</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${getStatusColor(project.estado)}`}>
+                        {project.estado}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-gray-500 line-clamp-2 mb-3">
+                      {project.description}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={(e) => handleViewDetails(project, e)}
+                    className="w-full mt-2 px-3 py-1.5 text-[#0056b3] border border-[#0056b3] rounded-lg hover:bg-[#0056b3] hover:text-white transition-colors text-xs font-semibold flex items-center justify-center gap-1"
+                  >
+                    <Eye size={14} />
+                    Ver Detalles
+                  </button>
+                </div>
               </div>
             ))
           )}
