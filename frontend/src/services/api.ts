@@ -106,5 +106,25 @@ export const api = {
   postFormData: (endpoint: string, formData: FormData) => request(endpoint, {
     method: 'POST',
     body: formData,
-  })
+  }),
+
+  // Para fijar/reemplazar la portada de un proyecto (PUT + multipart)
+  putFormData: (endpoint: string, formData: FormData) => request(endpoint, {
+    method: 'PUT',
+    body: formData,
+  }),
+
+  // Para descargar archivos binarios (IFC, Excel, etc.) que requieren
+  // Authorization — un <a href> normal no puede mandar el header, así
+  // que esto pide el archivo por fetch y devuelve el blob directo.
+  getBlob: async (endpoint: string): Promise<Blob> => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
+      headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+    });
+    if (!response.ok) {
+      throw new Error('No se pudo descargar el archivo.');
+    }
+    return response.blob();
+  },
 };

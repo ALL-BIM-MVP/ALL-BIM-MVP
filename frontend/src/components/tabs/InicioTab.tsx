@@ -1,12 +1,14 @@
 // components/tabs/InicioTab.tsx
-import React from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   MapPin, CalendarBlank, PencilSimple, CheckCircle, WarningCircle, ClipboardText,
-  Buildings, UserCircle, FileXls, CaretDown, Plus, Circle, ChartBar,
+  Buildings, UserCircle, FileXls, CaretDown, Plus, Circle, ChartBar, Camera,
 } from '@phosphor-icons/react';
 import { Project } from '../../types/project.types';
 import { MODULOS } from '../../constants/modulos';
 import { formatDate } from '../../utils/dateUtils';
+import { resolveMediaUrl } from '../../utils/media';
+import { projectService } from '../../services/project.service';
 
 interface EditForm {
   name: string;
@@ -14,11 +16,12 @@ interface EditForm {
   start_date: string;
   end_date: string;
   description: string;
+  client: string;
+  contractor: string;
 }
 
 interface InicioTabProps {
   project: Project;
-  fondoImage: string;
   canActuallyEdit: boolean;
   isEditingInfo: boolean;
   savingInfo: boolean;
@@ -33,7 +36,9 @@ interface InicioTabProps {
 
 /* ---------------------------------------------------------------------- */
 /* PLACEHOLDER — datos de ejemplo. Reemplazar cuando el backend exponga   */
-/* cliente/contratista, indicadores, verificación y estado de archivos.   */
+/* indicadores, verificación y estado de archivos.                        */
+/* client/contractor ya vienen del backend (project.client /              */
+/* project.contractor) — reemplazados abajo, ya no son placeholder.       */
 /* ---------------------------------------------------------------------- */
 const ESPECIALIDADES = [
   'Arquitectura', 'Estructuras', 'Mecánicas', 'Comunicaciones', 'Eléctricas', 'Equipamiento',
@@ -106,7 +111,6 @@ const SectionLabel: React.FC<{ icon: React.ReactNode; children: React.ReactNode;
 
 const InicioTab: React.FC<InicioTabProps> = ({
   project,
-  fondoImage,
   canActuallyEdit,
   isEditingInfo,
   savingInfo,
@@ -128,6 +132,38 @@ const InicioTab: React.FC<InicioTabProps> = ({
   })();
 
   const indicadoresPct = 74; // PLACEHOLDER
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingCover, setUploadingCover] = useState(false);
+  const [coverError, setCoverError] = useState<string | null>(null);
+  const [localCoverImage, setLocalCoverImage] = useState(project.cover_image);
+
+  useEffect(() => {
+    setLocalCoverImage(project.cover_image);
+    setCoverError(null);
+  }, [project.project_id, project.cover_image]);
+
+  const handlePickCover = () => {
+    if (uploadingCover || !canActuallyEdit) return;
+    fileInputRef.current?.click();
+  };
+
+  const handleCoverSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+
+    setUploadingCover(true);
+    setCoverError(null);
+    try {
+      const newCoverImage = await projectService.setCoverImage(project.project_id, file);
+      setLocalCoverImage(newCoverImage);
+    } catch (err: any) {
+      setCoverError(err.message || 'No se pudo actualizar la portada.');
+    } finally {
+      setUploadingCover(false);
+    }
+  };
 
   return (
     <div className="flex items-start justify-center min-h-[600px] relative py-2">
@@ -166,13 +202,24 @@ const InicioTab: React.FC<InicioTabProps> = ({
             </div>
 
             {canActuallyEdit && (
-              <button
-                onClick={isEditingInfo ? onCancelEditing : onStartEditing}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-[4px] hover:border-gray-300 hover:text-gray-700 transition-colors flex-shrink-0"
-              >
-                <PencilSimple size={14} weight="bold" />
-                {isEditingInfo ? 'Cancelar' : 'Editar'}
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {isEditingInfo && (
+                  <button
+                    onClick={onSaveEditing}
+                    disabled={savingInfo}
+                    className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0056b3] rounded-[4px] hover:bg-[#004494] transition-colors disabled:opacity-50"
+                  >
+                    {savingInfo ? 'Guardando...' : 'Guardar cambios'}
+                  </button>
+                )}
+                <button
+                  onClick={isEditingInfo ? onCancelEditing : onStartEditing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-[4px] hover:border-gray-300 hover:text-gray-700 transition-colors"
+                >
+                  <PencilSimple size={14} weight="bold" />
+                  {isEditingInfo ? 'Cancelar' : 'Editar'}
+                </button>
+              </div>
             )}
           </div>
 
@@ -180,9 +227,44 @@ const InicioTab: React.FC<InicioTabProps> = ({
 
             {/* Columna izquierda: imagen + datos + descripción */}
             <div>
-              <div className="rounded-[4px] overflow-hidden border border-gray-200 bg-slate-900">
-                <img src={fondoImage} alt={project.name} className="w-full h-48 object-cover" />
+              <div
+                onClick={handlePickCover}
+                className={`relative group rounded-[4px] overflow-hidden border border-gray-200 bg-slate-900 w-120 h-60 ${
+                  canActuallyEdit ? 'cursor-pointer' : ''
+                }`}
+              >
+                <img
+                  src={resolveMediaUrl(localCoverImage.url)}
+                  alt={project.name}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+                {canActuallyEdit && (
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 text-white text-xs font-semibold px-2.5 py-1.5 bg-black/50 rounded-[4px]">
+                      <Camera size={14} weight="bold" />
+                      {uploadingCover ? 'Subiendo...' : 'Cambiar imagen'}
+                    </span>
+                  </div>
+                )}
+                {uploadingCover && (
+                  <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
+                    <span className="text-xs font-semibold text-gray-600">Subiendo...</span>
+                  </div>
+                )}
               </div>
+              {canActuallyEdit && (
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleCoverSelected}
+                  className="hidden"
+                />
+              )}
+              {coverError && (
+                <p className="text-[11px] text-red-600 mt-1">{coverError}</p>
+              )}
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mt-2">
                 {project.name}
               </p>
@@ -203,112 +285,109 @@ const InicioTab: React.FC<InicioTabProps> = ({
                 </div>
               </div>
 
-              {/* Datos */}
-              {isEditingInfo ? (
-                <div className="mt-5 space-y-3">
-                  <div>
-                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1 block">
-                      Ubicación
-                    </label>
-                    <input
-                      type="text"
-                      value={editForm.location}
-                      onChange={(e) => onEditChange('location', e.target.value)}
-                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
-                    />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1 block">
-                        Inicio
-                      </label>
+              {/* Datos: mismo layout siempre, cada valor se vuelve input en su propio lugar al editar */}
+              <div className="mt-5">
+                <SectionLabel icon={null}>Datos</SectionLabel>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <MapPin size={15} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
+                    {isEditingInfo ? (
                       <input
-                        type="date"
-                        value={editForm.start_date}
-                        onChange={(e) => onEditChange('start_date', e.target.value)}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                        type="text"
+                        value={editForm.location}
+                        onChange={(e) => onEditChange('location', e.target.value)}
+                        placeholder="Ubicación"
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
                       />
-                    </div>
-                    <div>
-                      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1 block">
-                        Fin
-                      </label>
+                    ) : (
+                      <span>{project.location || '—'}</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <UserCircle size={15} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
+                    <span className="flex-shrink-0">Cliente:</span>
+                    {isEditingInfo ? (
                       <input
-                        type="date"
-                        value={editForm.end_date}
-                        onChange={(e) => onEditChange('end_date', e.target.value)}
-                        className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                        type="text"
+                        value={editForm.client}
+                        onChange={(e) => onEditChange('client', e.target.value)}
+                        placeholder="Cliente"
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
                       />
-                    </div>
+                    ) : (
+                      <span className="text-gray-500">{project.client || '—'}</span>
+                    )}
                   </div>
-                  <div>
-                    <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1 block">
-                      Descripción
-                    </label>
-                    <textarea
-                      value={editForm.description}
-                      onChange={(e) => onEditChange('description', e.target.value)}
-                      rows={3}
-                      className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none resize-none"
-                    />
-                  </div>
-                  <div className="flex justify-end">
-                    <button
-                      onClick={onSaveEditing}
-                      disabled={savingInfo}
-                      className="px-4 py-1.5 text-sm bg-[#0056b3] text-white rounded-[4px] hover:bg-[#004494] transition-colors disabled:opacity-50 font-semibold"
-                    >
-                      {savingInfo ? 'Guardando...' : 'Guardar cambios'}
-                    </button>
+                  <div className="flex items-center gap-2 text-sm text-gray-600">
+                    <Buildings size={15} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
+                    <span className="flex-shrink-0">Contratista:</span>
+                    {isEditingInfo ? (
+                      <input
+                        type="text"
+                        value={editForm.contractor}
+                        onChange={(e) => onEditChange('contractor', e.target.value)}
+                        placeholder="Contratista"
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                      />
+                    ) : (
+                      <span className="text-gray-500">{project.contractor || '—'}</span>
+                    )}
                   </div>
                 </div>
-              ) : (
-                <>
-                  <div className="mt-5">
-                    <SectionLabel icon={null}>Datos</SectionLabel>
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <MapPin size={15} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
-                        {project.location || '—'}
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <UserCircle size={15} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
-                        Cliente: <span className="text-gray-500">Gobierno Regional de Puno</span>
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Buildings size={15} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
-                        Contratista: <span className="text-gray-500">Ingeniería Palomino S.A.C.</span>
-                      </div>
-                    </div>
-                  </div>
+              </div>
 
-                  <div className="mt-5">
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
-                      <ClipboardText size={14} weight="duotone" />
-                      Descripción
-                    </p>
-                    <p className="text-sm text-gray-600 leading-relaxed">
-                      {project.description}
-                    </p>
-                  </div>
-                </>
-              )}
+              <div className="mt-5">
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                  <ClipboardText size={14} weight="duotone" />
+                  Descripción
+                </p>
+                {isEditingInfo ? (
+                  <textarea
+                    value={editForm.description}
+                    onChange={(e) => onEditChange('description', e.target.value)}
+                    rows={3}
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none resize-none"
+                  />
+                ) : (
+                  <p className="text-sm text-gray-600 leading-relaxed">
+                    {project.description}
+                  </p>
+                )}
+              </div>
             </div>
 
-            {/* Columna derecha: Inicio / Fin / Progreso */}
+            {/* Columna derecha: Inicio / Fin / Progreso — mismo lugar, editable en el mismo lugar */}
             <div className="flex flex-col gap-3">
               <div className="border border-gray-200 rounded-[4px] p-3.5 flex items-center gap-3">
                 <CalendarBlank size={16} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Inicio</p>
-                  <p className="text-sm font-bold text-gray-800">{formatDate(project.start_date)}</p>
+                  {isEditingInfo ? (
+                    <input
+                      type="date"
+                      value={editForm.start_date}
+                      onChange={(e) => onEditChange('start_date', e.target.value)}
+                      className="w-full mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                    />
+                  ) : (
+                    <p className="text-sm font-bold text-gray-800">{formatDate(project.start_date)}</p>
+                  )}
                 </div>
               </div>
               <div className="border border-gray-200 rounded-[4px] p-3.5 flex items-center gap-3">
                 <CalendarBlank size={16} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
-                <div>
+                <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Fin</p>
-                  <p className="text-sm font-bold text-gray-800">{formatDate(project.end_date)}</p>
+                  {isEditingInfo ? (
+                    <input
+                      type="date"
+                      value={editForm.end_date}
+                      onChange={(e) => onEditChange('end_date', e.target.value)}
+                      className="w-full mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                    />
+                  ) : (
+                    <p className="text-sm font-bold text-gray-800">{formatDate(project.end_date)}</p>
+                  )}
                 </div>
               </div>
               <div className="border border-gray-200 rounded-[4px] p-3.5">
@@ -353,66 +432,6 @@ const InicioTab: React.FC<InicioTabProps> = ({
             </div>
           </div>
 
-          {/* ---------- Verificación ---------- */}
-          <div className="mx-6 mt-4 border border-gray-200 rounded-[4px] p-5 overflow-hidden">
-            <SectionLabel
-              icon={<CheckCircle size={14} weight="bold" className="text-gray-400" />}
-              action={
-                <button className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0056b3] text-white text-xs font-semibold rounded-[4px] hover:bg-[#004494] transition-colors">
-                  Especialidad
-                  <CaretDown size={12} weight="bold" />
-                </button>
-              }
-            >
-              Verificación
-            </SectionLabel>
-            <p className="text-[11px] text-gray-400 -mt-2 mb-4">
-              Datos extraídos del modelo IFC cargado
-            </p>
-
-            {/* Tarjetas de conteo */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              {VERIFICACION_CONTEOS.map((c) => (
-                <div key={c.label} className="rounded-[4px] border border-gray-200 overflow-hidden">
-                  <div className="px-2.5 py-1.5 text-[10.5px] font-semibold text-gray-500 uppercase tracking-wide text-center leading-tight bg-gray-50 border-b border-gray-200">
-                    {c.label}
-                  </div>
-                  <div className="px-2.5 py-2 text-center text-lg font-bold text-[#0056b3] bg-white">
-                    {c.value}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Tabla de detalle */}
-            <div className="overflow-x-auto rounded-[4px] border border-gray-200">
-              <table className="w-full text-xs border-collapse min-w-[720px]">
-                <thead>
-                  <tr>
-                    {VERIFICACION_COLS.map((col) => (
-                      <th
-                        key={col}
-                        className="px-3 py-2 text-gray-600 font-semibold text-left uppercase tracking-wide text-[10.5px] border border-gray-200 bg-gray-50 whitespace-normal"
-                      >
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {VERIFICACION_FILAS.map((fila, i) => (
-                    <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/60'}>
-                      <td className="px-3 py-2 border border-gray-200 text-gray-600 break-all">{fila.guid}</td>
-                      <td className="px-3 py-2 border border-gray-200 text-gray-600 text-center">{fila.recuento}</td>
-                      <td className="px-3 py-2 border border-gray-200 text-gray-600 text-center">{fila.coherencia}</td>
-                      <td className="px-3 py-2 border border-gray-200 text-gray-600 text-center">{fila.variacion}</td>
-                      <td className="px-3 py-2 border border-gray-200 text-gray-600">{fila.comentario || '—'}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
 
           {/* ---------- Especialidades / Federado (barra inferior completa) ---------- */}
           <div className="mt-4 border-t border-gray-200 px-6 py-4 bg-gray-50 flex items-center gap-2 flex-wrap">

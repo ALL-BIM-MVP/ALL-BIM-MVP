@@ -59,6 +59,8 @@ const DashboardProjects: React.FC = () => {
     start_date: '',
     end_date: '',
     description: '',
+    client: '',
+    contractor: '',
   });
 
   useEffect(() => {
@@ -100,6 +102,8 @@ const DashboardProjects: React.FC = () => {
       start_date: project.start_date ? project.start_date.slice(0, 10) : '',
       end_date: project.end_date ? project.end_date.slice(0, 10) : '',
       description: project.description || '',
+      client: project.client || '',
+      contractor: project.contractor || '',
     });
     setIsEditingInfo(true);
   };
@@ -122,6 +126,8 @@ const DashboardProjects: React.FC = () => {
         startDate: editForm.start_date,
         endDate: editForm.end_date,
         description: editForm.description,
+        client: editForm.client.trim() ? editForm.client.trim() : null,
+        contractor: editForm.contractor.trim() ? editForm.contractor.trim() : null,
       });
       setProject(updated);
       setIsEditingInfo(false);
@@ -272,7 +278,8 @@ const DashboardProjects: React.FC = () => {
         {activeTab === 'inicio' && (
   <InicioTab
     project={project}
-    fondoImage={fondoImage}
+    
+
     canActuallyEdit={canActuallyEdit}
     isEditingInfo={isEditingInfo}
     savingInfo={savingInfo}
@@ -288,8 +295,12 @@ const DashboardProjects: React.FC = () => {
     }}
   />
 )}
-    {activeTab === 'archivos' && (
-  <ArchivosTab />
+   {activeTab === 'archivos' && (
+  <ArchivosTab
+    projectId={project?.project_id || 0}
+    isProjectOwner={isOwner}
+    currentUserId={user?.id}
+  />
 )}
         {activeTab === 'colaboradores' && isOwner && (
           <ColaboradoresTab onClose={() => setActiveTab('inicio')} 

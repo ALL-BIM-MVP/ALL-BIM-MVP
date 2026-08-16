@@ -1,5 +1,5 @@
 import { api } from './api';
-import { Project, NewProjectData, ProjectScope } from '../types/project.types';
+import { Project, NewProjectData, ProjectScope, ProjectFile } from '../types/project.types';
 
 export const projectService = {
   // Obtener proyectos con filtro por scope
@@ -16,6 +16,10 @@ export const projectService = {
       end_date: projectData.endDate,
       location: projectData.location,
       description: projectData.description,
+      // El backend exige que estas dos keys vengan siempre en el create,
+      // aunque el valor sea null (no se puede omitir la key).
+      client: projectData.client ?? null,
+      contractor: projectData.contractor ?? null,
     };
 
     const response = await api.post('/api/projects', newProject);
@@ -48,8 +52,50 @@ export const projectService = {
     if (data.endDate !== undefined) payload.end_date = data.endDate;
     if (data.location !== undefined) payload.location = data.location;
     if (data.description !== undefined) payload.description = data.description;
+    // PATCH sí acepta parcial (según la doc), así que estos dos solo van
+    // si realmente se editaron.
+    if (data.client !== undefined) payload.client = data.client;
+    if (data.contractor !== undefined) payload.contractor = data.contractor;
 
     const response = await api.patch(`/api/projects/${id}`, payload);
     return response;
+  },
+
+  // Fijar/reemplazar la imagen de portada del proyecto (solo dueño)
+  async setCoverImage(projectId: number, file: File): Promise<Project['cover_image']> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.putFormData(`/api/projects/${projectId}/image`, formData);
+    return response;
+  },
+
+  // Borrar la portada (vuelve a la imagen default)
+  async deleteCoverImage(projectId: number): Promise<Project['cover_image']> {
+    const response = await api.delete(`/api/projects/${projectId}/image`);
+    return response;
+  },
+
+  // Listar los archivos (IFC, Excel, etc.) subidos a un proyecto
+  async getProjectFiles(projectId: number): Promise<ProjectFile[]> {
+    const response = await api.get(`/api/projects/${projectId}/files`);
+    return response;
+  },
+
+  // Borrar un archivo del proyecto (solo quien lo subió o el dueño del proyecto)
+  async deleteProjectFile(projectId: number, fileId: string | number): Promise<void> {
+    await api.delete(`/api/projects/${projectId}/files/${fileId}`);
+  },
+
+  // Descargar el contenido real de un archivo y disparar la descarga en el navegador
+  async downloadFile(fileId: string | number, fileName: string): Promise<void> {
+    const blob = await api.getBlob(`/api/files/${fileId}/content`);
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   },
 };
