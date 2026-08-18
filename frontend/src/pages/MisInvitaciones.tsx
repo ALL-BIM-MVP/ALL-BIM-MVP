@@ -1,46 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React from 'react';
 import { Mail, Check, X, Clock, RefreshCw, AlertCircle } from 'lucide-react';
-import { getMeInvitations, updateInvitationStatus } from '../services/invitation.service';
+import { useInvitations } from '../context/InvitationsContext';
 import PageHeader from '../components/PageHeader';
 
 const MisInvitaciones: React.FC = () => {
-  const [invitations, setInvitations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [respondingId, setRespondingId] = useState<number | null>(null);
-
-  const loadInvitations = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await getMeInvitations('pending');
-      setInvitations(data);
-    } catch (err: any) {
-      setError(err.message || 'Error al cargar invitaciones');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadInvitations();
-  }, [loadInvitations]);
-
-  const handleRespond = async (
-    projectId: number,
-    invitationId: number,
-    status: 'aceptado' | 'rechazado'
-  ) => {
-    setRespondingId(invitationId);
-    try {
-      await updateInvitationStatus(projectId, invitationId, { status });
-      await loadInvitations();
-    } catch (err: any) {
-      setError(err.message || 'Error al responder la invitación');
-    } finally {
-      setRespondingId(null);
-    }
-  };
+  const {
+    invitations,
+    loading,
+    error,
+    respondingId,
+    loadInvitations,
+    respondInvitation
+  } = useInvitations();
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -85,14 +56,14 @@ const MisInvitaciones: React.FC = () => {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => handleRespond(inv.project.project_id, inv.invitation_id, 'rechazado')}
+                    onClick={() => respondInvitation(inv.project.project_id, inv.invitation_id, 'rechazado')}
                     disabled={respondingId === inv.invitation_id}
                     className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 text-sm font-medium flex items-center gap-1 disabled:opacity-50"
                   >
                     <X size={16} /> Rechazar
                   </button>
                   <button
-                    onClick={() => handleRespond(inv.project.project_id, inv.invitation_id, 'aceptado')}
+                    onClick={() => respondInvitation(inv.project.project_id, inv.invitation_id, 'aceptado')}
                     disabled={respondingId === inv.invitation_id}
                     className="px-4 py-2 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] text-sm font-medium flex items-center gap-1 disabled:opacity-50"
                   >

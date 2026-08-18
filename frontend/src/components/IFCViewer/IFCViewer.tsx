@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Focus, ChevronDown, Search, Crosshair, Paintbrush,Layers} from 'lucide-react';
+import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, ChevronDown, Search, Crosshair, Paintbrush,Layers} from 'lucide-react';
 import { useIfcModel } from './hooks/useIfcModel';
 import { ViewPreset } from './types';
 import PropertiesPanel from "./PropertiesPanel/PropertiesPanel";
@@ -12,6 +12,20 @@ interface IFCViewerProps {
 export interface IFCViewerHandle {
   selectEntityById: (expressId: number) => void;
   selectByIdOrGuid: (value: string) => Promise<boolean>;
+  // NUEVO: aísla varios elementos a la vez por expressId (oculta todo
+  // lo demás del modelo) — usado desde PartidasTree al hacer click
+  // sobre una partida del árbol, para ver en 3D solo los elementos de
+  // esa partida.
+  isolateElementsByIds: (expressIds: number[]) => void;
+  // NUEVO: resalta varios elementos a la vez Y muestra la ficha de
+  // propiedades del primero — usado desde la tabla de metrados al
+  // clickear una fila (un grupo). Comportamiento "normal" de click,
+  // aplicado a varios elementos: selección + popup, sin ocultar el
+  // resto del modelo.
+  selectGroupInViewer: (expressIds: number[]) => void;
+  // NUEVO: vuelve a mostrar el modelo completo (deshace cualquier
+  // aislamiento, sea el de una sola partida, un tipo, o varios tipos).
+  clearIsolation: () => void;
 }
 
 const InfoRow: React.FC<{ label: string; value: string; multiline?: boolean }> = ({ label, value, multiline }) => (
@@ -32,9 +46,6 @@ const DistanceLabel: React.FC<{ x: number; y: number; distance: number }> = ({ x
   </div>
 );
 
-// Igual que DistanceLabel, pero con el botón "×" pegado a la esquina superior
-// derecha del mismo cuadrito azul (relative + -top-2 -right-2, mismo patrón
-// que ya usa el popup del elemento seleccionado) — no es un punto aparte.
 const DistanceLabelWithDelete: React.FC<{ x: number; y: number; distance: number; onDelete: () => void }> = ({ x, y, distance, onDelete }) => (
   <div
     className="absolute z-30 -translate-x-1/2 -translate-y-full"
@@ -177,9 +188,17 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     hideElementById,
     isolateElementById,
     isolatedElementId,
+    // NUEVO: aislar varios expressId a la vez (click desde el árbol de partidas)
+    isolateElementsByIds,
+    isolatedElementIds,
     popupVisible,
     popupScreenPos,
     selectEntityById,
+    // NUEVO: resalta varios elementos a la vez Y muestra la ficha del
+    // primero (click en una fila/grupo de la tabla de metrados) —
+    // distinto de isolateElementsByIds, que oculta todo lo demás. Esto
+    // solo selecciona/resalta, sin tocar la visibilidad de nada más.
+    selectGroupInViewer,
     selectByIdOrGuid,
     paramIndex,
     // --- Filtro por categoría ---
@@ -200,6 +219,9 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
   useImperativeHandle(ref, () => ({
     selectEntityById: (expressId: number) => selectEntityById(expressId),
     selectByIdOrGuid: (value: string) => selectByIdOrGuid(value),
+    isolateElementsByIds: (expressIds: number[]) => isolateElementsByIds(expressIds),
+    selectGroupInViewer: (expressIds: number[]) => selectGroupInViewer(expressIds),
+    clearIsolation: () => clearIsolation(),
   }));
 
   // Panel unificado (buscador global + categorías del elemento). Se abre solo
@@ -238,6 +260,18 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     if (crossMode) exitCrossMode();
     togglePaintMode();
   };
+
+  // NUEVO: "Mostrar todo" — solo aparece si hay algún tipo de
+  // aislamiento activo (una partida del árbol, un elemento puntual, un
+  // tipo IFC, o varios tipos seleccionados en el panel de categorías).
+  // Vive acá adentro (no en Visor3DTab/PartidasTree) porque no
+  // necesita ningún trigger externo — clearIsolation() ya está
+  // disponible localmente.
+  const hasAnyIsolation =
+    isolatedElementId !== null ||
+    isolatedType !== null ||
+    (isolatedElementIds !== null && isolatedElementIds.size > 0) ||
+    selectedTypes.size > 0;
 
   return (
     <div className="flex h-full w-full">
@@ -362,6 +396,16 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
               >
                 <Camera size={16} />
               </button>
+
+              {hasAnyIsolation && (
+                <button
+                  onClick={clearIsolation}
+                  className="w-9 h-9 flex items-center justify-center rounded-lg bg-[#0056b3] hover:bg-[#004494] text-white transition-colors"
+                  title="Mostrar todo el modelo (deshacer aislamiento)"
+                >
+                  <Eye size={16} />
+                </button>
+              )}
 
             </div>
 

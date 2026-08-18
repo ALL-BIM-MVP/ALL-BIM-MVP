@@ -38,6 +38,16 @@ const VIEW_TARGETS: Record<ViewPreset, { x: number; y: number }> = {
   bottom: { x: 85, y: -38 },
 };
 
+// Margen desde el borde derecho del visor hasta el cubo. Subir este
+// número mueve el cubo hacia la IZQUIERDA (más lejos del borde);
+// bajarlo lo mueve hacia la DERECHA (más cerca del borde).
+const RIGHT_MARGIN = 40;
+
+// Margen desde el borde SUPERIOR del visor hasta el cubo. Bajar este
+// número mueve el cubo hacia ARRIBA (más cerca del borde); subirlo lo
+// mueve hacia ABAJO (más lejos del borde).
+const TOP_MARGIN = 4;
+
 const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef }) => {
   const [rotation, setRotation] = useState(DEFAULT_ROTATION);
   const [hoveredFace, setHoveredFace] = useState<ViewPreset | null>(null);
@@ -54,9 +64,9 @@ const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef }) => {
     const updatePosition = () => {
       if (anchorRef?.current) {
         const rect = anchorRef.current.getBoundingClientRect();
-        setScreenPos({ top: rect.top + 12, left: rect.right - 110 - 12 });
+        setScreenPos({ top: rect.top + TOP_MARGIN, left: rect.right - 110 - RIGHT_MARGIN });
       } else {
-        setScreenPos({ top: 12, left: window.innerWidth - 110 - 12 });
+        setScreenPos({ top: TOP_MARGIN, left: window.innerWidth - 110 - RIGHT_MARGIN });
       }
     };
     updatePosition();

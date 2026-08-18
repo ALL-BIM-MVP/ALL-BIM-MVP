@@ -5,19 +5,45 @@
 // pantalla de detalle (POST /ifc-files/:id/partidas/:partidaId/elements)
 // con columnas de Identificación/Dimensiones/Metrado — con flecha
 // "atrás" para volver al árbol.
+//
+// CAMBIOS de esta versión: agrega un flotante chico (esquina inferior
+// derecha de la tabla) con "Guardar"/"Borrar" plantilla — visible solo
+// cuando la plantilla activa es PROPIA (isOwn). 100% autocontenido acá
+// adentro, no requiere tocar Visor3DTab.tsx para nada.
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useState, useCallback } from 'react';
+import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, CheckCircle2, Save, Trash2 } from 'lucide-react';
 import {
   PartidaNode,
-  PartidaDetail,
-  PartidaGroup,
   getPartidasTree,
   getPartidaElements,
 } from '../../services/ifcfiles.service';
+import { useTemplates } from '../../hooks/useTemplates';
+import {
+  templateColumnsToPartidaRequest,
+  toTemplateSetsInput,
+  replaceTemplateColumns,
+  deleteTemplate,
+} from '../../services/templates.service';
+import type { PartidaDetail, PartidaGroup } from '../../services/ifcfiles.service';
+import type { TemplateFull, TemplateSet } from '../../services/templates.service';
+import TemplateSelector from './Templates/TemplateSelector';
+import TemplateEditor from './Templates/TemplateEditor';
+import MetradosTable from './Templates/MetradosTable';
 
 interface PartidasTreeProps {
   ifcFileId: string;
+  currentUserId?: number;
+  // Click sobre una partida (hoja) del árbol -> se llama con TODOS los
+  // expressId de esa partida, para que el padre (Visor3DTab) los
+  // AÍSLE en el visor 3D (oculta el resto). Sin esta prop, el click
+  // no dispara nada especial en el visor.
+  onSelectAllInViewer?: (expressIds: number[]) => void;
+  // NUEVO: click en una FILA de la tabla de metrados (un grupo) -> se
+  // llama con los expressId de ESE grupo puntual, para que el padre
+  // los RESALTE en el visor 3D — sin ocultar nada más (a diferencia
+  // de onSelectAllInViewer). Se usa adentro de PartidaDetailScreen.
+  onSelectGroupInViewer?: (expressIds: number[]) => void;
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -31,38 +57,149 @@ function formatNumber(value: number | null | undefined): string {
 const PartidaDetailScreen: React.FC<{
   ifcFileId: string;
   node: PartidaNode;
+  currentUserId: number;
   onBack: () => void;
-}> = ({ ifcFileId, node, onBack }) => {
+  onSelectGroupInViewer?: (expressIds: number[]) => void;
+}> = ({ ifcFileId, node, currentUserId, onBack, onSelectGroupInViewer }) => {
   const [detail, setDetail] = useState<PartidaDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorMode, setEditorMode] = useState<'edit' | 'create'>('edit');
+  const [quickSaving, setQuickSaving] = useState(false);
+  const [previewSets, setPreviewSets] = useState<TemplateSet[] | null>(null);
+
+  const {
+    templates,
+    activeTemplate,
+    loadingActive,
+    selectTemplate,
+    refreshList,
+    setActiveTemplateLocal,
+  } = useTemplates();
+
+  const effectiveSets = previewSets ?? activeTemplate?.sets ?? [];
+  const displayTemplate: TemplateFull | null = activeTemplate
+    ? { ...activeTemplate, sets: effectiveSets }
+    : null;
+
+  // "Estamos en una plantilla" = la activa es tuya (no default, no de
+  // otro usuario) — mismo criterio que isOwn en TemplateEditor. El
+  // flotante de Guardar/Borrar solo aparece en este caso.
+  const isOwn =
+    !!activeTemplate && !activeTemplate.is_system && activeTemplate.created_by === currentUserId;
+
+  const handleQuickSave = useCallback(async () => {
+    if (!isOwn || !activeTemplate) return;
+    setQuickSaving(true);
+    try {
+      const updated = await replaceTemplateColumns(
+        activeTemplate.template_id,
+        toTemplateSetsInput(effectiveSets)
+      );
+      await refreshList();
+      setActiveTemplateLocal(updated);
+      setPreviewSets(null);
+    } catch (err: any) {
+      alert(err.message || 'No se pudo guardar la plantilla.');
+    } finally {
+      setQuickSaving(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOwn, activeTemplate, effectiveSets]);
+
+  const handleQuickDelete = useCallback(async () => {
+    if (!isOwn || !activeTemplate) return;
+    if (!window.confirm(`¿Borrar la plantilla "${activeTemplate.name}"? No se puede deshacer.`)) return;
+    setQuickSaving(true);
+    try {
+      await deleteTemplate(activeTemplate.template_id);
+      setPreviewSets(null);
+      const list = await refreshList();
+      const fallback = list.find((t) => t.is_default) ?? list[0];
+      if (fallback) await selectTemplate(fallback.template_id);
+    } catch (err: any) {
+      alert(err.message || 'No se pudo borrar la plantilla.');
+    } finally {
+      setQuickSaving(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOwn, activeTemplate]);
+
+  // Reordenar arrastrando un header en MetradosTable — mismo criterio
+  // que el editor (mover con flechas): solo dentro del mismo set. Se
+  // aplica como vista previa en vivo (setPreviewSets), igual que
+  // cualquier otro cambio del editor — no pega al backend hasta que se
+  // guarde con el flotante 💾 o desde el modal.
+  const handleReorderColumn = useCallback(
+    (setIndex: number, fromColIndex: number, toColIndex: number) => {
+      const orderedSets = [...effectiveSets].sort((a, b) => a.sort_order - b.sort_order);
+      const target = orderedSets[setIndex];
+      if (!target) return;
+
+      const visible = [...target.columns]
+        .filter((c) => c.is_visible)
+        .sort((a, b) => a.column_order - b.column_order);
+      if (fromColIndex < 0 || fromColIndex >= visible.length) return;
+      if (toColIndex < 0 || toColIndex >= visible.length) return;
+
+      const [moved] = visible.splice(fromColIndex, 1);
+      visible.splice(toColIndex, 0, moved);
+
+      // Reasigna column_order 1..n según el nuevo orden visible, y
+      // mergea con las columnas NO visibles del mismo set (que no
+      // participan del drag, pero hay que conservarlas igual).
+      const hidden = target.columns.filter((c) => !c.is_visible);
+      const reordered = [...visible.map((c, i) => ({ ...c, column_order: i + 1 })), ...hidden];
+
+      const newSets = orderedSets.map((s, i) => (i === setIndex ? { ...s, columns: reordered } : s));
+      setPreviewSets(newSets);
+    },
+    [effectiveSets]
+  );
+
+  // NUEVO: click en una fila de la tabla (un grupo) -> aísla en el
+  // visor 3D SOLO los elementos de ese grupo puntual, no toda la
+  // partida. A diferencia de isolatePartidaInViewer, no hace falta
+  // pedir nada al backend — group.elements ya viene cargado en
+  // `detail` desde que se abrió la partida.
+  const handleSelectGroupInViewer = useCallback(
+    (group: PartidaGroup) => {
+      if (!onSelectGroupInViewer) return;
+      const expressIds = group.elements.map((el) => Number(el.express_id));
+      onSelectGroupInViewer(expressIds);
+    },
+    [onSelectGroupInViewer]
+  );
+
+  const loadDetail = useCallback(
+    (sets: TemplateSet[]) => {
+      setLoading(true);
+      setError(null);
+
+      const columns = templateColumnsToPartidaRequest(sets);
+      getPartidaElements(ifcFileId, node.partida_id, {
+        columns: columns.length > 0 ? columns : undefined,
+      })
+        .then((d) => setDetail(d))
+        .catch((err: any) => setError(err.message || 'Error al cargar el detalle de la partida.'))
+        .finally(() => setLoading(false));
+    },
+    [ifcFileId, node.partida_id]
+  );
+
+  const propertyColumnsSignature = JSON.stringify(templateColumnsToPartidaRequest(effectiveSets));
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setDetail(null);
-    getPartidaElements(ifcFileId, node.partida_id)
-      .then((d) => {
-        if (!cancelled) setDetail(d);
-      })
-      .catch((err: any) => {
-        if (!cancelled) setError(err.message || 'Error al cargar el detalle de la partida.');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // OJO: NO agregar detail/loading/error acá — ver la explicación en
-    // el bug que se corrigió antes. Solo debe re-dispararse si cambia
-    // de qué partida se pide el detalle.
-  }, [ifcFileId, node.partida_id]);
+    if (loadingActive) return;
+    if (!activeTemplate) return;
+    loadDetail(effectiveSets);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [node.partida_id, activeTemplate?.template_id, loadingActive, propertyColumnsSignature]);
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Todo en una sola fila: atrás + título/subtítulo a la izquierda, selector de plantilla + config a la derecha */}
+    // relative: ancla del flotante Guardar/Borrar de más abajo.
+    <div className="flex flex-col h-full relative">
       <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <button
@@ -84,12 +221,32 @@ const PartidaDetailScreen: React.FC<{
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded border border-gray-300 bg-white text-[10px] font-semibold text-gray-700 whitespace-nowrap">
-            Detallado (default)
-          </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0 mr-3">
+          <TemplateSelector
+            templates={templates}
+            activeTemplateId={activeTemplate?.template_id ?? null}
+            loading={loadingActive}
+            onSelect={(id) => {
+              setPreviewSets(null);
+              selectTemplate(id);
+            }}
+          />
           <button
-            title="Configurar columnas (próximamente)"
+            onClick={() => {
+              setEditorMode('create');
+              setEditorOpen(true);
+            }}
+            title="Nueva plantilla (copia de la activa, totalmente editable)"
+            className="text-[10px] font-semibold px-2 py-1 rounded border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 transition-colors flex-shrink-0 whitespace-nowrap"
+          >
+            Plantilla nueva
+          </button>
+          <button
+            onClick={() => {
+              setEditorMode('edit');
+              setEditorOpen(true);
+            }}
+            title="Mostrar/ocultar u agregar columnas de vista"
             className="w-6 h-6 flex items-center justify-center rounded border border-gray-300 bg-white text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors flex-shrink-0"
           >
             <SlidersHorizontal size={12} />
@@ -97,7 +254,6 @@ const PartidaDetailScreen: React.FC<{
         </div>
       </div>
 
-      {/* Contenido */}
       {loading ? (
         <div className="flex-1 min-h-0 py-10 text-center text-gray-400">
           <Loader2 size={20} className="animate-spin mx-auto mb-2" />
@@ -112,66 +268,73 @@ const PartidaDetailScreen: React.FC<{
         <div className="flex-1 min-h-0 py-10 text-center text-gray-400">
           <p className="text-sm">Sin elementos en esta partida.</p>
         </div>
+      ) : displayTemplate ? (
+        <MetradosTable
+          template={displayTemplate}
+          detail={detail}
+          code={node.code}
+          description={node.description}
+          unit={node.unit}
+          onReorderColumn={handleReorderColumn}
+          onSelectGroupInViewer={handleSelectGroupInViewer}
+        />
       ) : (
-        // Un solo contenedor con scroll en los dos ejes (no dos
-        // anidados) — así el scrollbar horizontal queda pegado al
-        // borde INFERIOR del área visible del panel, siempre a la
-        // vista, en vez de quedar al final de todo el contenido de la
-        // tabla (invisible hasta bajar del todo con el scroll vertical).
-        <div className="flex-1 min-h-0 overflow-auto rounded border border-gray-300">
-          <table className="w-full text-[10px] border-collapse min-w-[820px]">
-            <thead>
-              <tr className="bg-gray-100">
-                <th colSpan={3} className="px-2 py-1 text-left font-bold text-black border border-gray-300">
-                  IDENTIFICACIÓN
-                </th>
-                <th colSpan={3} className="px-2 py-1 text-left font-bold text-black border border-gray-300">
-                  DIMENSIONES
-                </th>
-                <th colSpan={5} className="px-2 py-1 text-left font-bold text-black border border-gray-300">
-                  METRADO
-                </th>
-                <th className="px-2 py-1 border border-gray-300" />
-                <th className="px-2 py-1 border border-gray-300" />
-              </tr>
-              <tr className="bg-gray-50">
-                <th className="px-2 py-1.5 text-left font-semibold text-black border border-gray-300">ITEM</th>
-                <th className="px-2 py-1.5 text-left font-semibold text-black border border-gray-300">DESCRIPCIÓN</th>
-                <th className="px-2 py-1.5 text-left font-semibold text-black border border-gray-300">UND</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Largo</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Ancho</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Altura</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Longitud</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Cant.</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Área</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Vol.</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Kg.</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">Sub Total</th>
-                <th className="px-2 py-1.5 text-right font-semibold text-black border border-gray-300">TOTAL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.groups.map((group: PartidaGroup, i) => (
-                <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                  <td className="px-2 py-1.5 border border-gray-200 text-gray-700">{node.code}</td>
-                  <td className="px-2 py-1.5 border border-gray-200 text-gray-700">{node.description}</td>
-                  <td className="px-2 py-1.5 border border-gray-200 text-gray-600">{node.unit}</td>
-                  <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.length)}</td>
-                  <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.width)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.height)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.run_length)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.quantity)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.area)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.volume)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-gray-600 text-right">{formatNumber(group.weight)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-gray-800 font-semibold text-right">{formatNumber(group.sub_total)}</td>
-                    <td className="px-2 py-1.5 border border-gray-200 text-black font-bold text-right">{formatNumber(detail.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div className="flex-1 min-h-0 py-10 text-center text-gray-400">
+          <AlertTriangle size={20} className="mx-auto mb-2 text-amber-500" />
+          <p className="text-sm">No se pudo cargar ninguna plantilla de columnas.</p>
+          <p className="text-xs mt-1">Revisá la pestaña Network (F12) el request a /api/templates.</p>
+        </div>
+      )}
+
+      {/* Flotante: Guardar/Borrar plantilla — solo si la activa es
+          tuya. Anclado a la esquina inferior derecha DE LA TABLA (este
+          contenedor), no del visor — no molesta ni se superpone con la
+          barra flotante del visor 3D. Fondo de color sólido (no solo
+          ícono coloreado) + tamaño más grande, para que se note. */}
+      {isOwn && !loading && (
+        <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 bg-white border border-gray-200 rounded-full shadow-xl px-2 py-2">
+          <button
+            onClick={handleQuickSave}
+            disabled={quickSaving}
+            title="Guardar plantilla"
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-[#0056b3] text-white hover:bg-[#004494] disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md"
+          >
+            {quickSaving ? <Loader2 size={17} className="animate-spin" /> : <Save size={17} />}
+          </button>
+          <button
+            onClick={handleQuickDelete}
+            disabled={quickSaving}
+            title="Borrar plantilla"
+            className="w-9 h-9 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md"
+          >
+            <Trash2 size={17} />
+          </button>
+        </div>
+      )}
+
+      {editorOpen && (
+        <TemplateEditor
+          source={activeTemplate}
+          currentUserId={currentUserId}
+          ifcFileId={ifcFileId}
+          forceEditable={editorMode === 'create'}
+          onChange={setPreviewSets}
+          onSaved={async (saved) => {
+            await refreshList();
+            setActiveTemplateLocal(saved);
+            setPreviewSets(null);
+            setEditorOpen(false);
+          }}
+          onDeleted={async () => {
+            await refreshList();
+            setPreviewSets(null);
+            setEditorOpen(false);
+          }}
+          onClose={() => {
+            setEditorOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -183,11 +346,13 @@ const PartidaTableRow: React.FC<{
   node: PartidaNode;
   depth: number;
   onSelectLeaf: (node: PartidaNode) => void;
-}> = ({ node, depth, onSelectLeaf }) => {
+  isolatingPartidaId: number | null;
+}> = ({ node, depth, onSelectLeaf, isolatingPartidaId }) => {
   const [expanded, setExpanded] = useState(depth === 0);
 
   const isLeaf = node.unit !== null;
   const hasChildren = node.children && node.children.length > 0;
+  const isIsolating = isolatingPartidaId === node.partida_id;
 
   const handleClick = () => {
     if (isLeaf) {
@@ -203,6 +368,7 @@ const PartidaTableRow: React.FC<{
         <td className="px-2.5 py-2 align-top border border-gray-200" style={{ paddingLeft: 12 + depth * 18 }}>
           <button
             onClick={handleClick}
+            title={isLeaf ? 'Ver tabla y aislar en el visor 3D' : undefined}
             className="inline-flex items-center gap-2 text-left cursor-pointer"
           >
             <span className="w-3.5 flex-shrink-0 text-gray-400">
@@ -210,7 +376,9 @@ const PartidaTableRow: React.FC<{
                 expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />
               ) : null}
             </span>
-            {isLeaf ? (
+            {isIsolating ? (
+              <Loader2 size={14} className="text-[#0056b3] flex-shrink-0 animate-spin" />
+            ) : isLeaf ? (
               <Ruler size={14} className="text-[#0056b3] flex-shrink-0" />
             ) : expanded ? (
               <FolderOpen size={14} className="text-amber-500 flex-shrink-0" />
@@ -237,7 +405,13 @@ const PartidaTableRow: React.FC<{
       {expanded && hasChildren && (
         <>
           {node.children.map((child) => (
-            <PartidaTableRow key={child.partida_id} node={child} depth={depth + 1} onSelectLeaf={onSelectLeaf} />
+            <PartidaTableRow
+              key={child.partida_id}
+              node={child}
+              depth={depth + 1}
+              onSelectLeaf={onSelectLeaf}
+              isolatingPartidaId={isolatingPartidaId}
+            />
           ))}
         </>
       )}
@@ -248,11 +422,20 @@ const PartidaTableRow: React.FC<{
 // ============================================================
 // COMPONENTE PRINCIPAL — alterna entre árbol y pantalla de detalle
 // ============================================================
-const PartidasTree: React.FC<PartidasTreeProps> = ({ ifcFileId }) => {
+const PartidasTree: React.FC<PartidasTreeProps> = ({
+  ifcFileId,
+  currentUserId = -1,
+  onSelectAllInViewer,
+  onSelectGroupInViewer,
+}) => {
   const [tree, setTree] = useState<PartidaNode[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<PartidaNode | null>(null);
+  // partida_id de la que se están resolviendo los elementos para
+  // aislar en el visor 3D (click derecho) — null = ninguna en curso.
+  // Muestra el spinner puntual en esa fila mientras se resuelve.
+  const [isolatingPartidaId, setIsolatingPartidaId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -273,16 +456,58 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({ ifcFileId }) => {
     };
   }, [ifcFileId]);
 
-  const handleSelectLeaf = useCallback((node: PartidaNode) => {
-    setSelectedNode(node);
-  }, []);
+  // Lógica compartida: resuelve TODOS los expressId de una partida
+  // (sin pedir ninguna columna de propiedad, no hace falta acá) y
+  // avisa al padre (Visor3DTab) para que los aísle en el visor 3D. La
+  // usan TANTO el click izquierdo (que además navega a la tabla) COMO
+  // el click derecho (que se queda en el árbol).
+  const isolatePartidaInViewer = useCallback(
+    async (node: PartidaNode) => {
+      if (!onSelectAllInViewer) return;
+      setIsolatingPartidaId(node.partida_id);
+      try {
+        const detail = await getPartidaElements(ifcFileId, node.partida_id);
+        // OJO: express_id llega como STRING desde el backend (mismo
+        // patrón BIGINT-como-string que file_id/ifc_file_id) — el
+        // visor 3D compara contra números reales. Sin este Number(),
+        // "5842" (string) nunca matchea 5842 (number), y el aislamiento
+        // termina sin encontrar nada = el modelo entero desaparece.
+        const expressIds = detail.groups.flatMap((g) => g.elements.map((el) => Number(el.express_id)));
+        onSelectAllInViewer(expressIds);
+      } catch (err: any) {
+        alert(err.message || 'No se pudieron cargar los elementos de esta partida.');
+      } finally {
+        setIsolatingPartidaId(null);
+      }
+    },
+    [ifcFileId, onSelectAllInViewer]
+  );
+
+  // Click izquierdo: navega a la tabla Y, al mismo tiempo, aísla en el
+  // visor 3D — no se espera a que termine el aislamiento para navegar
+  // (son dos cosas que pasan en paralelo, no una atrás de la otra).
+  const handleSelectLeaf = useCallback(
+    (node: PartidaNode) => {
+      setSelectedNode(node);
+      isolatePartidaInViewer(node);
+    },
+    [isolatePartidaInViewer]
+  );
 
   const handleBack = useCallback(() => {
     setSelectedNode(null);
   }, []);
 
   if (selectedNode) {
-    return <PartidaDetailScreen ifcFileId={ifcFileId} node={selectedNode} onBack={handleBack} />;
+    return (
+      <PartidaDetailScreen
+        ifcFileId={ifcFileId}
+        node={selectedNode}
+        currentUserId={currentUserId}
+        onBack={handleBack}
+        onSelectGroupInViewer={onSelectGroupInViewer}
+      />
+    );
   }
 
   if (loading) {
@@ -330,7 +555,13 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({ ifcFileId }) => {
           </thead>
           <tbody>
             {tree.map((node) => (
-              <PartidaTableRow key={node.partida_id} node={node} depth={0} onSelectLeaf={handleSelectLeaf} />
+              <PartidaTableRow
+                key={node.partida_id}
+                node={node}
+                depth={0}
+                onSelectLeaf={handleSelectLeaf}
+                isolatingPartidaId={isolatingPartidaId}
+              />
             ))}
           </tbody>
         </table>
