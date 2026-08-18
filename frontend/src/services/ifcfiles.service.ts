@@ -1,4 +1,4 @@
-// src/services/ifc-files.service.ts
+// src/services/ifcfiles.service.ts
 //
 // Servicio para el flujo de carga/listado/procesamiento de archivos IFC.
 // Basado 1:1 en la documentación de endpoints (sección 1 y 2):
@@ -183,8 +183,14 @@ export const getPartidasTree = async (ifcFileId: string): Promise<PartidaNode[]>
 };
 
 export interface PartidaElementDetail {
-  element_id: number;
-  express_id: number;
+  // OJO: element_id y express_id llegan como STRING desde el backend
+  // (BIGINT de Postgres) — no castear a number sin querer en otro
+  // lado. Para el visor 3D específicamente sí hace falta convertir
+  // express_id a number antes de usarlo (ver PartidasTree.tsx,
+  // handleContextMenuLeaf) porque ahí se compara contra IDs reales del
+  // modelo Three.js.
+  element_id: string;
+  express_id: string;
   name: string;
   length: number;
   run_length: number;
@@ -194,6 +200,8 @@ export interface PartidaElementDetail {
   area: number;
   volume: number;
   weight: number;
+  // key = "<property_set_name>::<property_name>" (sección 3.2 del doc).
+  // {} si la request no pidió columnas ifc_property.
   properties: Record<string, string | null>;
 }
 
@@ -229,6 +237,34 @@ export interface PartidaDetail {
   groups: PartidaGroup[];
 }
 
+// ---- NUEVO: soporte para columnas de propiedad IFC (doc 3.2) ----
+
+// Columna de propiedad IFC a resolver. Mutuamente excluyente con
+// template_id (mandar UNO de los dos, o ninguno).
+//
+// ⚠️ IMPORTANTE: el backend valida "columns" con el MISMO schema que
+// usan las plantillas (TemplateColumnInputSchema, una unión
+// discriminada por source_type) — no con una forma más chica como
+// sugiere el ejemplo de la doc (sección 3.2). Por eso hacen falta acá
+// source_type y column_order, aunque el servicio que resuelve los
+// valores (metrado-partidas.service.ts) después solo lea name/
+// property_set_name/property_name — sin esos dos campos, Zod rechaza
+// la unión ENTERA con 400 INVALID_REQUEST_DATA antes de llegar a leer
+// nada más (ni siquiera evalúa property_set_name).
+export interface PartidaColumnRequest {
+  name: string;
+  source_type: 'ifc_property';
+  property_set_name: string; // "" es válido (propiedad sin Pset) — confirmado en el schema real, sin .min(1)
+  property_name: string;
+  column_order: number; // no se usa para nada semánticamente en /elements, pero el schema lo exige — cualquier entero sirve
+}
+
+export interface GetPartidaElementsOptions {
+  group_by?: Array<'level_name' | 'space_name' | 'tag'>;
+  template_id?: number;
+  columns?: PartidaColumnRequest[];
+}
+
 /**
  * Detalle agrupado de una partida hoja (unit !== null) —
  * POST /ifc-files/:id/partidas/:partidaId/elements (doc 3.2).
@@ -238,7 +274,7 @@ export interface PartidaDetail {
 export const getPartidaElements = async (
   ifcFileId: string,
   partidaId: number,
-  options?: { group_by?: Array<'level_name' | 'space_name' | 'tag'> }
+  options?: GetPartidaElementsOptions
 ): Promise<PartidaDetail> => {
   const response = await api.post(
     `/api/ifc-files/${ifcFileId}/partidas/${partidaId}/elements`,

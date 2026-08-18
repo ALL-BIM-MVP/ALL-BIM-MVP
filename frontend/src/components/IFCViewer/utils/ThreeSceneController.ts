@@ -321,6 +321,25 @@ export class ThreeSceneController {
   setIsolatedEntities(ids: Set<number> | null) { this.isolatedIds = ids; this.applyVisibilityFlags(); }
   getHiddenIds() { return this.hiddenIds; }
 
+  // FIX: la ocultación (ocultar puntual / aislar) NO usa mesh.visible —
+  // usa un atributo custom por vértice ("hidden") leído por el shader,
+  // porque un solo THREE.Mesh agrupa MUCHOS elementos IFC juntos en la
+  // misma geometría (no hay un mesh por elemento). Por eso el raycaster
+  // de Three.js (que solo entiende object.visible, no atributos custom)
+  // sigue "pegándole" a triángulos ocultos — visualmente invisibles,
+  // pero geométricamente presentes. Este helper chequea el vértice
+  // PUNTUAL que golpeó el rayo contra ese mismo atributo, para poder
+  // saltearlo en pick()/raycastSceneMagnetic()/raycastFaceCross() y
+  // seguir buscando el próximo hit real (lo que sí se puede ver).
+  private isHitOnHiddenVertex(mesh: THREE.Mesh, faceIndex: number): boolean {
+    const geom = mesh.geometry;
+    const hiddenAttr = geom.getAttribute('hidden') as THREE.BufferAttribute | undefined;
+    if (!hiddenAttr) return false;
+    const index = geom.getIndex();
+    const vIdx = index ? index.getX(faceIndex * 3) : faceIndex * 3;
+    return hiddenAttr.getX(vIdx) === 1;
+  }
+
   setSelection(ids: number[]) {
     for (const id of this.selectedIds) {
       const locations = this.idToLocation.get(id);
@@ -479,7 +498,12 @@ export class ThreeSceneController {
     const ndc = this.ndcFromCanvasPixels(x, y);
     this.raycaster.setFromCamera(ndc, this.cameraController.camera);
     const hits = this.raycaster.intersectObjects(this.meshes, false);
-    const hit = hits.find((h) => h.object.visible && h.faceIndex !== undefined);
+    const hit = hits.find(
+      (h) =>
+        h.object.visible &&
+        h.faceIndex !== undefined &&
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+    );
     if (!hit) return { expressId: null };
 
     const mesh = hit.object as THREE.Mesh;
@@ -505,7 +529,12 @@ export class ThreeSceneController {
     const ndc = this.ndcFromCanvasPixels(pxX, pxY);
     this.raycaster.setFromCamera(ndc, this.cameraController.camera);
     const hits = this.raycaster.intersectObjects(this.meshes, false);
-    const hit = hits.find((h) => h.object.visible && h.faceIndex !== undefined);
+    const hit = hits.find(
+      (h) =>
+        h.object.visible &&
+        h.faceIndex !== undefined &&
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+    );
     if (!hit) return null;
 
     const mesh = hit.object as THREE.Mesh;
@@ -619,7 +648,12 @@ export class ThreeSceneController {
     const rayDirection = this.raycaster.ray.direction.clone(); // guardarla: se pisa en el 2do raycast
 
     const hits = this.raycaster.intersectObjects(this.meshes, false);
-    const hit = hits.find((h) => h.object.visible && h.faceIndex !== undefined);
+    const hit = hits.find(
+      (h) =>
+        h.object.visible &&
+        h.faceIndex !== undefined &&
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+    );
     if (!hit) return null;
 
     const mesh = hit.object as THREE.Mesh;
@@ -761,6 +795,7 @@ export class ThreeSceneController {
     const depthHits = this.raycaster.intersectObjects(this.meshes, false);
     const depthHit = depthHits.find((h) => {
       if (!h.object.visible || h.faceIndex === undefined) return false;
+      if (this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)) return false;
       const hMesh = h.object as THREE.Mesh;
       const hIndex = hMesh.geometry.getIndex();
       if (!hIndex) return false;
@@ -802,7 +837,12 @@ export class ThreeSceneController {
     const rayDirection = this.raycaster.ray.direction.clone();
 
     const hits = this.raycaster.intersectObjects(this.meshes, false);
-    const hit = hits.find((h) => h.object.visible && h.faceIndex !== undefined);
+    const hit = hits.find(
+      (h) =>
+        h.object.visible &&
+        h.faceIndex !== undefined &&
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+    );
     if (!hit) return null;
 
     const normal = (hit.face?.normal.clone() ?? new THREE.Vector3(0, 1, 0))
