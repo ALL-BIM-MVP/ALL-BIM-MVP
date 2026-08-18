@@ -55,11 +55,23 @@ Content-Type: application/json
 
 {
   "role_id": 3,
-  "email": "Denilson@correo.com"
+  "email": "Denilo@correo.com"
 }
 
 ### Capturar tokens automáticamente
 @tokenLink = {{invitations.response.body.token}}
+
+### =========================
+### Historial de invitaciones enviadas (user_invitations)
+### (admin/supervisor) — más reciente primero, limit por defecto 50
+### =========================
+GET {{baseUrl}}/invitations
+Authorization: Bearer {{accessToken}}
+
+### Con limit personalizado (tope real server-side: 100, aunque pidas más)
+GET {{baseUrl}}/invitations?limit=5
+Authorization: Bearer {{accessToken}}
+
 ### =========================
 ### Validar invitación
 ### =========================
@@ -305,13 +317,79 @@ Content-Type: application/octet-stream
 
 
 ### 2. Listar archivos del proyecto (todos)
-GET {{baseUrl}}/projects/{{createdProjectId}}/files
+GET {{baseUrl}}/projects/2/files
 Authorization: Bearer {{accessToken}}
 
 
 ### 3. Listar solo IFC pendientes de procesar (el picker)
 GET {{baseUrl}}/projects/{{createdProjectId}}/files?file_type=ifc&processed=false
 Authorization: Bearer {{accessToken}}
+
+
+### 3b. Subir una imagen cualquiera del proyecto (no la portada — esa es
+### PUT /projects/:id/image, ver MÓDULO DE PROYECTOS). Al subir una
+### imagen se genera automáticamente su miniatura (400×300, ver
+### utils/thumbnail.ts) — ⚠️ ajustá la ruta del archivo a una imagen
+### real en tu máquina.
+# @name uploadImage
+POST {{baseUrl}}/projects/{{createdProjectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="fachada.jpg"
+Content-Type: image/jpeg
+
+< ./fachada-de-prueba.jpg
+--WebAppBoundary--
+
+### Capturar el file_id de la imagen subida
+@uploadedImageId = {{uploadImage.response.body.file_id}}
+
+
+### 3c. Listar archivos de nuevo — la imagen subida debería traer
+### "file_type": "image" y "thumbnail_url": "/files/.../thumbnail?token=..."
+### (URL FIRMADA, vence en 5 min por defecto — ver FILE_SIGNED_URL_TTL_SECONDS
+### en .env). El resto de los archivos (ifc, pdf, etc.) siempre traen
+### thumbnail_url: null, nunca se les intenta generar una.
+# @name listFilesWithThumbnails
+GET {{baseUrl}}/projects/{{createdProjectId}}/files
+Authorization: Bearer {{accessToken}}
+
+### Capturar la thumbnail_url firmada de la imagen recién subida (asume
+### que es el primer archivo de la lista — ORDER BY uploaded_at DESC)
+@signedThumbnailPath = {{listFilesWithThumbnails.response.body.0.thumbnail_url}}
+
+### 3d. Miniatura vía la URL firmada — SIN Authorization, así es como la
+### usaría un <img src="..."> directo. Cabe en 400×300, siempre JPEG.
+GET {{baseUrl}}{{signedThumbnailPath}}
+
+### 3d-bis. La misma miniatura, pero por el camino de siempre
+### (Authorization: Bearer, sin token firmado) — los dos caminos
+### conviven, ver authorizeFileAccess en file-access.middleware.ts.
+GET {{baseUrl}}/files/{{uploadedImageId}}/thumbnail
+Authorization: Bearer {{accessToken}}
+
+
+### 3e. Imagen original completa (mismo endpoint que cualquier archivo)
+GET {{baseUrl}}/files/{{uploadedImageId}}/content
+Authorization: Bearer {{accessToken}}
+
+
+### 3f. Caso de error: pedir la miniatura de un archivo que no es imagen
+### (o cuya generación falló) -> 404 THUMBNAIL_NOT_AVAILABLE
+GET {{baseUrl}}/files/{{uploadedFileId}}/thumbnail
+Authorization: Bearer {{accessToken}}
+
+
+### 3g. Caso de error: token firmado reusado para OTRO archivo -> 401
+### AUTH_SIGNED_URL_INVALID_OR_EXPIRED (la firma incluye el file_id, no
+### sirve para nada que no sea el archivo con el que se generó)
+GET {{baseUrl}}/files/{{uploadedFileId}}/thumbnail?token={{signedThumbnailPath}}
+
+
+### 3h. Caso de error: token basura/vencido -> 401 AUTH_SIGNED_URL_INVALID_OR_EXPIRED
+GET {{baseUrl}}/files/{{uploadedImageId}}/thumbnail?token=esto-no-es-un-token-valido
 
 
 ### 4. Ver/descargar el contenido de un archivo (inline, para el visor)

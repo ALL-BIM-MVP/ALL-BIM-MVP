@@ -4,7 +4,10 @@ import { AppError } from "../models/errors/app-error.js";
 import { AUTH_ERRORS } from "../models/errors/auth.errors.js";
 import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 import { FILE_ERRORS } from "../models/errors/files.errors.js";
-import { deleteFileService, getFileForDownloadService, getProjectFilesService, saveFileService } from "../services/files.service.js";
+import {
+    deleteFileService, getFileForDownloadService, getFileForThumbnailService,
+    getProjectFilesService, saveFileService
+} from "../services/files.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ProjectIdParamSchema } from "../schemas/projects.schema.js";
 import {
@@ -72,7 +75,12 @@ export const getProjectFilesController = asyncHandler (
 export const getFileContentController = asyncHandler (
     async (req : Request, res : Response) : Promise<void> =>{
 
-        if (!req.user) {
+        // authorizeFileAccess ya garantizó UNO de los dos: req.user
+        // (Bearer normal) o req.fileAccessGrant (?token= firmado, ver
+        // middlewares/file-access.middleware.ts) — este chequeo es solo
+        // defensivo, no debería poder fallar si la ruta usa ese
+        // middleware.
+        if (!req.user && !req.fileAccessGrant) {
             throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
         }
 
@@ -88,7 +96,7 @@ export const getFileContentController = asyncHandler (
             throw new AppError(COMMON_ERRORS.INVALID_QUERY_PARAMETER);
         }
 
-        const file = await getFileForDownloadService(req.user, params.data);
+        const file = await getFileForDownloadService(params.data, req.user ?? null);
 
         const absolutePath = path.resolve(file.file_path);
         const existsOnDisk = await fs.access(absolutePath).then(() => true).catch(() => false);
@@ -105,6 +113,38 @@ export const getFileContentController = asyncHandler (
             });
             return;
         }
+
+        await new Promise<void>((resolve, reject) => {
+            res.sendFile(absolutePath, (err) => err ? reject(err) : resolve());
+        });
+});
+
+// Sin query params (a diferencia de content, que soporta ?download) —
+// una miniatura solo se usa para previsualizar inline, nunca para
+// descargar. Siempre JPEG porque generateThumbnail() la genera así.
+export const getFileThumbnailController = asyncHandler (
+    async (req : Request, res : Response) : Promise<void> =>{
+
+        if (!req.user && !req.fileAccessGrant) {
+            throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+        }
+
+        const params = FileIdParamSchema.safeParse(req.params);
+
+        if (!params.success) {
+            throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+        }
+
+        const file = await getFileForThumbnailService(params.data, req.user ?? null);
+
+        const absolutePath = path.resolve(file.thumbnail_path);
+        const existsOnDisk = await fs.access(absolutePath).then(() => true).catch(() => false);
+
+        if (!existsOnDisk) {
+            throw new AppError(FILE_ERRORS.FILE_MISSING_ON_DISK);
+        }
+
+        res.type("image/jpeg");
 
         await new Promise<void>((resolve, reject) => {
             res.sendFile(absolutePath, (err) => err ? reject(err) : resolve());

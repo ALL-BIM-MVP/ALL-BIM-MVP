@@ -36,5 +36,12 @@ export const FILE_ERRORS = {
             code: "FILE_MISSING_ON_DISK",
             message: "El archivo existe en la base de datos pero no se encontró en el almacenamiento."
         }
+    },
+    THUMBNAIL_NOT_AVAILABLE: {
+        statusCode: 404,
+        response: {
+            code: "THUMBNAIL_NOT_AVAILABLE",
+            message: "Este archivo no tiene una miniatura disponible."
+        }
     }
 } satisfies Record<string, ErrorFormat>;

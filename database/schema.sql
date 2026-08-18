@@ -100,7 +100,13 @@ CREATE TABLE files (
     file_path TEXT NOT NULL,
     file_size BIGINT,
     checksum TEXT,
-    mime_type VARCHAR(255),              
+    mime_type VARCHAR(255),
+    -- Solo se llena para file_type='image' cuando se pudo generar la
+    -- miniatura al subir (ver utils/thumbnail.ts, backend). NULL =
+    -- no disponible (no es imagen, o sharp no pudo procesarla) — nunca
+    -- se expone tal cual al cliente, GET /files/:id/thumbnail y el
+    -- has_thumbnail de la API son lo único público derivado de esto.
+    thumbnail_path TEXT,
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     uploaded_by INT NOT NULL REFERENCES users(user_id)
 );
