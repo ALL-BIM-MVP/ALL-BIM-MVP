@@ -137,6 +137,9 @@ interface PipelineMetradoElement {
     run_length: number | null;
     width: number | null;
     height: number | null;
+    // Solo para elementos de perfil circular (tubos) — null para todo
+    // lo demás, ver comentario en database/schema.sql.
+    diameter: number | null;
     quantity: number | null;
     area: number | null;
     volume: number | null;
@@ -155,11 +158,19 @@ interface PipelineResult {
     metrado_elements: PipelineMetradoElement[];
 }
 
+// "quantity" (campo builtin "Und." — ver builtin_field_catalog en
+// database/system-data.sql) es EL metrado de una partida 'und', no una
+// "cantidad de elementos" — eso es element_count (calculado más abajo,
+// nada que ver con esta tabla). Se deja explícito en vez de confiar en
+// el fallback ?? "quantity" de más abajo, justamente porque antes esa
+// ambigüedad ("¿'quantity' es el metrado o el conteo?") ya causó que
+// el catálogo etiquetara este campo como "Cant." por error.
 const UNIT_TO_METRADO_KEY: Partial<Record<string, keyof PipelineMetradoElement>> = {
     m: "run_length", // el metrado de una partida 'm' es la Longitud, no la dimensión bruta "length"
     m2: "area",
     m3: "volume",
     kg: "weight",
+    und: "quantity",
 };
 
 interface PartidaTotal {
@@ -171,8 +182,8 @@ interface PartidaTotal {
 // llevan fila en metrado_partida_totals, no hay rollup hacia arriba acá
 // (ver comentario en database/schema.sql). total = suma directa de los
 // metrado_elements de esa partida, según la columna que corresponde a
-// su unidad (m->length, m2->area, m3->volume, kg->weight, el resto
-// ->quantity). Nada de "sub_total": ese concepto es de agrupar
+// su unidad (m->run_length, m2->area, m3->volume, kg->weight,
+// und->quantity). Nada de "sub_total": ese concepto es de agrupar
 // elementos por tag en la vista de detalle, no de esta tabla.
 const calcularTotalesPorPartida = (
     partidas: PipelinePartida[],
@@ -296,9 +307,9 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
             const elementId = expressIdToElementId.get(me.express_id);
             if (partidaId === undefined || elementId === undefined) continue;
             await client.query(
-                `INSERT INTO metrado_elements (partida_id, element_id, length, run_length, width, height, quantity, area, volume, weight)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-                [partidaId, elementId, me.length, me.run_length, me.width, me.height, me.quantity, me.area, me.volume, me.weight]
+                `INSERT INTO metrado_elements (partida_id, element_id, length, run_length, width, height, diameter, quantity, area, volume, weight)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+                [partidaId, elementId, me.length, me.run_length, me.width, me.height, me.diameter, me.quantity, me.area, me.volume, me.weight]
             );
         }
 

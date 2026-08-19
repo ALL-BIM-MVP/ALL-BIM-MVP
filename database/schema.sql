@@ -192,6 +192,13 @@ CREATE TABLE metrado_elements (
     -- de "length" de arriba.
     run_length NUMERIC(18,6),
 
+    -- Solo para elementos de perfil circular (tubos — ver
+    -- processing/ifc/geometria_proyeccion.py, extraer_dimensiones_circulares).
+    -- NULL para todo lo demás. width/height quedan NULL a propósito en
+    -- esos elementos: una sección circular no tiene un ancho/alto
+    -- distinto del diámetro.
+    diameter NUMERIC(18,6),
+
     quantity NUMERIC(18,6),
 
     area NUMERIC(18,6),
@@ -267,7 +274,7 @@ CREATE TABLE builtin_field_catalog (
     data_type        VARCHAR(20) NOT NULL CHECK (data_type IN ('text','numeric','integer')),
     is_aggregate     BOOLEAN NOT NULL DEFAULT FALSE,
     applies_to_group VARCHAR(20) NOT NULL CHECK (
-        applies_to_group IN ('identificacion','dimensiones','metrado','totales')
+        applies_to_group IN ('identificacion','dimensiones','cantidad','metrado','totales')
     ),
     sort_order       INT NOT NULL DEFAULT 0
 );

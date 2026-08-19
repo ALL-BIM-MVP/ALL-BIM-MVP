@@ -85,6 +85,9 @@ export interface PartidaElementRow {
     // mismo valor cuando revit no trae una IfcQuantityLength propia. Un
     // elemento curvo puede tener run_length > length.
     run_length : string | number | null;
+    // Solo para elementos de perfil circular (tubos) — null para todo
+    // lo demás, ver comentario en database/schema.sql.
+    diameter : string | number | null;
     quantity : string | number | null;
     area : string | number | null;
     volume : string | number | null;
@@ -99,6 +102,7 @@ interface PartidaElementItem {
     run_length : number | null;
     width : number | null;
     height : number | null;
+    diameter : number | null;
     quantity : number | null;
     area : number | null;
     volume : number | null;
@@ -130,12 +134,13 @@ export interface PartidaElementGroup {
     space_name : string | null;
     tag : string | null;
     element_count : number;
-    // Estos 8 campos son los de UN elemento representativo del grupo
+    // Estos 9 campos son los de UN elemento representativo del grupo
     // (no la suma) — ver comentario de groupPartidaElements.
     length : number | null;
     run_length : number | null;
     width : number | null;
     height : number | null;
+    diameter : number | null;
     quantity : number | null;
     area : number | null;
     volume : number | null;
@@ -157,9 +162,13 @@ export interface PartidaElementGroup {
 export interface PartidaElementsDetail {
     partida_id : number;
     unit : string | null;
-    // suma de sub_total de todos los grupos — en teoría coincide con el
-    // total ya guardado en metrado_partida_totals para esta partida.
-    total : number;
+    // NO va acá un "total" — sería el mismo valor repetido en las N
+    // filas del detalle (suma de sub_total de todos los grupos), y esa
+    // repetición fue justo lo que confundió al usuario ("¿por qué cada
+    // fila muestra el total de toda la partida?"). Ese número YA existe,
+    // una sola vez, en PartidaTreeNode.total (GET /ifc-files/:id/partidas
+    // — viene de metrado_partida_totals, no hace falta recalcularlo ni
+    // reenviarlo acá).
     // Qué columnas de propiedad se pidieron (vacío [] si ninguna) — el
     // frontend usa .key para leer group.properties[key]/element.properties[key],
     // y .found para saber si vale la pena pedirle a este archivo esa
@@ -189,6 +198,7 @@ const toElementItem = (
         run_length: toNumberOrNull(row.run_length),
         width: toNumberOrNull(row.width),
         height: toNumberOrNull(row.height),
+        diameter: toNumberOrNull(row.diameter),
         quantity: toNumberOrNull(row.quantity),
         area: toNumberOrNull(row.area),
         volume: toNumberOrNull(row.volume),
@@ -239,15 +249,20 @@ const modaProperties = (
 
 // Mismo criterio que ifc-processing-runner.ts (UNIT_TO_METRADO_KEY) —
 // qué metrado le corresponde mostrar a cada unidad de partida. Se repite
-// acá (5 líneas) en vez de importarlo del runner para no acoplar el
+// acá (6 líneas) en vez de importarlo del runner para no acoplar el
 // modelo de partidas al service de procesamiento. 'm' -> run_length
 // (Longitud, el metrado real), NUNCA "length" (que es la dimensión
-// bruta Largo).
+// bruta Largo). 'und' -> quantity ("Und.", builtin_field_catalog) — OJO,
+// "quantity" es el METRADO de una partida 'und', no la cantidad de
+// elementos agrupados (eso es element_count, un campo aparte, ver
+// PartidaElementGroup — antes el catálogo confundía los dos bajo la
+// misma etiqueta "Cant.").
 const METRADO_KEY_POR_UNIDAD: Record<string, keyof PartidaElementItem> = {
     m: "run_length",
     m2: "area",
     m3: "volume",
     kg: "weight",
+    und: "quantity",
 };
 
 const round4 = (value : string | number | null) : number => {
@@ -256,29 +271,35 @@ const round4 = (value : string | number | null) : number => {
 };
 
 // Clave de agrupamiento: SIEMPRE incluye las dimensiones brutas (Largo/
-// Ancho/Alto, redondeadas) además de los campos pedidos en group_by.
-// Mismo tag pero medidas distintas NO es el mismo grupo — si no, el
-// "valor representativo de un solo elemento" que se usa más abajo no
-// sería válido para todo el grupo (caso real: un mismo tag con varios
-// juegos de medidas distintas en el mismo nivel/espacio, cada uno su
-// propia fila en el Excel de referencia). Usa las dimensiones brutas
-// (length/width/height), no run_length — dos elementos pueden compartir
-// caja envolvente pero tener una Longitud medida distinta (o viceversa),
-// lo que define si son "el mismo elemento repetido" es la geometría.
+// Ancho/Alto/Diametro, redondeadas) además de los campos pedidos en
+// group_by. Mismo tag pero medidas distintas NO es el mismo grupo — si
+// no, el "valor representativo de un solo elemento" que se usa más
+// abajo no sería válido para todo el grupo (caso real: un mismo tag
+// con varios juegos de medidas distintas en el mismo nivel/espacio,
+// cada uno su propia fila en el Excel de referencia). Usa las
+// dimensiones brutas (length/width/height/diameter), no run_length —
+// dos elementos pueden compartir caja envolvente pero tener una
+// Longitud medida distinta (o viceversa), lo que define si son "el
+// mismo elemento repetido" es la geometría. diameter entra acá aparte
+// de width/height porque en un elemento circular esos dos quedan null
+// (ver comentario en PartidaElementRow) — sin esta clave, dos tramos
+// de tubería de distinto diámetro pero igual longitud se agruparían
+// como si fueran el mismo elemento repetido.
 const dimsKey = (row : PartidaElementRow) : string =>
-    `${round4(row.length)}|${round4(row.width)}|${round4(row.height)}`;
+    `${round4(row.length)}|${round4(row.width)}|${round4(row.height)}|${round4(row.diameter)}`;
 
 // Agrupa filas de elementos por los campos pedidos (nivel/espacio/tag,
 // por defecto los 3) + dimensiones. Elementos con el mismo tag y las
 // mismas medidas se asumen físicamente idénticos (misma familia/tipo
-// repetida) — por eso los 8 campos de metrado/dimensión que se muestran
+// repetida) — por eso los 9 campos de metrado/dimensión que se muestran
 // por grupo son los de UN solo elemento representativo, NO la suma de
 // todos (sumarlos duplicaría el valor real — 9 barras de 2.14m no
 // sumaban "19.28m" de longitud, eso no significa nada). Lo único que sí
-// se multiplica por la cantidad es sub_total, y solo con el metrado que
-// corresponde a la unidad de la partida (m→run_length, m2→area,
-// m3→volume, kg→weight, resto→quantity) — igual que en el Excel de
-// referencia.
+// se multiplica por element_count es sub_total, y solo con el metrado
+// que corresponde a la unidad de la partida (m→run_length, m2→area,
+// m3→volume, kg→weight, und→quantity) — igual que en el Excel de
+// referencia. element_count en sí (el "Cant." real, ver
+// builtin_field_catalog) NO se multiplica por nada, es un conteo.
 export const groupPartidaElements = (
     rows : PartidaElementRow[], groupBy : readonly GroupByField[], partidaUnit : string | null,
     propertyValuesByElement : PropertyValuesByElement = new Map(), propertyKeys : readonly string[] = []
@@ -308,6 +329,7 @@ export const groupPartidaElements = (
             run_length: representativo.run_length,
             width: representativo.width,
             height: representativo.height,
+            diameter: representativo.diameter,
             quantity: representativo.quantity,
             area: representativo.area,
             volume: representativo.volume,

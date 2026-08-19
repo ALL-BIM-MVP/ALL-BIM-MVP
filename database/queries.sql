@@ -22,18 +22,23 @@ ON CONFLICT (partida_id) DO UPDATE
 
 -- Nota real (recomendado hacerlo en la app, no en SQL puro): por cada
 -- partida se sabe su `unit`, y esa unidad ya determina que columna de
--- metrado_elements sumar (length/area/volume/weight/quantity). Ejemplo
--- resuelto en la aplicacion:
+-- metrado_elements sumar (run_length/area/volume/weight/quantity) —
+-- OJO, es run_length (el metrado "Longitud"), NO length (la dimension
+-- bruta Largo, ver comentario de metrado_elements en schema.sql). Y
+-- 'und' -> quantity, que es el metrado "Und." de esa partida, NO la
+-- cantidad de elementos agrupados (ese es element_count, ya resuelto
+-- arriba por el COUNT(*) del paso A). Ejemplo resuelto en la aplicacion:
 --
 --   UPDATE metrado_partida_totals t
 --   SET sub_total = sub.total
 --   FROM (
 --       SELECT me.partida_id,
 --              SUM(CASE p.unit
---                    WHEN 'm'   THEN me.length
+--                    WHEN 'm'   THEN me.run_length
 --                    WHEN 'm2'  THEN me.area
 --                    WHEN 'm3'  THEN me.volume
 --                    WHEN 'kg'  THEN me.weight
+--                    WHEN 'und' THEN me.quantity
 --                    ELSE me.quantity
 --                  END) AS total
 --       FROM metrado_elements me
@@ -138,7 +143,7 @@ SELECT
     e.element_id,
     e.express_id,
     e.name,
-    me.length, me.width, me.height, me.quantity,
+    me.length, me.width, me.height, me.diameter, me.quantity,
     me.area, me.volume, me.weight
 FROM metrado_elements me
 JOIN ifc_elements e ON e.element_id = me.element_id
