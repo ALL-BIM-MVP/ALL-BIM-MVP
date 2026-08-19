@@ -5,6 +5,13 @@ type IsolationTarget =
   | { kind: 'type'; value: string }
   | { kind: 'types'; value: Set<string> }
   | { kind: 'element'; value: number }
+  // NUEVO: aislar VARIOS elementos puntuales a la vez, por expressId —
+  // para "seleccionar todos los del mismo tipo en el visor" desde
+  // PartidasTree (click derecho en una partida del árbol). Distinto de
+  // 'types' (que agrupa por tipo IFC vía typeGroups) — acá los ids ya
+  // vienen resueltos de antemano (de POST .../elements, groups[].
+  // elements[].express_id), no hace falta mapear nada.
+  | { kind: 'elements'; value: Set<number> }
   | null;
 
 export function useEntityVisibility(
@@ -36,6 +43,10 @@ export function useEntityVisibility(
       });
     } else if (isolationArg?.kind === 'element') {
       isolatedIds = new Set([isolationArg.value]);
+    } else if (isolationArg?.kind === 'elements') {
+      // Los ids ya vienen resueltos (expressId reales de la partida) —
+      // se pasan directo, sin pasar por typeGroups.
+      isolatedIds = new Set(isolationArg.value);
     }
     renderer.setIsolatedEntities?.(isolatedIds);
 
@@ -66,7 +77,7 @@ export function useEntityVisibility(
     });
   }, [hiddenTypes, hiddenElementIds, applyVisibility]);
 
-  // 👉 NUEVO: selección múltiple del panel de categorías.
+  // 👉 selección múltiple del panel de categorías.
   // Vacío = sin filtro, se ve el modelo completo.
   // Con 1+ tipos tildados = se aísla el modelo a mostrar solo esos tipos.
   const toggleSelectType = useCallback((type: string) => {
@@ -115,6 +126,18 @@ export function useEntityVisibility(
     });
   }, [hiddenTypes, hiddenElementIds, applyVisibility]);
 
+  // NUEVO: aislar VARIOS elementos puntuales a la vez (ver comentario
+  // de IsolationTarget más arriba). A diferencia de isolateElementById,
+  // NO hace toggle (siempre aísla el set nuevo que se le pasa) — un
+  // click derecho sobre otra partida del árbol simplemente reemplaza
+  // la selección anterior, no la des-aísla.
+  const isolateElementsByIds = useCallback((ids: number[]) => {
+    setSelectedTypes(new Set());
+    const next: IsolationTarget = ids.length > 0 ? { kind: 'elements', value: new Set(ids) } : null;
+    setIsolation(next);
+    applyVisibility(hiddenTypes, hiddenElementIds, next);
+  }, [hiddenTypes, hiddenElementIds, applyVisibility]);
+
   const clearIsolation = useCallback(() => {
     setSelectedTypes(new Set());
     setIsolation(null);
@@ -131,6 +154,7 @@ export function useEntityVisibility(
     hiddenTypes,
     isolatedType: isolation?.kind === 'type' ? isolation.value : null,
     isolatedElementId: isolation?.kind === 'element' ? isolation.value : null,
+    isolatedElementIds: isolation?.kind === 'elements' ? isolation.value : null,
     hiddenElementIds,
     selectedTypes,
     toggleSelectType,
@@ -141,6 +165,7 @@ export function useEntityVisibility(
     hideElementById,
     showElementById,
     isolateElementById,
+    isolateElementsByIds,
     clearAllHidden,
   };
 }

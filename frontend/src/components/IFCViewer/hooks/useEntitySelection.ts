@@ -27,7 +27,13 @@ export function useEntitySelection(
   const popupVisibleRef = useRef(false);
   useEffect(() => { popupVisibleRef.current = popupVisible; }, [popupVisible]);
 
-  const selectEntityById = useCallback(async (expressId: number, point?: { x: number; y: number; z: number }) => {
+  // Trae propiedades/materiales/historial de UN elemento y muestra el
+  // popup — NO toca la selección visual en el renderer (eso lo decide
+  // quien llama: selectEntityById marca solo este; selectGroupInViewer
+  // marca varios y usa esto solo para la ficha del primero). Separado
+  // de selectEntityById para poder reusar la parte cara (web-ifc) sin
+  // pisar una selección múltiple ya aplicada.
+  const showEntityDetails = useCallback(async (expressId: number, point?: { x: number; y: number; z: number }) => {
     const store = storeRef.current;
     const renderer = rendererRef.current;
     if (!store?.api || store.modelID === undefined || !renderer) return;
@@ -133,20 +139,19 @@ export function useEntitySelection(
         materials,
       } as SelectedEntity);
 
-      renderer.setSelection?.([expressId]);
-
       let anchorPoint = point;
       if (!anchorPoint) {
-        // Selección por búsqueda/ID: no hay punto de click. Volamos la
-        // cámara, mostramos el marcador láser (por si queda tapado por un
-        // vecino) y usamos el centro del elemento como ancla del popup.
+        // Sin punto de click (búsqueda por ID, o click desde la tabla
+        // de metrados): volamos la cámara, mostramos el marcador láser
+        // (por si queda tapado por un vecino) y usamos el centro del
+        // elemento como ancla del popup.
         renderer.flyToElement?.(expressId);
         renderer.showElementMarker?.(expressId);
         anchorPoint = renderer.getElementCenter?.(expressId) ?? undefined;
       } else {
-        // Selección por click: ya estás viendo el elemento directamente,
-        // no hace falta marcador — y si quedó uno de una búsqueda anterior,
-        // lo limpiamos.
+        // Selección por click directo en el 3D: ya estás viendo el
+        // elemento, no hace falta marcador — y si quedó uno de una
+        // búsqueda anterior, lo limpiamos.
         renderer.clearElementMarker?.();
       }
 
@@ -158,6 +163,28 @@ export function useEntitySelection(
       console.error('Error al leer propiedades del elemento:', err);
     }
   }, [rendererRef, storeRef]);
+
+  // Selección de UN elemento (click directo en el 3D, o resultado de
+  // búsqueda): marca la selección visual Y muestra su ficha completa.
+  const selectEntityById = useCallback(async (expressId: number, point?: { x: number; y: number; z: number }) => {
+    rendererRef.current?.setSelection?.([expressId]);
+    await showEntityDetails(expressId, point);
+  }, [rendererRef, showEntityDetails]);
+
+  // NUEVO: selección de un GRUPO (click en una fila de la tabla de
+  // metrados) — resalta TODOS los elementos del grupo en el visor, y
+  // muestra la ficha de propiedades del PRIMERO (mostrar la ficha de
+  // cada uno a la vez no tendría sentido en un solo popup). Es el
+  // comportamiento "normal" de click, aplicado a varios elementos:
+  // selección + popup, sin ocultar el resto del modelo.
+  const selectGroupInViewer = useCallback(async (expressIds: number[]) => {
+    if (expressIds.length === 0) return;
+    rendererRef.current?.setSelection?.(expressIds);
+    // showEntityDetails no vuelve a tocar la selección — así los otros
+    // elementos del grupo se quedan resaltados también, no solo el
+    // primero que aparece en el popup.
+    await showEntityDetails(expressIds[0]);
+  }, [rendererRef, showEntityDetails]);
 
   const clearSelection = useCallback(() => {
     setSelectedEntity(null);
@@ -249,6 +276,7 @@ export function useEntitySelection(
   return {
     selectedEntity,
     selectEntityById,
+    selectGroupInViewer,
     selectByIdOrGuid,
     clearSelection,
     popupVisible,

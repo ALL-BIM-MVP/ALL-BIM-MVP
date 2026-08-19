@@ -17,6 +17,8 @@ import {
   processExistingIfcFile,
   pollIfcProcessStatus,
 } from '../../services/ifcfiles.service';
+import { useAuth } from '../../context/AuthContext';
+
 
 interface Visor3DTabProps {
   projectId: number;
@@ -78,6 +80,7 @@ const IfcStatusBadge: React.FC<{ status: IfcFile['ifc_status'] }> = ({ status })
 };
 
 const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
+  const { user } = useAuth();
   const [ifcFile, setIfcFile] = useState<File | null>(null);
   const [ifcArrayBuffer, setIfcArrayBuffer] = useState<ArrayBuffer | null>(null);
   const [ifcLoading, setIfcLoading] = useState(false);
@@ -379,6 +382,23 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     }
   };
 
+  // Click en una partida del árbol -> AÍSLA en el visor 3D todos los
+  // elementos de esa partida (oculta el resto del modelo). Simple
+  // passthrough hacia el ref del visor — PartidasTree ya resuelve los
+  // expressId (vía getPartidaElements) antes de llamar a esto.
+  const handleSelectAllInViewer = useCallback((expressIds: number[]) => {
+    viewerRef.current?.isolateElementsByIds(expressIds);
+  }, []);
+
+  // NUEVO: click en una FILA de la tabla de metrados (un grupo) -> solo
+  // RESALTA esos elementos en el visor, sin ocultar nada más — a
+  // diferencia de handleSelectAllInViewer de arriba (que aísla),
+  // porque acá la intención es "mostrame dónde está esto puntual",
+  // no "quiero ver solo esto".
+  const handleSelectGroupInViewer = useCallback((expressIds: number[]) => {
+    viewerRef.current?.selectGroupInViewer(expressIds);
+  }, []);
+
   // ---------- Sub-componentes de UI reutilizados en los dos triggers ----------
   const EntryPopover: React.FC<{ align?: 'center' | 'up' }> = ({ align = 'center' }) => (
     <div
@@ -423,14 +443,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         }
       >
         <div className="flex-1 min-h-0 flex relative overflow-hidden">
-          <button
-            onClick={() => setIsFullscreen(prev => !prev)}
-            className="absolute bottom-3 right-3 z-[10000] w-9 h-9 flex items-center justify-center bg-black/60 hover:bg-black/80 text-white rounded transition-colors"
-            title={isFullscreen ? 'Minimizar' : 'Ampliar'}
-          >
-            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </button>
-
+         
           <div
             className="flex-1 flex flex-col items-center justify-center text-gray-700 relative overflow-hidden bg-[#EEEEEE]"
             onMouseDown={closeSearchOnInteract}
@@ -626,7 +639,14 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                     // todo el scroll vertical y esconda el scrollbar
                     // horizontal al final del todo.
                     <div className="h-full min-h-0">
-                      {currentFileId && <PartidasTree ifcFileId={currentFileId} />}
+                      {currentFileId && (
+                        <PartidasTree
+                          ifcFileId={currentFileId}
+                          currentUserId={user?.id ?? undefined}
+                          onSelectAllInViewer={handleSelectAllInViewer}
+                          onSelectGroupInViewer={handleSelectGroupInViewer}
+                        />
+                      )}
                     </div>
                   )}
                 </div>
