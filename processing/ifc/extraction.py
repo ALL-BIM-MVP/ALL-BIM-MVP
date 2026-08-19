@@ -4,12 +4,13 @@
 # norma, cantidades de Revit. Puerto casi textual de
 # proceso-metrados-base/utils.py — son funciones agnósticas de la forma
 # de salida (siguen siendo válidas tanto si el resultado se arma como
-# árbol de presentación como si se arma normalizado). Se dejaron afuera
-# a propósito `extraer_cantidades_qto` (no la usaba nadie en el pipeline
-# original) y `calcular_metrados_geometrico`/`_agrupar_caras` (el cálculo
-# de área/volumen por malla triangular cruda) — esta última no es la
-# "metrado geométrico" que se usa como fallback de prioridad (ver
-# metrados.py): ese fallback es a partir de dimensiones, no de malla.
+# árbol de presentación como si se arma normalizado). Se dejó afuera a
+# propósito `extraer_cantidades_qto` (no la usaba nadie en el pipeline
+# original). `calcular_metrados_geometrico`/`_agrupar_caras` (el cálculo
+# de área/volumen por malla triangular cruda de proceso-metrados-base)
+# SÍ se reemplazó — ver geometria_proyeccion.py, corrige dos bugs de
+# fondo que tenía el original (nunca soldaba vértices, agrupamiento
+# O(n²)) y sí está cableado acá abajo, en obtener_dimensiones().
 import math
 import re
 import ifcopenshell
@@ -17,6 +18,10 @@ import ifcopenshell.geom
 from collections import Counter
 
 from .config import DENSIDAD_ACERO_KG_M3
+from .geometria_proyeccion import (
+    calcular_dimensiones_por_proyeccion, calcular_metrado_circular,
+    calcular_volumen_malla, triangulos_y_normales,
+)
 
 GEOM_SETTINGS = ifcopenshell.geom.settings()
 GEOM_SETTINGS.set(GEOM_SETTINGS.USE_WORLD_COORDS, True)
@@ -469,6 +474,41 @@ def inferir_categoria(el):
 # ----------------------------------------------------------------------
 # Métodos de extracción principales
 # ----------------------------------------------------------------------
+def extraer_dimensiones_circulares(el):
+    """IfcExtrudedAreaSolid + perfil circular (tubos — confirmado con
+    datos reales: los 294 IfcFlowSegment de Vista3D_SANITARIAS.ifc usan
+    consistentemente IfcCircleProfileDef). El radio viene EXACTO y
+    tipado en el IFC — no hace falta reconstruirlo de una malla como el
+    resto de los métodos de esta cascada, así que va primero, antes que
+    cualquier alternativa geométrica.
+
+    Devuelve {"Largo": profundidad de extrusión, "Diametro": 2×radio} —
+    Ancho/Alto NO se llenan a propósito: una sección circular no tiene
+    "ancho" ni "alto" distintos, sería el mismo número repetido con
+    nombres que no le corresponden a la figura (mismo criterio que ya
+    se usa para figuras irregulares: solo se reportan las dimensiones
+    que de verdad aplican).
+
+    is_a('IfcCircleProfileDef') también matchea IfcCircleHollowProfileDef
+    (subtipo, agrega WallThickness) — Radius ahí sigue siendo el radio
+    EXTERIOR en los dos casos, que es lo que importa para el diámetro
+    nominal del tubo."""
+    try:
+        rep = el.Representation
+        if not rep:
+            return None
+        for rep_map in rep.Representations:
+            for item in rep_map.Items:
+                if item.is_a('IfcExtrudedAreaSolid'):
+                    profile = item.SweptArea
+                    if profile.is_a('IfcCircleProfileDef'):
+                        return {"Largo": float(item.Depth), "Diametro": float(profile.Radius) * 2}
+                    return None
+    except Exception:
+        return None
+    return None
+
+
 def extraer_dimensiones_parametricas(el):
     """IfcExtrudedAreaSolid + perfil rectangular."""
     try:
@@ -502,6 +542,44 @@ def extraer_dimensiones_parametricas(el):
                     return None
     except Exception:
         return None
+
+
+def reordenar_dims_por_extent_z(shape, dims):
+    """Reordena {Largo,Ancho,Alto} para que "Alto" sea el que mejor
+    coincide con la extensión real en Z del elemento (bounding box del
+    shape ya resuelto en coordenadas mundiales — GEOM_SETTINGS ya tiene
+    USE_WORLD_COORDS activado).
+
+    Hace falta porque extraer_dimensiones_parametricas (IfcExtrudedAreaSolid
+    + perfil rectangular) asigna Ancho=profile.XDim/Alto=profile.YDim a
+    ciegas, sin ninguna verificación de hacia dónde apunta cada eje —
+    para la gran mayoría de muros la convención de exportación coincide
+    por casualidad, pero se confirmó con datos reales que NO es
+    universal: un muro delgado y vertical (una capa de pintura modelada
+    como IfcWallStandardCase aparte) tenía su dirección de extrusión
+    apuntando distinto, y esa asignación ciega terminaba poniendo el
+    espesor (1mm) en "Alto" y la altura real (2.3m) en "Largo" — el
+    mismo tipo de bug de fondo que geometria_proyeccion ya resuelve
+    para su propio cálculo, acá aplicado al resultado de paramétrico.
+
+    Público (no `_`) a propósito — classify._procesar_huecos_descuento
+    la reusa tal cual para los vanos (IfcOpeningElement), que tienen
+    EXACTAMENTE el mismo problema y confirmado que sí ocurre en la
+    práctica: un vano de puerta/ventana normal (0.8×2.15m) salía como
+    "Largo=3.048 (la profundidad del vano, sin sentido como 'largo'),
+    Alto=0.8" en vez de Ancho=0.8/Alto=2.15 — inflando muchísimo el
+    descuento de área/volumen del muro que lo contiene."""
+    if shape is None:
+        return dims
+    zs = shape.geometry.verts[2::3]
+    if not zs:
+        return dims
+    extent_z = max(zs) - min(zs)
+    valores = [dims["Largo"], dims["Ancho"], dims["Alto"]]
+    idx_alto = min(range(3), key=lambda i: abs(valores[i] - extent_z))
+    alto = valores[idx_alto]
+    restantes = sorted((valores[i] for i in range(3) if i != idx_alto), reverse=True)
+    return {"Largo": restantes[0], "Ancho": restantes[1], "Alto": alto}
 
 
 def extraer_dimensiones_fierro(el):
@@ -550,12 +628,59 @@ def fallback_dimensiones(el, psets, shape):
 
 
 def obtener_dimensiones(el, psets):
-    shape = get_shape(el)  # una sola llamada
+    """Punto de entrada real — resuelve Largo/Ancho/Alto (y Diametro,
+    si aplica) por la cascada de prioridad de abajo, y le adjunta
+    _vol_geom SIEMPRE que haya una malla disponible, sin importar qué
+    paso de la cascada terminó resolviendo las dimensiones.
 
+    Por qué esto va SEPARADO de la cascada, no adentro de cada paso: el
+    volumen de un sólido cerrado es una propiedad universal — se puede
+    integrar directo de la malla (calcular_volumen_malla, teorema de la
+    divergencia) sin necesitar saber Largo/Ancho/Alto, sin necesitar
+    encontrar qué cara es "la" cara, sin necesitar la maquinaria de
+    emparejamiento de geometria_proyeccion en absoluto. Esa maquinaria
+    (agrupar_caras + encontrar_pares_opuestos + OBB) sigue siendo
+    necesaria para Largo/Ancho/Área (esos SÍ dependen de identificar
+    una cara significativa), pero usarla también para el volumen — como
+    hacía la versión anterior de este archivo, "área real × espesor
+    real" — era peor en dos sentidos a la vez: una aproximación (asume
+    espesor uniforme, un prisma) Y más cara de calcular (toda esa
+    maquinaria) que la integral directa, que ya estaba escrita y
+    validada para tubos. area_total_m2 de geometria_proyeccion sigue
+    existiendo para ÁREA (esa sí necesita identificar una cara), pero
+    ya no calcula ningún volumen — el volumen final SIEMPRE sale de
+    esta integral universal, sin excepción por paso de la cascada."""
+    shape = get_shape(el)  # una sola vez, se reusa para la cascada Y el volumen
+    dims = _resolver_dimensiones_por_cascada(el, psets, shape)
+
+    if dims.get("_vol_geom") is None and shape is not None:
+        vertices, triangles, _, _ = triangulos_y_normales(shape)
+        if triangles:
+            dims = {**dims, "_vol_geom": calcular_volumen_malla(vertices, triangles)}
+
+    return dims
+
+
+def _resolver_dimensiones_por_cascada(el, psets, shape):
     # 0. Fierro
     dims_bar = extraer_dimensiones_fierro(el)
     if dims_bar and dims_bar["Largo"] is not None:
         return dims_bar
+
+    # 0.4. Perfil circular (tubos) — Largo/Diametro salen del perfil
+    # tipado (radio exacto, no hay que reconstruirlo), pero área/volumen
+    # SÍ se miden de la malla real (calcular_metrado_circular) — no con
+    # π×radio²×largo, que sería el volumen de un cilindro matemático
+    # ideal, no el del sólido realmente exportado (mismo criterio que
+    # el resto de esta cascada: nunca una fórmula por dimensiones si se
+    # puede medir la figura real).
+    dims_circ = extraer_dimensiones_circulares(el)
+    if dims_circ is not None:
+        extra = {}
+        metrado_circ = calcular_metrado_circular(el)
+        if metrado_circ is not None:
+            extra = {"_area_geom": metrado_circ["area_m2"], "_vol_geom": metrado_circ["volumen_m3"]}
+        return {"Largo": dims_circ["Largo"], "Ancho": None, "Alto": None, "Diametro": dims_circ["Diametro"], **extra}
 
     # 0.5. Dimensiones explícitas (puertas, ventanas)
     dims_exp = extraer_dimensiones_explicitas(el)
@@ -565,6 +690,11 @@ def obtener_dimensiones(el, psets):
     # 1. Paramétrico
     dims_param = extraer_dimensiones_parametricas(el)
     if dims_param and all(v is not None for v in dims_param.values()):
+        # Cross-check contra la extensión Z real (ver _dimension_mas_vertical)
+        # ANTES de normalizar por categoría — la asignación cruda de
+        # extraer_dimensiones_parametricas no siempre acierta cuál de
+        # sus 3 valores es realmente "Alto".
+        dims_param = reordenar_dims_por_extent_z(shape, dims_param)
         categoria = inferir_categoria(el)
         if categoria:
             return normalizar_ejes_por_categoria(
@@ -580,6 +710,62 @@ def obtener_dimensiones(el, psets):
 
     if shape is None:
         return fallback_dimensiones(el, psets, None)
+
+    # 2.5. Proyección de par de caras opuestas (geometria_proyeccion) —
+    # geometría real, más confiable que el OBB del sólido completo (que
+    # se infla con cualquier inclinación) y que el fallback de texto de
+    # extraer_metrados_revit_completo (ver metrados.py, ahí se decide
+    # la prioridad final entre este método y ese texto). Usa su propio
+    # shape con vértices soldados (ver geometria_proyeccion.get_shape_soldado),
+    # no reusa `shape` de acá arriba — necesita ese setting distinto
+    # para que el agrupamiento de caras funcione.
+    dims_proy = calcular_dimensiones_por_proyeccion(el)
+    if dims_proy is not None:
+        # area_geom viaja SIEMPRE que hubo un par válido (regular o no)
+        # — es el área real, triangulada, suma de TODAS las sub-figuras
+        # encontradas (no Largo×Ancho de una sola). calcular_metrados()
+        # la prefiere por sobre su propia fórmula por clase cuando está
+        # presente (ver ese comentario para el porqué: Largo×Ancho de
+        # un OBB sobreestima cualquier cara que no sea un rectángulo
+        # exacto — confirmado con datos reales, un techo trapezoidal
+        # daba 18% más área con la fórmula vieja que con el área
+        # triangulada real — y para elementos con varias vertientes,
+        # ignoraba por completo todas menos la más grande). NO se
+        # adjunta _vol_geom acá a propósito — calcular_dimensiones_por_
+        # proyeccion ya no calcula volumen (era área×espesor, una
+        # aproximación de prisma); el wrapper obtener_dimensiones lo
+        # integra directo de la malla completa apenas termine esta
+        # cascada, sea cual sea el paso que la resolvió.
+        extra = {"_area_geom": dims_proy["area_total_m2"]}
+        if dims_proy["Largo"] is not None:
+            # No pasa por normalizar_ejes_por_categoria a propósito:
+            # geometria_proyeccion YA resuelve Largo/Ancho/Alto según
+            # alineación real con el eje Z (ver _dimensiones_de_par),
+            # más preciso que las heurísticas de esa función (la rama
+            # "wall" confía ciegamente en que el Alto que le pasan ya
+            # es la altura, y la rama "floor" reordena por VALOR, no
+            # por eje — cualquiera de las dos podría deshacer esta
+            # resolución ya correcta).
+            return {"Largo": dims_proy["Largo"], "Ancho": dims_proy["Ancho"], "Alto": dims_proy["Alto"], **extra}
+        # Encontró un par de caras válido (confirma que el elemento SÍ
+        # es tipo "sándwich" — dos caras opuestas con área similar) pero
+        # el contorno es demasiado irregular como para que Largo/Ancho
+        # signifiquen algo (ver _es_figura_regular) — ej. el express_id
+        # 136277 de desenlazado.ifc, una membrana de 196.6 m² reales
+        # cuyo rectángulo envolvente mide 526 m². Confirmado con datos
+        # reales que NO conviene caer al OBB del sólido completo (paso
+        # 3, más abajo) para este caso: para ese mismo elemento da
+        # 38.9×26.4=1028 m², un error todavía MAYOR que el rectángulo
+        # de una sola cara — así que acá se corta la cascada, sin
+        # probar los pasos siguientes. Alto (espesor) sigue siendo
+        # confiable (viene de la distancia entre los dos planos del
+        # par, no depende de que el contorno sea o no un rectángulo) y
+        # se conserva; Largo/Ancho quedan en None literal, no un número
+        # que aparente ser correcto — pero _area_geom SÍ tiene la medida
+        # real (196.6 m² en este caso), así que el metrado final de área
+        # no queda en 0 pese a no tener Largo/Ancho (el volumen tampoco
+        # queda en 0: lo agrega el wrapper vía malla completa).
+        return {"Largo": None, "Ancho": None, "Alto": dims_proy["Alto"], **extra}
 
     # 3. OBB con normalización
     obb = extraer_dimensiones_orientadas(el, shape)
@@ -606,10 +792,35 @@ def calcular_metrados(dims, el=None):
     """lon/area/vol a partir de Largo/Ancho/Alto. Es el fallback
     "geométrico" que usa metrados.py cuando el IFC no trae el valor via
     Revit — NO calcula weight (eso es exclusivo de metrados.py, solo
-    para acero)."""
+    para acero).
+
+    Si dims trae _area_geom (geometria_proyeccion/perfil circular — ver
+    obtener_dimensiones pasos 0.4/2.5) ese valor SIEMPRE gana por sobre
+    la fórmula por clase de acá abajo: es el área real triangulada
+    (suma de todas las sub-figuras encontradas), más precisa que
+    Largo×Ancho de un solo OBB — confirmado con datos reales que para
+    una cara no-rectangular (trapezoidal, ej. un techo inclinado)
+    Largo×Ancho puede sobreestimar ~18%, y para un elemento con varias
+    vertientes (ej. un techo a varias aguas) Largo×Ancho de un único
+    par ignora por completo el resto de la superficie real.
+
+    _vol_geom, en cambio, viaja en dims para prácticamente CUALQUIER
+    elemento con malla (obtener_dimensiones lo integra directo de la
+    malla completa al final de la cascada, sin importar qué paso
+    resolvió Largo/Ancho/Alto — ver ese docstring) — así que se evalúa
+    SIEMPRE, sin exigir que _area_geom también esté presente. Antes acá
+    exigía las dos juntas (`and`), lo que en la práctica descartaba
+    _vol_geom (el real, integrado) para todo elemento "normal" que
+    resuelve por paramétrico/Qto/OBB — esos nunca traen _area_geom, así
+    que siempre caían al `largo*ancho*alto` de más abajo pese a tener
+    ya calculado el volumen real. area/vol se resuelven ahora cada uno
+    por separado."""
     largo = dims.get("Largo") or 0.0
     ancho = dims.get("Ancho") or 0.0
     alto = dims.get("Alto") or 0.0
+
+    area_geom = dims.get("_area_geom")
+    vol_geom = dims.get("_vol_geom")
 
     area_m2 = largo * alto  # valor por defecto (muro)
     if el is not None:
@@ -628,8 +839,30 @@ def calcular_metrados(dims, el=None):
                     dims_ordenadas = sorted([largo, ancho, alto])
                     area_m2 = dims_ordenadas[1] * dims_ordenadas[2]
 
-    volumen = largo * ancho * alto
-    return {"lon": largo, "area": area_m2, "vol": volumen}
+    if area_geom is not None:
+        area_m2 = area_geom
+    volumen = vol_geom if vol_geom is not None else largo * ancho * alto
+
+    # área_neta_huecos/vol_neta_huecos: True cuando el valor de arriba
+    # salió de la malla real (area_geom/vol_geom) — IfcOpenShell ya
+    # resuelve los IfcRelVoidsElement (puertas/ventanas empotradas) al
+    # triangular el sólido por default, así que esa malla YA viene sin
+    # el material de los vanos, confirmado con datos reales: mismo muro
+    # con 2 ventanas, malla con vanos resueltos = 1.30 m³ contra 2.04 m³
+    # con IfcOpenShell.settings.DISABLE_OPENING_SUBTRACTIONS=True (el
+    # sólido completo, sin vanos). Si acá abajo se aplicara TAMBIÉN el
+    # descuento de huecos de classify._aplicar_descuento_huecos sobre
+    # un valor que ya viene neto, se restaría el hueco dos veces — ver
+    # ese módulo, ahora usa estas banderas para no hacerlo. False
+    # cuando el valor es la fórmula por clase de acá arriba (Largo×Alto/
+    # Largo×Ancho/heurística) o el `largo*ancho*alto` de respaldo — esa
+    # fórmula NO conoce los vanos, ahí el descuento posterior sigue
+    # siendo necesario.
+    return {
+        "lon": largo, "area": area_m2, "vol": volumen,
+        "_area_neta_huecos": area_geom is not None,
+        "_vol_neta_huecos": vol_geom is not None,
+    }
 
 
 def inferir_unidad(dims):
@@ -643,11 +876,62 @@ def inferir_unidad(dims):
     return "und"
 
 
+# Si el nombre de una propiedad contiene cualquiera de estas palabras,
+# NUNCA se usa como dimensión aunque también contenga una palabra de
+# CLAVES_LONGITUD/ÁREA/etc — son propiedades de posición/referencia por
+# definición, no medidas. "Coincidir palabra completa en vez de
+# substring" NO alcanza para este caso: "ALTURA" ya es una palabra
+# completa suelta dentro de "DESFASE DE ALTURA DESDE NIVEL" (confirmado
+# con datos reales del proyecto). Lista armada a partir de casos reales
+# encontrados (DESFASE DE ALTURA DESDE NIVEL, ALTURA DE EXTREMO
+# INICIAL) más variantes previsibles del mismo patrón (ALTURA DE
+# ANTEPECHO también es una posición — "sill height" — no la altura del
+# elemento). "PROJECTED" es el mismo caso para área: un techo trae
+# tanto "PROJECTEDAREA" (área en planta, achicada por la inclinación)
+# como "TOTALAREA" (el área real de cobertura) — las dos contienen
+# "AREA" como substring, así que sin este descalificador cualquiera de
+# las dos podía ganar según el orden de iteración (confirmado con datos
+# reales: PROJECTEDAREA=219.59 vs TOTALAREA=236.14 para el mismo techo,
+# un 7% de diferencia, nada despreciable).
+DESCALIFICADORES_DIMENSION = [
+    "DESFASE", "OFFSET", "DESDE", "REFERENCIA", "REFERENCE",
+    "INICIAL", "FINAL", "EXTREMO", "NIVEL DE", "ANTEPECHO",
+    "ID DE", " ID", "FASE", "SUBPROYECTO", "MARCA", "PROJECTED",
+]
+
+
+def _nombre_descalificado(nombre_upper):
+    return any(d in nombre_upper for d in DESCALIFICADORES_DIMENSION)
+
+
+def _valor_no_negativo(valor):
+    """Convierte a float y rechaza negativos — una medida escalar
+    (largo/área/volumen/peso) nunca puede ser negativa; si el valor
+    encontrado es negativo, la propiedad matcheada casi seguro NO es la
+    dimensión que se creyó que era (es una posición/desfase con signo),
+    así que se descarta en vez de propagarse como dato inválido."""
+    try:
+        v = float(valor)
+    except (ValueError, TypeError):
+        return None
+    return v if v >= 0 else None
+
+
 def extraer_metrados_revit_completo(el):
-    metrados = {"lon": None, "area": None, "vol": None, "count": None, "weight": None}
+    """Devuelve DOS dicts separados, no uno solo — metrados.py necesita
+    distinguir la fuente para decidir prioridad (ver calcular_metrados_final):
+    metrados_tipados sale de IfcElementQuantity (typed, sin ambigüedad,
+    máxima confianza); metrados_texto sale de adivinar por palabra clave
+    contra el nombre de una IfcPropertySingleValue cualquiera (fallback
+    de menor confianza, ahora protegido con DESCALIFICADORES_DIMENSION +
+    no-negatividad, pero sigue siendo una adivinanza de texto)."""
+    metrados_tipados = {"lon": None, "area": None, "vol": None, "count": None, "weight": None}
+    metrados_texto = {"lon": None, "area": None, "vol": None, "count": None, "weight": None}
     propiedades = {}
 
-    # 1. IfcElementQuantity
+    # 1. IfcElementQuantity — typed, no ambiguo (IfcQuantityLength no se
+    # confunde con una posición); igual se valida no-negatividad acá
+    # también por consistencia, aunque en teoría no debería hacer falta.
     for rel in getattr(el, "IsDefinedBy", []):
         if not rel.is_a("IfcRelDefinesByProperties"):
             continue
@@ -657,22 +941,31 @@ def extraer_metrados_revit_completo(el):
         if prop_def.is_a("IfcElementQuantity"):
             for q in getattr(prop_def, "Quantities", []):
                 if q.is_a("IfcQuantityLength") and q.LengthValue is not None:
-                    if metrados["lon"] is None:
-                        metrados["lon"] = float(q.LengthValue)
+                    if metrados_tipados["lon"] is None:
+                        v = _valor_no_negativo(q.LengthValue)
+                        if v is not None:
+                            metrados_tipados["lon"] = v
                 elif q.is_a("IfcQuantityArea") and q.AreaValue is not None:
-                    if metrados["area"] is None:
-                        metrados["area"] = float(q.AreaValue)
+                    if metrados_tipados["area"] is None:
+                        v = _valor_no_negativo(q.AreaValue)
+                        if v is not None:
+                            metrados_tipados["area"] = v
                 elif q.is_a("IfcQuantityVolume") and q.VolumeValue is not None:
-                    if metrados["vol"] is None:
-                        metrados["vol"] = float(q.VolumeValue)
+                    if metrados_tipados["vol"] is None:
+                        v = _valor_no_negativo(q.VolumeValue)
+                        if v is not None:
+                            metrados_tipados["vol"] = v
                 elif q.is_a("IfcQuantityCount") and q.CountValue is not None:
-                    if metrados["count"] is None:
-                        metrados["count"] = float(q.CountValue)
+                    if metrados_tipados["count"] is None:
+                        metrados_tipados["count"] = float(q.CountValue)  # count SÍ puede ser 0
                 elif q.is_a("IfcQuantityWeight") and q.WeightValue is not None:
-                    if metrados["weight"] is None:
-                        metrados["weight"] = float(q.WeightValue)
+                    if metrados_tipados["weight"] is None:
+                        v = _valor_no_negativo(q.WeightValue)
+                        if v is not None:
+                            metrados_tipados["weight"] = v
 
-    # 2. Propiedades del exportador (fallback)
+    # 2. Propiedades del exportador (fallback de texto — acá vivían los
+    # bugs: substring sin descalificar posiciones, y sin validar signo)
     CLAVES_AREA = ["AREA", "ÁREA", "SURFACE", "GROSS AREA", "NET AREA"]
     CLAVES_VOLUMEN = ["VOLUME", "VOLUMEN", "NET VOLUME", "GROSS VOLUME"]
     CLAVES_LONGITUD = ["LENGTH", "LONGITUD", "WIDTH", "ANCHURA", "ALTURA", "HEIGHT", "DEPTH", "PERALTE"]
@@ -686,38 +979,38 @@ def extraer_metrados_revit_completo(el):
         if not prop_def or not prop_def.is_a("IfcPropertySet"):
             continue
         for prop in getattr(prop_def, "HasProperties", []):
-            if prop.is_a("IfcPropertySingleValue") and prop.NominalValue is not None:
-                nombre = getattr(prop, "Name", "").upper().strip()
-                valor = prop.NominalValue.wrappedValue if hasattr(prop.NominalValue, 'wrappedValue') else prop.NominalValue
-                propiedades[nombre] = valor
+            if not (prop.is_a("IfcPropertySingleValue") and prop.NominalValue is not None):
+                continue
+            nombre = getattr(prop, "Name", "").upper().strip()
+            valor = prop.NominalValue.wrappedValue if hasattr(prop.NominalValue, 'wrappedValue') else prop.NominalValue
+            propiedades[nombre] = valor
 
-                if metrados["area"] is None and any(k in nombre for k in CLAVES_AREA):
-                    try:
-                        metrados["area"] = float(valor)
-                    except (ValueError, TypeError):
-                        pass
-                if metrados["vol"] is None and any(k in nombre for k in CLAVES_VOLUMEN):
-                    try:
-                        metrados["vol"] = float(valor)
-                    except (ValueError, TypeError):
-                        pass
-                if metrados["lon"] is None and any(k in nombre for k in CLAVES_LONGITUD):
-                    try:
-                        metrados["lon"] = float(valor)
-                    except (ValueError, TypeError):
-                        pass
-                if metrados["weight"] is None and any(k in nombre for k in CLAVES_PESO):
-                    try:
-                        metrados["weight"] = float(valor)
-                    except (ValueError, TypeError):
-                        pass
-                if metrados["count"] is None and any(k in nombre for k in CLAVES_CONTEO):
-                    try:
-                        metrados["count"] = float(valor)
-                    except (ValueError, TypeError):
-                        pass
+            if _nombre_descalificado(nombre):
+                continue  # posición/referencia/fase/etc — nunca una dimensión, sea cual sea CLAVES_*
 
-    return {"metrados_revit": metrados, "propiedades": propiedades}
+            if metrados_texto["area"] is None and any(k in nombre for k in CLAVES_AREA):
+                v = _valor_no_negativo(valor)
+                if v is not None:
+                    metrados_texto["area"] = v
+            if metrados_texto["vol"] is None and any(k in nombre for k in CLAVES_VOLUMEN):
+                v = _valor_no_negativo(valor)
+                if v is not None:
+                    metrados_texto["vol"] = v
+            if metrados_texto["lon"] is None and any(k in nombre for k in CLAVES_LONGITUD):
+                v = _valor_no_negativo(valor)
+                if v is not None:
+                    metrados_texto["lon"] = v
+            if metrados_texto["weight"] is None and any(k in nombre for k in CLAVES_PESO):
+                v = _valor_no_negativo(valor)
+                if v is not None:
+                    metrados_texto["weight"] = v
+            if metrados_texto["count"] is None and any(k in nombre for k in CLAVES_CONTEO):
+                try:
+                    metrados_texto["count"] = float(valor)  # count SÍ puede ser 0
+                except (ValueError, TypeError):
+                    pass
+
+    return {"metrados_tipados": metrados_tipados, "metrados_texto": metrados_texto, "propiedades": propiedades}
 
 
 def peso_nominal_kg_por_metro(diametro_metros):

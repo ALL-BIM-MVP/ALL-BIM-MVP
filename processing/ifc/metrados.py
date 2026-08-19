@@ -7,17 +7,30 @@
 # dimensiones e ignoraba por completo lo que el IFC ya traía calculado
 # (metrados_revit se guardaba aparte, nunca se usaba para decidir).
 #
-# Regla (confirmada con el usuario):
-#   lon/area/vol  -> metrados_revit (IfcElementQuantity /
-#                    IfcPropertySingleValue, lo que exportó Revit) si
-#                    existe; si no, se calcula por geometría a partir de
-#                    dimensiones (extraction.calcular_metrados, mismas
-#                    condicionales por clase de elemento que ya existían).
+# Regla (revisada — antes esto era "Revit (tipado o de texto,
+# indistinto) siempre gana, geométrico solo si Revit no trajo nada").
+# Eso enmascaraba por completo cualquier mejora al cálculo geométrico
+# (ver extraction.obtener_dimensiones/geometria_proyeccion) para
+# cualquier elemento donde el fallback de texto de Revit encontrara
+# ALGO, aunque fuera un valor mal etiquetado (bug real, confirmado con
+# datos: una ventana con "ALTURA DE EXTREMO INICIAL" terminaba de
+# longitud). La nueva prioridad, de más a menos confiable:
+#   lon/area/vol  -> 1) metrados_tipados (IfcElementQuantity — typed,
+#                       sin ambigüedad de nombre)
+#                    2) geometría real (extraction.calcular_metrados a
+#                       partir de obtener_dimensiones, que ya incluye
+#                       la proyección de caras — más confiable que
+#                       adivinar por palabra clave)
+#                    3) metrados_texto (IfcPropertySingleValue
+#                       adivinado por nombre — último recurso, ahora
+#                       protegido con descalificadores + no-negatividad,
+#                       pero sigue siendo una adivinanza de texto)
 #   weight        -> SIEMPRE null, excepto IfcReinforcingBar (acero):
 #                    ahí se calcula por diámetro nominal contra
 #                    TABLA_PESOS_ACERO (fallback: CrossSectionArea *
 #                    densidad si el diámetro no está en la tabla).
-#   count         -> metrados_revit["count"] si existe, si no 1.0.
+#   count         -> metrados_tipados["count"] si existe, si no
+#                    metrados_texto["count"], si no 1.0.
 #                    (Nota: partidas 'und' sin NINGUNA propiedad Revit
 #                    de conteo, ej. "bisagras por puerta", van a caer
 #                    en count=1.0 por defecto — no hay con qué inferir
@@ -72,11 +85,13 @@ def _metrados_acero(el):
     return {"lon": largo, "area": 0.0, "vol": volumen, "weight": weight, "count": 1.0}
 
 
-def calcular_metrados_final(el, dims, metrados_revit):
+def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto):
     """Punto de entrada único: dado el elemento IFC, sus dimensiones
-    (obtener_dimensiones) y lo que se pudo extraer directo del IFC
-    (extraction.extraer_metrados_revit_completo), devuelve el dict
-    final de 5 valores: {lon, area, vol, weight, count}."""
+    (obtener_dimensiones) y las dos fuentes que se pudieron extraer
+    directo del IFC (extraction.extraer_metrados_revit_completo —
+    tipada y de texto, por separado a propósito, ver comentario de
+    cabecera), devuelve el dict final de 5 valores:
+    {lon, area, vol, weight, count}."""
 
     acero = _metrados_acero(el)
     if acero is not None:
@@ -91,23 +106,62 @@ def calcular_metrados_final(el, dims, metrados_revit):
             "vol": vol,
             "weight": acero["weight"],
             "count": acero["count"],
+            # Una barra de acero no tiene vanos (get_openings nunca la
+            # toca), así que estas banderas no cambian nada acá — se
+            # incluyen solo para que el dict tenga la misma forma que
+            # el resto de los retornos de esta función.
+            "_area_neta_huecos": False,
+            "_vol_neta_huecos": False,
         }
 
-    lon = metrados_revit.get("lon")
-    area = metrados_revit.get("area")
-    vol = metrados_revit.get("vol")
-    count = metrados_revit.get("count")
+    # 1. Tipado (IfcElementQuantity)
+    lon = metrados_tipados.get("lon")
+    area = metrados_tipados.get("area")
+    vol = metrados_tipados.get("vol")
+    count = metrados_tipados.get("count")
 
+    # area_neta_huecos/vol_neta_huecos: si el valor final terminó
+    # saliendo de la geometría (calcular_metrados) Y esa geometría vino
+    # de la malla real (area_geom/vol_geom, no de la fórmula por
+    # clase), YA viene neta de vanos — IfcOpenShell resuelve los
+    # IfcRelVoidsElement al triangular el sólido por default (ver
+    # extraction.calcular_metrados, confirmado con datos reales) — así
+    # que classify._aplicar_descuento_huecos NO debe restar de nuevo.
+    # Si en cambio el valor vino de tipado (IfcElementQuantity) o de
+    # texto (más abajo), la bandera queda en False — no hay evidencia
+    # con datos reales de este proyecto de que esos valores de Revit ya
+    # vengan netos de vanos (no se tocó ese comportamiento, sigue
+    # descontando como siempre).
+    area_neta_huecos = False
+    vol_neta_huecos = False
+
+    # 2. Geometría real (obtener_dimensiones, incluye proyección de caras)
     if lon is None or area is None or vol is None:
         geometrico = calcular_metrados(dims, el)
         if lon is None:
             lon = geometrico["lon"]
         if area is None:
             area = geometrico["area"]
+            area_neta_huecos = geometrico["_area_neta_huecos"]
         if vol is None:
             vol = geometrico["vol"]
+            vol_neta_huecos = geometrico["_vol_neta_huecos"]
+
+    # 3. Texto de Revit (último recurso, adivinado por nombre de propiedad)
+    if lon is None:
+        lon = metrados_texto.get("lon")
+    if area is None:
+        area = metrados_texto.get("area")
+    if vol is None:
+        vol = metrados_texto.get("vol")
+    if count is None:
+        count = metrados_texto.get("count")
 
     if count is None:
         count = 1.0
 
-    return {"lon": lon, "area": area, "vol": vol, "weight": None, "count": count}
+    return {
+        "lon": lon, "area": area, "vol": vol, "weight": None, "count": count,
+        "_area_neta_huecos": area_neta_huecos,
+        "_vol_neta_huecos": vol_neta_huecos,
+    }

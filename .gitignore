@@ -29,6 +29,7 @@ jspm_packages/
 processing/proceso-metrados-base/
 processing/**/.venv/
 processing/**/__pycache__/
+processing/output/
 docs/
 test/
 dist/

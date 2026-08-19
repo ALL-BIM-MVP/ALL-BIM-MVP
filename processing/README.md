@@ -50,12 +50,21 @@ PROCESSING_PYTHON=/ruta/a/otro/python
 ```bash
 processing/.venv/bin/python -m processing.ifc.cli \
   processing/proceso-metrados-base/archives/desenlazado.ifc \
-  --norma processing/proceso-metrados-base/norma_completa.json \
-  --out /tmp/resultado.json
+  --norma processing/proceso-metrados-base/norma_completa.json
 ```
 
-Corriendo esto desde la raíz del repo. Sin `--out` imprime el JSON a
-stdout en vez de escribirlo a un archivo.
+Sin `--out`, el JSON queda guardado solo en `processing/output/<nombre_del_ifc>.json`
+(carpeta dentro del repo, se crea sola — ignorada por git, es
+descartable). Es el default pensado para probar el pipeline a mano: no
+hace falta acordarse de nada más, y el resultado queda en un lugar
+visible del proyecto, no en el `/tmp` del sistema operativo (que está
+FUERA del repo — si buscás el archivo desde el explorador del editor,
+ahí nunca va a aparecer).
+
+Si preferís elegir vos la ruta, `--out <archivo>` guarda exactamente
+ahí (relativo o absoluto) — así es como lo invoca el backend Node, con
+un path propio en el `/tmp` del sistema. `--out -` imprime el JSON a
+stdout en vez de guardarlo (para pipear a `jq`, por ejemplo).
 
 ## Estructura
 
