@@ -346,66 +346,115 @@ Authorization: Bearer {{accessToken}}
 
 
 ### =========================================================================
-### MÓDULO DE ROLES DE PROYECTO (PROJECT ROLES)
+### MÓDULOS + ROLES/PERMISOS POR MÓDULO (Fase 2 —
+### docs/roadmap-modulos-y-permisos.md) — reemplaza PROJECT ROLES
+### (eliminado entero, ya no existe /project-roles).
 ### =========================================================================
 
-### 1. Crear un nuevo rol de proyecto personalizado
-# @name createProjectRole
-POST {{baseUrl}}/project-roles
+### 1. Catálogo de módulos (fijo, no depende de proyecto)
+GET {{baseUrl}}/modules
+Authorization: Bearer {{accessToken}}
+
+### 2. Roles del módulo Metrados + su mapa de permisos completo
+GET {{baseUrl}}/modules/metrados/roles
+Authorization: Bearer {{accessToken}}
+
+### 3. Mi acceso resuelto a un módulo puntual de un proyecto — lo que
+### se pide al ENTRAR a ese módulo (rol + permisos ya aplanados)
+GET {{baseUrl}}/projects/{{createdProjectId}}/modules/metrados/access
+Authorization: Bearer {{accessToken}}
+
+### 4. Los 6 módulos de una (solo trae los is_active=true hoy)
+GET {{baseUrl}}/projects/{{createdProjectId}}/my-modules
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### MÓDULO DE MIEMBROS
+### =========================================================================
+
+### 1. Listar miembros — CUALQUIER miembro u owner puede leer (incluye
+### al owner como fila sintética, y marca is_me en cada fila)
+GET {{baseUrl}}/projects/{{createdProjectId}}/members
+Authorization: Bearer {{accessToken}}
+
+### 2. Hacer admin a un miembro (solo owner/admin) — ⚠️ reemplazá el 1
+### por un memberId real (project_member_id, NO user_id) de la
+### respuesta de arriba
+PATCH {{baseUrl}}/projects/{{createdProjectId}}/members/1/admin
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "name": "Modelador BIM Senior"
+  "is_admin": true
 }
 
-### Capturar automáticamente el ID del rol de proyecto creado
-@createdProjectRoleId = {{createProjectRole.response.body.project_role_id}}
-
-
-### 2. Listar roles de proyecto (Por defecto trae combinados: defaults + creados por mí)
-GET {{baseUrl}}/project-roles
-Authorization: Bearer {{accessToken}}
-
-
-### 3. Listar roles filtrando por Scope 'default' (Para cuando implementes el Query Schema)
-GET {{baseUrl}}/project-roles?scope=default
-Authorization: Bearer {{accessToken}}
-
-
-### 4. Listar roles filtrando por Scope 'owner' (Solo los creados por mí)
-GET {{baseUrl}}/project-roles?scope=owner
-Authorization: Bearer {{accessToken}}
-
-
-### 5. Actualizar el nombre de un rol de proyecto (Caso Exitoso)
-PATCH {{baseUrl}}/project-roles/{{createdProjectRoleId}}
+### 3. Asignar un rol de módulo a un miembro que NO es admin — ⚠️
+### memberId real + module_role_id sacado de la request 2 de arriba
+### (GET /modules/metrados/roles)
+PUT {{baseUrl}}/projects/{{createdProjectId}}/members/1/modules/metrados/role
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "name": "Coordinador BIM Líder"
+  "module_role_id": 2
 }
 
-
-### 6. Actualizar rol (Caso de Error - Nombre vacío)
-PATCH {{baseUrl}}/project-roles/{{createdProjectRoleId}}
+### 4. Caso de error: alguien sin ser owner/admin intenta gestionar -> 403 ADMIN_PERMISSION_REQUIRED
+PATCH {{baseUrl}}/projects/{{createdProjectId}}/members/1/admin
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
-  "name": ""
+  "is_admin": true
 }
 
-
-### 7. Intentar eliminar un rol por defecto o en uso (Caso de Error esperado: 400 o 404)
-### 💡 Nota: Puedes probar cambiar el ID por uno que sepas que está asignado a un miembro
-DELETE {{baseUrl}}/project-roles/2
+### 5. Eliminar un miembro (solo owner/admin) — ⚠️ userId real
+DELETE {{baseUrl}}/projects/{{createdProjectId}}/members/2
 Authorization: Bearer {{accessToken}}
 
 
-### 8. Eliminar el rol de proyecto personalizado creado (Caso Exitoso)
-DELETE {{baseUrl}}/project-roles/{{createdProjectRoleId}}
+### =========================================================================
+### MÓDULO DE INVITACIONES DE PROYECTO
+### =========================================================================
+
+### 1. Invitar SIN admin — con roles de módulo puntuales (vacío en un
+### módulo = queda en el mínimo "solo ver" por defecto al aceptar)
+POST {{baseUrl}}/projects/{{createdProjectId}}/invitations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "email": "colega@empresa.com",
+  "is_admin": false,
+  "module_roles": [
+    { "module_code": "metrados", "module_role_id": 2 }
+  ]
+}
+
+### 2. Invitar COMO admin — module_roles va vacío, is_admin ya da acceso total
+POST {{baseUrl}}/projects/{{createdProjectId}}/invitations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "email": "otro-colega@empresa.com",
+  "is_admin": true
+}
+
+### 3. Caso de error: is_admin=true CON module_roles no vacío -> 400
+POST {{baseUrl}}/projects/{{createdProjectId}}/invitations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "email": "x@empresa.com",
+  "is_admin": true,
+  "module_roles": [ { "module_code": "metrados", "module_role_id": 2 } ]
+}
+
+### 4. Listar invitaciones del proyecto (solo owner/admin)
+GET {{baseUrl}}/projects/{{createdProjectId}}/invitations
 Authorization: Bearer {{accessToken}}
 
 

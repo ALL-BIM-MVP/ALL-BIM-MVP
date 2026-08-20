@@ -6,12 +6,12 @@ import routerRoles from './routes/roles.routes.js';
 import routerUsers from './routes/users.routes.js';
 import routerInvitationUser from './routes/user-invitations.routes.js';
 import routerProjects from './routes/projects.routes.js';
-import routerProjectRoles from './routes/project-roles.routes.js';
 import routerProjectInvitations from './routes/project-invitations.routes.js';
 import routerProjectMembers from './routes/project-members.routes.js';
 import routerFiles, { fileContentRouter } from './routes/files.routes.js';
 import routerIfcMetrados, { ifcFilesRouter } from './routes/ifc-metrados.routes.js';
 import routerTemplates from './routes/templates.routes.js';
+import routerModules, { projectModulesRouter } from './routes/modules.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
 import { PUBLIC_UPLOADS_DIR } from './middlewares/upload.midleware.js';
@@ -38,7 +38,6 @@ app.use('/api/roles', routerRoles);
 app.use('/api/users', routerUsers);
 app.use('/api/invitations', routerInvitationUser);
 app.use('/api/projects', routerProjects);
-app.use('/api/project-roles', routerProjectRoles);
 app.use('/api/projects', routerProjectInvitations );
 app.use('/api/projects', routerProjectMembers );
 app.use('/api/projects', routerFiles );
@@ -46,6 +45,8 @@ app.use('/api/files', fileContentRouter );
 app.use('/api/projects', routerIfcMetrados );
 app.use('/api/ifc-files', ifcFilesRouter );
 app.use('/api/templates', routerTemplates );
+app.use('/api/modules', routerModules );
+app.use('/api/projects', projectModulesRouter );
 
 
 app.use(errorHandler)

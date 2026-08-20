@@ -4,14 +4,14 @@ import { getIfcFileStatusController, processIfcMetradosController } from '../con
 import { getPartidaElementsController, getPartidasTreeController } from '../controllers/metrado-partidas.controller.js';
 import { getAvailableColumnsController } from '../controllers/templates.controller.js';
 import { getEstadoElementosController } from '../controllers/metrados-estado.controller.js';
-import { requireAuth, requireRolePrivileges } from '../middlewares/auth.middleware.js';
-import { ROLES } from '../constants/roles.js';
+import { requireAuth } from '../middlewares/auth.middleware.js';
 
 const router = Router();
 
-router.post('/:projectId/ifc-metrados/process', requireAuth,
-    requireRolePrivileges(ROLES.ADMINISTRADOR, ROLES.MODERADOR, ROLES.SUPERVISOR, ROLES.USUARIO),
-    uploadSingleFile, processIfcMetradosController);
+// Sin chequeo de rol de cuenta — el permiso real ('upload'/'process'
+// del módulo Metrados) se resuelve en processIfcMetradosService (Fase
+// 2, ver docs/roadmap-modulos-y-permisos.md).
+router.post('/:projectId/ifc-metrados/process', requireAuth, uploadSingleFile, processIfcMetradosController);
 
 // "Muestra de estado de cantidad de elementos" (prototipo) — a nivel
 // de PROYECTO, no de un solo archivo, ver metrados-estado.models.ts.

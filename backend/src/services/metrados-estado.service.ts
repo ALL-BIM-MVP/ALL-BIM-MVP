@@ -10,13 +10,16 @@ import {
     construirEstadoElementos,
     type ElementoConjuntoRow, type EstadoElementosResult,
 } from "../models/metrados-estado.models.js";
-import { assertProjectAccess } from "./files.service.js";
+import { assertModulePermission } from "./project-access.service.js";
 
 export const getEstadoElementosService = async (
     user: DecodedToken, { projectId }: ProjectIdParam
 ): Promise<EstadoElementosResult> => {
 
-    await assertProjectAccess(projectId, user.user_id);
+    // Es un reporte del módulo METRADOS BIM puntualmente (ver
+    // comentario de cabecera) — mismo criterio que el resto de
+    // ifc-metrados.service.ts.
+    await assertModulePermission(projectId, user.user_id, "metrados", "view");
 
     // A nivel de PROYECTO (todos los archivos IFC ya procesados, no
     // uno solo) — por diseño: si el mismo archivo se subió/procesó más

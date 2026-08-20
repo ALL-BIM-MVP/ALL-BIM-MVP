@@ -6,8 +6,15 @@ import type { DecodedToken } from "../models/auth.models.js";
 import type { ProjectIdParam } from "../schemas/projects.schema.js";
 import type { IfcFileIdParam, ProcessIfcMetradosQuery } from "../schemas/ifc-metrados.schema.js";
 import { transformIfcFileStatus, type IfcFileStatusFull, type IfcFileStatusRow } from "../models/ifc-files.models.js";
-import { assertProjectAccess, saveFileService } from "./files.service.js";
+import { saveFileService } from "./files.service.js";
+import { assertModulePermission } from "./project-access.service.js";
 import { runIfcProcessing } from "./ifc-processing-runner.js";
+
+// Todo esto es trabajo del módulo METRADOS BIM — único módulo
+// funcional hoy (Fase 2, ver docs/roadmap-modulos-y-permisos.md). El
+// día que otro módulo también procese IFC, esta constante deja de
+// alcanzar y hay que resolver el módulo real por contexto.
+const METRADOS_MODULE_CODE = "metrados";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -104,7 +111,13 @@ export const processIfcMetradosService = async (
     { force }: ProcessIfcMetradosQuery
 ): Promise<ProcessIfcMetradosResult> => {
 
-    await assertProjectAccess(projectId, user.user_id);
+    // "process" siempre — es la acción real de este endpoint. "upload"
+    // además, solo si vino un archivo nuevo por multipart (la variante
+    // por file_id reprocesa uno que ya estaba, no sube nada).
+    await assertModulePermission(projectId, user.user_id, METRADOS_MODULE_CODE, "process");
+    if (multerFile) {
+        await assertModulePermission(projectId, user.user_id, METRADOS_MODULE_CODE, "upload");
+    }
 
     let fileId: number;
     let filePath: string;
@@ -151,7 +164,7 @@ export const getIfcFileStatusService = async (
     const row = rows[0];
     if (!row) throw new AppError(IFC_METRADOS_ERRORS.STATUS_NOT_FOUND);
 
-    await assertProjectAccess(row.project_id, user.user_id);
+    await assertModulePermission(row.project_id, user.user_id, METRADOS_MODULE_CODE, "view");
 
     // project_id solo se pidió para validar el acceso — no es parte del
     // contrato de salida, así que no se pasa tal cual (transformIfcFileStatus
@@ -160,12 +173,16 @@ export const getIfcFileStatusService = async (
     return transformIfcFileStatus(status);
 };
 
-// Confirma que el ifc_file_id exista y que el usuario tenga acceso al
-// proyecto dueño de ese archivo — mismo JOIN que getIfcFileStatusService,
-// factorizado para que lo reusen los endpoints de partidas/elementos
-// (metrado-partidas.service.ts), que no necesitan el resto de columnas
-// de ifc_files, solo confirmar el acceso.
-export const assertIfcFileAccess = async (ifcFileId: number, userId: number): Promise<void> => {
+// Confirma que el ifc_file_id exista y que el usuario tenga el permiso
+// pedido (default "view") sobre el módulo Metrados del proyecto dueño
+// de ese archivo — mismo JOIN que getIfcFileStatusService, factorizado
+// para que lo reusen los endpoints de partidas/elementos
+// (metrado-partidas.service.ts) y el catálogo de columnas
+// (templates.service.ts), que no necesitan el resto de columnas de
+// ifc_files, solo confirmar el acceso.
+export const assertIfcFileAccess = async (
+    ifcFileId: number, userId: number, permissionCode: string = "view"
+): Promise<void> => {
     const { rows } = await pool.query<{ project_id: number }>(
         `SELECT f.project_id
         FROM ifc_files i
@@ -177,5 +194,5 @@ export const assertIfcFileAccess = async (ifcFileId: number, userId: number): Pr
     const row = rows[0];
     if (!row) throw new AppError(IFC_METRADOS_ERRORS.STATUS_NOT_FOUND);
 
-    await assertProjectAccess(row.project_id, userId);
+    await assertModulePermission(row.project_id, userId, METRADOS_MODULE_CODE, permissionCode);
 };

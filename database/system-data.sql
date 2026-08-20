@@ -30,6 +30,70 @@ VALUES
 
 
 -- ------------------------------------------------------------
+-- MÓDULOS + ROLES/PERMISOS POR MÓDULO (Fase 2 — reemplaza
+-- project_roles, ver docs/roadmap-modulos-y-permisos.md)
+-- ------------------------------------------------------------
+-- Los 6 módulos reales de la app — solo METRADOS BIM tiene
+-- funcionalidad hoy (is_active=true), el resto son slots reservados.
+INSERT INTO modules (code, name, is_active) VALUES
+    ('metrados',  'METRADOS BIM',   true),
+    ('ssomma',    'SSOMMA BIM',     false),
+    ('calidad',   'CALIDAD BIM',    false),
+    ('logistica', 'LOGISTICA BIM',  false),
+    ('costos',    'COSTOS BIM',     false),
+    ('planos',    'PLANOS BIM',     false);
+
+-- Vocabulario ÚNICO de permisos, reusado entre TODOS los módulos (no
+-- un catálogo por módulo) — export/configure quedan reservados para
+-- las Fases 4/5 (exportar Excel, configuración CSRT), ya sembrados acá
+-- para no migrar de nuevo cuando lleguen, aunque hoy ningún rol los
+-- otorgue de verdad salvo Administrador.
+INSERT INTO module_permissions (code, label_default) VALUES
+    ('view',      'Ver'),
+    ('upload',    'Subir'),
+    ('process',   'Procesar'),
+    ('delete',    'Eliminar'),
+    ('export',    'Exportar'),
+    ('configure', 'Configurar');
+
+-- Roles del módulo METRADOS — los únicos con funcionalidad real hoy.
+-- Administrador = techo (todos los permisos, incluso los reservados a
+-- futuro). Visualizador = piso (solo ver). Editor = todo lo operativo
+-- de hoy (ver/subir/procesar/eliminar) sin lo reservado a futuro — así
+-- quedan los dos extremos fáciles de probar más uno intermedio.
+DO $$
+DECLARE
+    v_module_id INT;
+    v_role_admin INT;
+    v_role_editor INT;
+    v_role_viewer INT;
+BEGIN
+    SELECT module_id INTO v_module_id FROM modules WHERE code = 'metrados';
+
+    INSERT INTO module_roles (module_id, name, description) VALUES
+        (v_module_id, 'Administrador', 'Acceso completo: ver, subir, procesar, eliminar y configurar el módulo.')
+        RETURNING module_role_id INTO v_role_admin;
+    INSERT INTO module_roles (module_id, name, description) VALUES
+        (v_module_id, 'Editor', 'Puede ver, subir, procesar y eliminar archivos, pero no configurar el módulo.')
+        RETURNING module_role_id INTO v_role_editor;
+    INSERT INTO module_roles (module_id, name, description) VALUES
+        (v_module_id, 'Visualizador', 'Solo puede ver — no puede subir, procesar ni eliminar nada.')
+        RETURNING module_role_id INTO v_role_viewer;
+
+    INSERT INTO module_role_permissions (module_role_id, module_permission_id)
+    SELECT v_role_admin, module_permission_id FROM module_permissions; -- Administrador: TODOS
+
+    INSERT INTO module_role_permissions (module_role_id, module_permission_id)
+    SELECT v_role_editor, module_permission_id FROM module_permissions
+        WHERE code IN ('view', 'upload', 'process', 'delete');
+
+    INSERT INTO module_role_permissions (module_role_id, module_permission_id)
+    SELECT v_role_viewer, module_permission_id FROM module_permissions
+        WHERE code = 'view';
+END $$;
+
+
+-- ------------------------------------------------------------
 -- CATALOGO DE COLUMNAS BUILTIN PARA PLANTILLAS DE METRADO
 -- ------------------------------------------------------------
 -- Catálogo fijo de campos "de fábrica" que cualquier plantilla de
