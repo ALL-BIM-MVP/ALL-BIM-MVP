@@ -9,6 +9,7 @@ import type { UserLayout } from '../models/users.models.js';
 import { createSession } from './session.service.js';
 import { hashToken } from '../utils/hashing.js';
 import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
+import { USER_ERRORS } from '../models/errors/user.errors.js';
 import { AppError } from '../models/errors/app-error.js';
 
 export const loginService = async ({email, password} : LoginRequest) : Promise<AuthResponse> => {
@@ -16,13 +17,20 @@ export const loginService = async ({email, password} : LoginRequest) : Promise<A
         `SELECT * FROM users WHERE email = $1`,
         [email]
     );
-    
+
     const user = result.rows[0];
     if (!user) throw new AppError(AUTH_ERRORS.LOGIN_FAILED);
 
     const storedHash = user.password_hash;
     const isValid : boolean = await bcrypt.compare(password, storedHash);
     if (!isValid) throw new AppError(AUTH_ERRORS.LOGIN_FAILED);
+
+    // Se revisan DESPUÉS de validar la contraseña a propósito — así no
+    // se le confirma a un atacante que el email existe/está
+    // desactivado/eliminado antes de probar si conoce la contraseña
+    // real (mismo criterio que LOGIN_FAILED genérico de arriba).
+    if (user.is_deleted) throw new AppError(USER_ERRORS.USER_DELETED);
+    if (!user.active) throw new AppError(USER_ERRORS.USER_INACTIVE);
 
     const payload : AuthPayload = {
         role_id: user.role_id,
@@ -76,7 +84,7 @@ export const refreshSessionService = async (refreshToken: string) : Promise<Toke
     );
 
     const userQuery = await pool.query<AuthPayload>(
-        `SELECT user_id, role_id, email FROM users WHERE user_id = $1 AND active = true`,
+        `SELECT user_id, role_id, email FROM users WHERE user_id = $1 AND active = true AND is_deleted = false`,
         [decoded.user_id]
     );
     const user = userQuery.rows[0];

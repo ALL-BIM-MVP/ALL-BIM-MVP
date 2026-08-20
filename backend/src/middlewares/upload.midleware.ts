@@ -67,3 +67,17 @@ export const uploadCoverImage = multer({
   storage: publicCoverStorage,
   limits: { fileSize: MAX_FILE_SIZE_BYTES },
 }).single("file");
+
+// Foto de perfil — memoryStorage a propósito, no diskStorage: el
+// archivo SIEMPRE se reprocesa con sharp antes de guardarse en algún
+// lado (ver utils/avatar.ts, recorte a 256×256), así que nunca hace
+// falta tocar disco con el buffer crudo ni limpiar un temporal
+// después — se lee una vez en memoria, se transforma, se escribe la
+// versión final directo. Límite más chico que el general (200MB): es
+// una foto de perfil, no un archivo de proyecto.
+const AVATAR_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+export const uploadProfilePicture = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: AVATAR_MAX_UPLOAD_BYTES },
+}).single("file");

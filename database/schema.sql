@@ -18,9 +18,41 @@ CREATE TABLE roles (
 CREATE TABLE users (
     user_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name VARCHAR(60) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    -- Nullable a propósito: cuentas ya registradas antes de este campo
+    -- no tienen con qué llenarlo, y el registro no lo exige todavía.
+    last_name VARCHAR(80),
     email VARCHAR(256) UNIQUE NOT NULL,
     password_hash VARCHAR(256) NOT NULL,
+    -- Solo se llena si el usuario subió una foto propia — NULL = sin
+    -- foto, el frontend decide cómo mostrarlo (iniciales, ícono
+    -- genérico, etc.), no se genera ninguna imagen de reemplazo acá
+    -- (a diferencia de la portada de proyecto, que sí tiene un
+    -- default real porque una tarjeta de proyecto necesita mostrar
+    -- SIEMPRE alguna imagen).
+    profile_picture_path TEXT,
+
+    -- active: inhabilitar cuenta — REVERSIBLE, lo usa un administrador
+    -- ante sospecha de abuso (ej. demasiadas subidas, actividad rara).
+    -- No es lo mismo que is_deleted, ver abajo.
     active BOOLEAN DEFAULT TRUE,
+    deactivated_by INT REFERENCES users(user_id),
+    deactivated_at TIMESTAMPTZ,
+
+    -- is_deleted: baja de cuenta — soft-delete real, NO reversible
+    -- desde la API (aunque el dato técnicamente sigue en la fila). La
+    -- razón de tener las dos banderas separadas es justamente esa:
+    -- active sirve para suspender sin perder la posibilidad de
+    -- reactivar, is_deleted es la baja definitiva. Puede activarla el
+    -- propio usuario (autogestión) o un administrador. Deliberadamente
+    -- NO se borra la fila ni se tocan sus datos relacionados (archivos
+    -- subidos, membresías de proyecto, invitaciones enviadas/recibidas
+    -- siguen intactos, con sus FK apuntando a este mismo user_id) — la
+    -- única excepción es la foto de perfil, que si se borra de verdad
+    -- (archivo físico + esta misma columna a NULL).
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ,
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
     role_id INT NOT NULL REFERENCES roles(role_id)
 );

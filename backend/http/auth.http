@@ -101,6 +101,122 @@ Authorization: Bearer {{accessToken}}
 GET {{baseUrl}}/users
 Authorization: Bearer {{accessToken}}
 
+### Incluyendo cuentas eliminadas (is_deleted) — excluidas por defecto
+GET {{baseUrl}}/users?include_deleted=true
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### PERFIL DE USUARIO (Fase 1 — docs/roadmap-modulos-y-permisos.md)
+### =========================================================================
+
+### 1. Editar nombre/apellido propios (autogestión, al menos un campo)
+PATCH {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "last_name": "Cllanos Salvador"
+}
+
+### 1b. Caso de error: body vacío -> 400 (no hay nada que actualizar)
+PATCH {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{}
+
+
+### 2. Subir/reemplazar foto de perfil (multipart, campo "file") — se
+### recorta a 256×256 y siempre sobreescribe la misma ruta
+### (avatars/<userId>.jpg), no acumula versiones viejas. ⚠️ ajustá la
+### ruta del archivo de prueba a algo real en tu máquina.
+# @name setProfilePicture
+PUT {{baseUrl}}/users/me/photo
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="foto.jpg"
+Content-Type: image/jpeg
+
+< ./foto-de-prueba.jpg
+--WebAppBoundary--
+
+### La URL pública ya sirve sin token, directo en un <img src="...">
+@profilePictureUrl = {{setProfilePicture.response.body.profile_picture_url}}
+GET {{baseUrl}}{{profilePictureUrl}}
+
+
+### 3. Caso de error: subir algo que no es una imagen -> 400 INVALID_IMAGE_FILE
+PUT {{baseUrl}}/users/me/photo
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="no-es-imagen.txt"
+Content-Type: text/plain
+
+esto no es una imagen
+--WebAppBoundary--
+
+
+### 4. Borrar la foto de perfil (vuelve a profile_picture_url: null)
+DELETE {{baseUrl}}/users/me/photo
+Authorization: Bearer {{accessToken}}
+
+### 4b. Caso de error: borrar de nuevo sin foto propia -> 404 NO_PROFILE_PICTURE
+DELETE {{baseUrl}}/users/me/photo
+Authorization: Bearer {{accessToken}}
+
+
+### 5. Administración (SOLO ADMINISTRADOR, nunca sobre uno mismo) —
+### ⚠️ reemplazá el 2 por un user_id real que NO sea tu propia cuenta.
+### Desactivar (reversible)
+PATCH {{baseUrl}}/users/2/active
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "active": false
+}
+
+### Reactivar
+PATCH {{baseUrl}}/users/2/active
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "active": true
+}
+
+### Caso de error: un admin intentando desactivarse a SÍ MISMO -> 400 CANNOT_TARGET_SELF
+PATCH {{baseUrl}}/users/1/active
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "active": false
+}
+
+### Eliminar cuenta de otro usuario (is_deleted, NO reversible) —
+### ⚠️ después de correr esto, ese user_id queda eliminado de verdad.
+DELETE {{baseUrl}}/users/2
+Authorization: Bearer {{accessToken}}
+
+### Caso de error: un admin intentando eliminarse a SÍ MISMO por acá -> 400
+### (para eso está la request 6 de abajo, la de autogestión)
+DELETE {{baseUrl}}/users/1
+Authorization: Bearer {{accessToken}}
+
+
+### 6. Eliminar la PROPIA cuenta (autogestión, directa, sin estado de
+### suspensión previo por ahora) — ⚠️ después de correr esto,
+### {{accessToken}} deja de servir para cualquier otra request de este
+### archivo (la cuenta queda is_deleted=true).
+DELETE {{baseUrl}}/users/me
+Authorization: Bearer {{accessToken}}
+
 
 ###
 GET {{baseUrl}}/projects?scope=mine
@@ -715,5 +831,29 @@ Authorization: Bearer {{accessToken}}
 ### 10. Caso de error: borrar la plantilla del sistema -> 404 (nunca
 ### editable/borrable por acá, mismo criterio que el PUT de columnas)
 DELETE {{baseUrl}}/templates/6
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### MUESTRA DE ESTADO DE CANTIDAD DE ELEMENTOS (prototipo)
+### A nivel de PROYECTO (todos los archivos IFC ya procesados), no de un
+### solo archivo — ver comentario de cabecera en metrados-estado.models.ts.
+### "elemento conjunto" = <archivo>-<guid>-<tag>-<código>. Solo devuelve
+### los que tienen algún problema (repetido y/o algún componente vacío).
+### =========================================================================
+
+### 1. Estado de elementos del proyecto recién creado arriba
+GET {{baseUrl}}/projects/2/metrados/estado-elementos
+Authorization: Bearer {{accessToken}}
+
+
+### 2. Mismo endpoint, apuntando directo a un project_id conocido (ajustá
+### el número al de un proyecto real de tu BD con archivos ya procesados)
+GET {{baseUrl}}/projects/2/metrados/estado-elementos
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Caso de error: proyecto inexistente o sin acceso -> 404
+GET {{baseUrl}}/projects/999999/metrados/estado-elementos
 Authorization: Bearer {{accessToken}}
 
