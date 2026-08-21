@@ -15,6 +15,9 @@ export type InvitationRequest = z.infer<typeof InvitationSchema>;
 
 export const RegisterSchema = z.object({
     name: z.string(),
+    // Opcional a propósito: se agrega el campo (ver users.last_name)
+    // sin volver el registro más restrictivo de lo que ya era.
+    last_name: z.string().min(1).optional(),
     password: z.string(),
     token : z.uuid(),
 });

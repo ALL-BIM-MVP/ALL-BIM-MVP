@@ -1,131 +1,147 @@
 import pool from "../db/database.js";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { ProjectIdParam } from "../schemas/projects.schema.js";
-import type { ProjectMemberIdParam, ProjectMemberUserParam, UpdateProjectMemberRoleData } from "../schemas/project-members.schema.js";
+import type {
+    ProjectMemberIdParam, ProjectMemberModuleParam, ProjectMemberUserParam,
+    SetMemberAdminData, SetMemberModuleRoleData,
+} from "../schemas/project-members.schema.js";
 import {
-    transformMemberToFull, transformMemberToListItem, transformToCurrentUserProjectRole,
-    type CurrentUserProjectRole, type ProjectMemberFull, type ProjectMemberListItem, type ProjectMemberRow
+    transformMemberToListItem, type ProjectMemberListItem, type ProjectMemberRow,
 } from "../models/project-members.models.js";
+import { toProfilePictureUrl } from "../models/users.models.js";
 import { AppError } from "../models/errors/app-error.js";
+import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
 import { PROJECT_MEMBER_ERRORS } from "../models/errors/project-members.errors.js";
-import { PROJECT_INVITATION_ERRORS } from "../models/errors/project-invitations.errors.js";
+import { MODULE_ERRORS } from "../models/errors/modules.errors.js";
+import { assertProjectAccess, assertProjectAdmin } from "./project-access.service.js";
 
+// Cualquier miembro (u owner) puede LEER la lista — no es información
+// sensible, es común poder ver con quién trabajás en un proyecto.
+// Gestionar (admin/módulo/eliminar) sí sigue restringido, ver más abajo.
 export const getListProjectMembersService = async (
-    {user_id : ownerId} : DecodedToken, { projectId } : ProjectIdParam
+    { user_id : currentUserId } : DecodedToken, { projectId } : ProjectIdParam
 ) : Promise<ProjectMemberListItem[]> => {
 
-    const result = await pool.query<ProjectMemberListItem>(
-        `SELECT pm.project_member_id,
-            u.user_id, u.name AS user_name, u.email,
-            pr.project_role_id, pr.name AS project_role_name
-        FROM project_members pm
-        INNER JOIN projects p
-            USING(project_id)
-        INNER JOIN users u
-            USING(user_id)
-        INNER JOIN project_roles pr
-            USING(project_role_id)
-        WHERE pm.project_id = $1 AND p.owner_id = $2
-        ORDER BY pm.joined_at DESC`,
-        [projectId, ownerId]
-    );
+    await assertProjectAccess(projectId, currentUserId);
 
-    return result.rows.map( pm => transformMemberToListItem(pm));
-};
-
-// Rol del usuario autenticado dentro de un proyecto — dueño o miembro,
-// para que el frontend sepa qué puede hacer sin tener que adivinarlo
-// a partir del listado completo de miembros (que además es owner-only).
-export const getCurrentUserProjectRoleService = async (
-    { user_id : userId } : DecodedToken, { projectId } : ProjectIdParam
-) : Promise<CurrentUserProjectRole> => {
-
-    const result = await pool.query<{ is_owner : boolean; role_id : number | null; role_name : string | null }>(
-        `SELECT
-            (p.owner_id = $2) AS is_owner,
-            pr.project_role_id AS role_id,
-            pr.name AS role_name
+    const ownerResult = await pool.query<{
+        owner_id : number; user_name : string; user_last_name : string | null;
+        user_email : string; profile_picture_path : string | null; created_at : Date;
+    }>(
+        `SELECT p.owner_id, u.name AS user_name, u.last_name AS user_last_name,
+            u.email AS user_email, u.profile_picture_path, p.created_at
         FROM projects p
-        LEFT JOIN project_members pm
-            ON pm.project_id = p.project_id AND pm.user_id = $2
-        LEFT JOIN project_roles pr
-            ON pr.project_role_id = pm.project_role_id
-        WHERE p.project_id = $1
-            AND (p.owner_id = $2 OR pm.user_id = $2)
-        LIMIT 1`,
-        [projectId, userId]
+        INNER JOIN users u ON u.user_id = p.owner_id
+        WHERE p.project_id = $1`,
+        [projectId]
     );
+    const owner = ownerResult.rows[0];
+    if (!owner) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
 
-    const row = result.rows[0];
-
-    if (!row) throw new AppError(PROJECT_INVITATION_ERRORS.UNAUTHORIZED);
-
-    return transformToCurrentUserProjectRole(row);
-};
-
-export const updateProjectMemberRoleService = async (
-    {user_id : ownerId} : DecodedToken, { projectId, memberId } : ProjectMemberIdParam,
-    { project_role_id : projectRoleId } : UpdateProjectMemberRoleData
-) : Promise<ProjectMemberFull> => {
-
-    const roleCheck = await pool.query(
-        `SELECT 1 FROM project_roles
-            WHERE project_role_id = $1 AND (is_default = true OR created_by = $2)`,
-        [projectRoleId, ownerId]
-    );
-
-    if (roleCheck.rowCount === 0) throw new AppError(PROJECT_MEMBER_ERRORS.INVALID_ROLE);
-
-    const resultUpdate = await pool.query<{ project_member_id : number }>(
-        `UPDATE project_members pm
-            SET project_role_id = $1
-        FROM projects p
-        WHERE pm.project_member_id = $2
-            AND pm.project_id = $3
-            AND p.project_id = pm.project_id
-            AND p.owner_id = $4
-        RETURNING pm.project_member_id`,
-        [projectRoleId, memberId, projectId, ownerId]
-    );
-
-    const updated = resultUpdate.rows[0];
-
-    if (!updated) throw new AppError(PROJECT_MEMBER_ERRORS.NOT_FOUND);
-
-    const resultMember = await pool.query<ProjectMemberRow>(
+    const membersResult = await pool.query<ProjectMemberRow>(
         `SELECT pm.project_member_id, pm.joined_at, pm.project_id,
-            u.user_id, u.name AS user_name, u.email AS user_email,
-            pr.project_role_id, pr.name AS project_role_name
+            u.user_id, u.name AS user_name, u.last_name AS user_last_name,
+            u.email AS user_email, u.profile_picture_path, pm.is_admin,
+            COALESCE(
+                JSON_AGG(
+                    JSON_BUILD_OBJECT(
+                        'module_code', m.code, 'module_name', m.name,
+                        'module_role_id', mr.module_role_id, 'role_name', mr.name
+                    )
+                ) FILTER (WHERE mr.module_role_id IS NOT NULL),
+                '[]'
+            ) AS module_roles
         FROM project_members pm
-        INNER JOIN users u
-            USING(user_id)
-        INNER JOIN project_roles pr
-            USING(project_role_id)
-        WHERE pm.project_member_id = $1
-        LIMIT 1`,
-        [updated.project_member_id]
+        INNER JOIN users u USING(user_id)
+        LEFT JOIN project_member_module_roles pmmr ON pmmr.project_member_id = pm.project_member_id
+        LEFT JOIN module_roles mr ON mr.module_role_id = pmmr.module_role_id
+        LEFT JOIN modules m ON m.module_id = pmmr.module_id
+        WHERE pm.project_id = $1
+        GROUP BY pm.project_member_id, pm.joined_at, pm.project_id, u.user_id, u.name, u.last_name,
+            u.email, u.profile_picture_path, pm.is_admin
+        ORDER BY pm.joined_at DESC`,
+        [projectId]
     );
 
-    const pm = resultMember.rows[0];
+    const ownerRow : ProjectMemberListItem = {
+        project_member_id: null,
+        user_id: owner.owner_id,
+        user_name: owner.user_name,
+        user_last_name: owner.user_last_name,
+        email: owner.user_email,
+        profile_picture_url: toProfilePictureUrl(owner.profile_picture_path),
+        is_owner: true,
+        is_admin: true,
+        is_me: owner.owner_id === currentUserId,
+        joined_at: owner.created_at,
+        module_roles: [],
+    };
 
-    if (!pm) throw new AppError(PROJECT_MEMBER_ERRORS.NOT_FOUND);
-
-    return transformMemberToFull(pm);
+    return [ownerRow, ...membersResult.rows.map((row) => transformMemberToListItem(row, currentUserId))];
 };
 
-export const removeProjectMemberService = async (
-    {user_id : ownerId} : DecodedToken, { projectId, userId : memberUserId } : ProjectMemberUserParam
+// PATCH /:projectId/members/:memberId/admin — solo owner/admin.
+export const setMemberAdminService = async (
+    { user_id : actingUserId } : DecodedToken, { projectId, memberId } : ProjectMemberIdParam,
+    { is_admin } : SetMemberAdminData
 ) : Promise<void> => {
 
-    const result = await pool.query(
-        `DELETE FROM project_members pm
-        USING projects p
-        WHERE pm.project_id = p.project_id
-            AND pm.project_id = $1
-            AND pm.user_id = $2
-            AND p.owner_id = $3`,
-        [projectId, memberUserId, ownerId]
-    );
+    await assertProjectAdmin(projectId, actingUserId);
 
+    const result = await pool.query(
+        `UPDATE project_members SET is_admin = $1 WHERE project_member_id = $2 AND project_id = $3`,
+        [is_admin, memberId, projectId]
+    );
+    if (result.rowCount === 0) throw new AppError(PROJECT_MEMBER_ERRORS.NOT_FOUND);
+};
+
+// PUT /:projectId/members/:memberId/modules/:moduleCode/role — solo
+// owner/admin. Asigna (o reemplaza, ON CONFLICT) el module_role de ESE
+// miembro para ESE módulo — un miembro tiene como mucho un rol por
+// módulo (UNIQUE(project_member_id, module_id), ver schema.sql).
+export const setMemberModuleRoleService = async (
+    { user_id : actingUserId } : DecodedToken, { projectId, memberId, moduleCode } : ProjectMemberModuleParam,
+    { module_role_id : moduleRoleId } : SetMemberModuleRoleData
+) : Promise<void> => {
+
+    await assertProjectAdmin(projectId, actingUserId);
+
+    const memberCheck = await pool.query(
+        `SELECT 1 FROM project_members WHERE project_member_id = $1 AND project_id = $2`,
+        [memberId, projectId]
+    );
+    if (memberCheck.rowCount === 0) throw new AppError(PROJECT_MEMBER_ERRORS.NOT_FOUND);
+
+    const moduleResult = await pool.query<{ module_id : number }>(
+        `SELECT module_id FROM modules WHERE code = $1`, [moduleCode]
+    );
+    const moduleRow = moduleResult.rows[0];
+    if (!moduleRow) throw new AppError(MODULE_ERRORS.MODULE_NOT_FOUND);
+
+    const roleCheck = await pool.query(
+        `SELECT 1 FROM module_roles WHERE module_role_id = $1 AND module_id = $2`,
+        [moduleRoleId, moduleRow.module_id]
+    );
+    if (roleCheck.rowCount === 0) throw new AppError(PROJECT_MEMBER_ERRORS.INVALID_MODULE_ROLE);
+
+    await pool.query(
+        `INSERT INTO project_member_module_roles (project_member_id, module_id, module_role_id)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (project_member_id, module_id) DO UPDATE SET module_role_id = EXCLUDED.module_role_id`,
+        [memberId, moduleRow.module_id, moduleRoleId]
+    );
+};
+
+// DELETE /:projectId/members/:userId — solo owner/admin.
+export const removeProjectMemberService = async (
+    { user_id : actingUserId } : DecodedToken, { projectId, userId : memberUserId } : ProjectMemberUserParam
+) : Promise<void> => {
+
+    await assertProjectAdmin(projectId, actingUserId);
+
+    const result = await pool.query(
+        `DELETE FROM project_members WHERE project_id = $1 AND user_id = $2`,
+        [projectId, memberUserId]
+    );
     if (result.rowCount === 0) throw new AppError(PROJECT_MEMBER_ERRORS.NOT_FOUND);
 };

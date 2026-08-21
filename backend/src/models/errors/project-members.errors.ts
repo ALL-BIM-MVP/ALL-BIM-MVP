@@ -6,14 +6,21 @@ export const PROJECT_MEMBER_ERRORS = {
         statusCode: 404,
         response: {
             code: "PROJECT_MEMBER_NOT_FOUND",
-            message: "El miembro solicitado no existe, no pertenece a este proyecto o no tienes permiso para gestionarlo."
+            message: "El miembro solicitado no existe o no pertenece a este proyecto."
         }
     },
-    INVALID_ROLE: {
+    INVALID_MODULE_ROLE: {
         statusCode: 400,
         response: {
-            code: "PROJECT_MEMBER_INVALID_ROLE",
-            message: "El rol de proyecto especificado no existe o no está disponible para asignarlo."
+            code: "PROJECT_MEMBER_INVALID_MODULE_ROLE",
+            message: "El rol de módulo especificado no existe o no pertenece a ese módulo."
+        }
+    },
+    CANNOT_TARGET_OWNER: {
+        statusCode: 400,
+        response: {
+            code: "PROJECT_MEMBER_CANNOT_TARGET_OWNER",
+            message: "El propietario del proyecto no se gestiona como un miembro más."
         }
     }
 } satisfies Record<string, ErrorFormat>;

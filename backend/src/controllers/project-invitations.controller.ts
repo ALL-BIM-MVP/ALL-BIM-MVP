@@ -106,7 +106,7 @@ export const getUsersSuggestionForInvitationToProjectController = asyncHandler (
             throw new AppError(COMMON_ERRORS.INVALID_QUERY_PARAMETER);
         }
 
-        const suggestions = await getUsersSuggestionForInvitationToProjectService(queryBody.data,projectParam.data);
+        const suggestions = await getUsersSuggestionForInvitationToProjectService(req.user, queryBody.data, projectParam.data);
         
         res.status(200).json(suggestions);
 });

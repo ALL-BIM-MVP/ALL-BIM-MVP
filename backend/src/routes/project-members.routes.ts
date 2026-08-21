@@ -1,29 +1,19 @@
 import { Router } from 'express';
-import { requireAuth, requireRolePrivileges } from '../middlewares/auth.middleware.js';
+import { requireAuth } from '../middlewares/auth.middleware.js';
 import {
-    getCurrentUserProjectRoleController, getListProjectMembersController,
-    removeProjectMemberController, updateProjectMemberRoleController
+    getListProjectMembersController, removeProjectMemberController,
+    setMemberAdminController, setMemberModuleRoleController,
 } from '../controllers/project-members.controller.js';
-import { ROLES } from '../constants/roles.js';
 
 const router = Router();
 
-router.get('/:projectId/members', requireAuth,
-    requireRolePrivileges(ROLES.ADMINISTRADOR, ROLES.MODERADOR, ROLES.SUPERVISOR),
-    getListProjectMembersController);
+// Cualquier miembro (u owner) puede leer la lista — el chequeo real
+// (owner-o-miembro) vive en el service (assertProjectAccess), no acá.
+router.get('/:projectId/members', requireAuth, getListProjectMembersController);
 
-// Sin requireRolePrivileges a propósito: cualquier usuario autenticado
-// (dueño o miembro, cualquier rol) necesita poder consultar su PROPIO
-// rol en el proyecto — a diferencia del listado de arriba, que sí es
-// solo para quien gestiona el proyecto.
-router.get('/:projectId/user-role', requireAuth, getCurrentUserProjectRoleController);
-
-router.patch('/:projectId/members/:memberId', requireAuth,
-    requireRolePrivileges(ROLES.ADMINISTRADOR, ROLES.MODERADOR, ROLES.SUPERVISOR),
-    updateProjectMemberRoleController);
-
-router.delete('/:projectId/members/:userId', requireAuth,
-    requireRolePrivileges(ROLES.ADMINISTRADOR, ROLES.MODERADOR, ROLES.SUPERVISOR),
-    removeProjectMemberController);
+// Gestión — solo owner/admin (assertProjectAdmin en el service).
+router.patch('/:projectId/members/:memberId/admin', requireAuth, setMemberAdminController);
+router.put('/:projectId/members/:memberId/modules/:moduleCode/role', requireAuth, setMemberModuleRoleController);
+router.delete('/:projectId/members/:userId', requireAuth, removeProjectMemberController);
 
 export default router;

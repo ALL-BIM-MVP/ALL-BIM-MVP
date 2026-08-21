@@ -149,7 +149,7 @@ export const getPartidaElementsService = async (
 
     const result = await pool.query<PartidaElementRow>(
         `SELECT e.element_id, e.express_id, e.name, e.level_name, e.space_name, e.tag,
-            me.length, me.run_length, me.width, me.height, me.quantity, me.area, me.volume, me.weight
+            me.length, me.run_length, me.width, me.height, me.diameter, me.quantity, me.area, me.volume, me.weight
         FROM metrado_elements me
         JOIN ifc_elements e ON e.element_id = me.element_id
         WHERE me.partida_id = $1
@@ -166,7 +166,7 @@ export const getPartidaElementsService = async (
     const groupBy = body.group_by && body.group_by.length > 0 ? body.group_by : GROUP_BY_FIELDS;
     const groups = groupPartidaElements(result.rows, groupBy, partida.unit, propertyValuesByElement, propertyKeys);
 
-    const total = groups.reduce((acc, g) => acc + g.sub_total, 0);
-
-    return { partida_id: partidaId, unit: partida.unit, total, resolved_properties: resolvedProperties, groups };
+    // Ya no se devuelve "total" acá (ver comentario en PartidaElementsDetail)
+    // — ese valor ya lo trae PartidaTreeNode.total desde el árbol.
+    return { partida_id: partidaId, unit: partida.unit, resolved_properties: resolvedProperties, groups };
 };

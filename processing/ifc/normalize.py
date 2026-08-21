@@ -140,11 +140,35 @@ def normalizar(elementos, norma_index, schema_version):
             "run_length": met["lon"],
             "width": dims.get("Ancho"),
             "height": dims.get("Alto"),
+            # Solo para elementos de sección circular (tubos, ver
+            # extraction.extraer_dimensiones_circulares) — null para
+            # todo lo demás. width/height quedan null ahí a propósito:
+            # una sección circular no tiene un ancho/alto distinto del
+            # diámetro, reportarlo dos veces con nombres que no le
+            # corresponden a la figura sería confuso, no más completo.
+            "diameter": dims.get("Diametro"),
             "quantity": met["count"],
             "area": met["area"],
             "volume": met["vol"],
             "weight": met["weight"],
         })
+
+    # _registrar_ancestros_norma le pone unidad a CUALQUIER ancestro que
+    # sea tipo='partida' en la norma, sin saber todavía si ese código
+    # terminará teniendo elementos propios o si TODO lo que cayó ahí en
+    # realidad fue más profundo (un sub-nivel, ej. un elemento
+    # clasificado como OE.3.4.3.3 cuando la norma solo define hasta
+    # OE.3.4.3) — confirmado con datos reales: OE.3.4.3 quedaba con
+    # unit='m2' y 0 elementos propios, con toda su "masa" real en su
+    # hijo OE.3.4.3.3. Pasada final: cualquier partida con unidad pero
+    # sin NINGÚN elemento directo (todo lo suyo se fue a un hijo) se
+    # degrada a carpeta (unit=None) — no pierde información, la unidad
+    # ya quedó heredada en el hijo (ver classify.py, unidad_norma se
+    # hereda del ancestro cuando no hay match exacto).
+    codigos_con_elementos = {e["partida_code"] for e in metrado_elements}
+    for p in partidas.values():
+        if p["unit"] is not None and p["code"] not in codigos_con_elementos:
+            p["unit"] = None
 
     definitions = [{"property_set": d[0], "property_name": d[1]} for d in property_definitions]
     values = [{"property_set": v[0], "property_name": v[1], "value": v[2]} for v in property_values]

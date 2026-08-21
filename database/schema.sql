@@ -5,6 +5,9 @@
 
 CREATE TABLE modules(
     module_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Clave estable para rutas/referencias ("metrados", no "METRADOS
+    -- BIM") — mismo criterio code/label_default que builtin_field_catalog.
+    code VARCHAR(40) UNIQUE NOT NULL,
     name VARCHAR(80) NOT NULL,
     is_active BOOLEAN NOT NULL
 );
@@ -18,9 +21,41 @@ CREATE TABLE roles (
 CREATE TABLE users (
     user_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name VARCHAR(60) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    -- Nullable a propósito: cuentas ya registradas antes de este campo
+    -- no tienen con qué llenarlo, y el registro no lo exige todavía.
+    last_name VARCHAR(80),
     email VARCHAR(256) UNIQUE NOT NULL,
     password_hash VARCHAR(256) NOT NULL,
+    -- Solo se llena si el usuario subió una foto propia — NULL = sin
+    -- foto, el frontend decide cómo mostrarlo (iniciales, ícono
+    -- genérico, etc.), no se genera ninguna imagen de reemplazo acá
+    -- (a diferencia de la portada de proyecto, que sí tiene un
+    -- default real porque una tarjeta de proyecto necesita mostrar
+    -- SIEMPRE alguna imagen).
+    profile_picture_path TEXT,
+
+    -- active: inhabilitar cuenta — REVERSIBLE, lo usa un administrador
+    -- ante sospecha de abuso (ej. demasiadas subidas, actividad rara).
+    -- No es lo mismo que is_deleted, ver abajo.
     active BOOLEAN DEFAULT TRUE,
+    deactivated_by INT REFERENCES users(user_id),
+    deactivated_at TIMESTAMPTZ,
+
+    -- is_deleted: baja de cuenta — soft-delete real, NO reversible
+    -- desde la API (aunque el dato técnicamente sigue en la fila). La
+    -- razón de tener las dos banderas separadas es justamente esa:
+    -- active sirve para suspender sin perder la posibilidad de
+    -- reactivar, is_deleted es la baja definitiva. Puede activarla el
+    -- propio usuario (autogestión) o un administrador. Deliberadamente
+    -- NO se borra la fila ni se tocan sus datos relacionados (archivos
+    -- subidos, membresías de proyecto, invitaciones enviadas/recibidas
+    -- siguen intactos, con sus FK apuntando a este mismo user_id) — la
+    -- única excepción es la foto de perfil, que si se borra de verdad
+    -- (archivo físico + esta misma columna a NULL).
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+    deleted_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ,
+
     created_at TIMESTAMPTZ DEFAULT NOW(),
     role_id INT NOT NULL REFERENCES roles(role_id)
 );
@@ -58,21 +93,73 @@ CREATE TABLE projects (
     created_by INT NOT NULL REFERENCES users(user_id)
 );
 
-CREATE TABLE project_roles(
-    project_role_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    name VARCHAR(60) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
-    is_default BOOLEAN NOT NULL DEFAULT FALSE,
-    created_by INT DEFAULT NULL REFERENCES users(user_id),
-    UNIQUE(created_by, name)
+-- ------------------------------------------------------------
+-- MÓDULOS + ROLES/PERMISOS POR MÓDULO (Fase 2, ver
+-- docs/roadmap-modulos-y-permisos.md) — reemplaza project_roles
+-- (rol de proyecto con nombre libre, sin tabla de permisos detrás).
+-- Dos niveles, no uno: administración del proyecto (owner implícito +
+-- project_members.is_admin, ambos con acceso total, SIN pasar por
+-- estas tablas — ver comentario en project_members más abajo) y
+-- trabajo dentro de un módulo puntual (esto de acá, granular, solo
+-- aplica a quien no es owner ni admin).
+-- ------------------------------------------------------------
+
+CREATE TABLE module_permissions (
+    module_permission_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Vocabulario ÚNICO, reusado entre TODOS los módulos (no un
+    -- catálogo distinto por módulo) — view/upload/process/delete son
+    -- reales hoy (Metrados), export/configure quedan reservados para
+    -- las Fases 4/5 pero ya con su código sembrado, para no tener que
+    -- migrar de nuevo cuando lleguen.
+    code VARCHAR(40) UNIQUE NOT NULL,
+    label_default VARCHAR(60) NOT NULL
+);
+
+CREATE TABLE module_roles (
+    module_role_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    module_id INT NOT NULL REFERENCES modules(module_id) ON DELETE CASCADE,
+    name VARCHAR(60) NOT NULL,
+    -- Frase corta para el tooltip "¿qué significa este rol?" del
+    -- frontend — dato de catálogo, no texto fijo del lado cliente
+    -- (así nunca queda desactualizada si cambian los permisos reales).
+    description TEXT,
+    UNIQUE(module_id, name)
+);
+
+CREATE TABLE module_role_permissions (
+    module_role_id INT NOT NULL REFERENCES module_roles(module_role_id) ON DELETE CASCADE,
+    module_permission_id INT NOT NULL REFERENCES module_permissions(module_permission_id) ON DELETE CASCADE,
+    PRIMARY KEY (module_role_id, module_permission_id)
 );
 
 CREATE TABLE project_members(
     project_member_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     user_id INT NOT NULL REFERENCES users(user_id),
-    project_role_id INT NOT NULL REFERENCES project_roles(project_role_id),
+    -- is_admin = acceso TOTAL a todos los módulos del proyecto, sin
+    -- necesidad de fila en project_member_module_roles — es un bypass
+    -- de código (ver services/project-access.service.ts), no una
+    -- asignación implícita del rol "Administrador" en cada módulo:
+    -- así un permiso nuevo que se agregue el día de mañana lo tiene
+    -- automático, sin tener que acordarse de sembrarlo para este rol
+    -- en los 6 módulos. El owner (projects.owner_id) tiene el mismo
+    -- acceso total sin necesitar siquiera una fila acá.
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
     joined_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(project_id,user_id)
+);
+
+-- Rol de módulo de un miembro que NO es owner ni admin — si un
+-- miembro no tiene fila acá para un módulo dado, el mínimo por
+-- defecto es "puede ver, sin cambiar nada" en TODOS los módulos (ver
+-- resolveModuleAccess) — nunca "sin acceso a nada", esa restricción
+-- más dura queda para el futuro (ver roadmap, Fase 2).
+CREATE TABLE project_member_module_roles (
+    project_member_module_role_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_member_id INT NOT NULL REFERENCES project_members(project_member_id) ON DELETE CASCADE,
+    module_id INT NOT NULL REFERENCES modules(module_id) ON DELETE CASCADE,
+    module_role_id INT NOT NULL REFERENCES module_roles(module_role_id),
+    UNIQUE(project_member_id, module_id)
 );
 
 CREATE TABLE project_invitations(
@@ -83,8 +170,21 @@ CREATE TABLE project_invitations(
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '3 days',
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    project_role_id INT NOT NULL REFERENCES project_roles(project_role_id),
+    -- Mismo criterio que project_members.is_admin — si es admin, no
+    -- hace falta ninguna fila en project_invitation_module_roles.
+    is_admin BOOLEAN NOT NULL DEFAULT FALSE,
     invited_by INT NOT NULL REFERENCES users(user_id)
+);
+
+-- Espejo de project_member_module_roles, pero sobre la invitación
+-- (todavía no existe el project_member) — se copia 1:1 a
+-- project_member_module_roles recién cuando se acepta (ver
+-- updateStatusInvitationService).
+CREATE TABLE project_invitation_module_roles (
+    invitation_id INT NOT NULL REFERENCES project_invitations(invitation_id) ON DELETE CASCADE,
+    module_id INT NOT NULL REFERENCES modules(module_id) ON DELETE CASCADE,
+    module_role_id INT NOT NULL REFERENCES module_roles(module_role_id),
+    PRIMARY KEY (invitation_id, module_id)
 );
 
 
@@ -192,6 +292,13 @@ CREATE TABLE metrado_elements (
     -- de "length" de arriba.
     run_length NUMERIC(18,6),
 
+    -- Solo para elementos de perfil circular (tubos — ver
+    -- processing/ifc/geometria_proyeccion.py, extraer_dimensiones_circulares).
+    -- NULL para todo lo demás. width/height quedan NULL a propósito en
+    -- esos elementos: una sección circular no tiene un ancho/alto
+    -- distinto del diámetro.
+    diameter NUMERIC(18,6),
+
     quantity NUMERIC(18,6),
 
     area NUMERIC(18,6),
@@ -267,7 +374,7 @@ CREATE TABLE builtin_field_catalog (
     data_type        VARCHAR(20) NOT NULL CHECK (data_type IN ('text','numeric','integer')),
     is_aggregate     BOOLEAN NOT NULL DEFAULT FALSE,
     applies_to_group VARCHAR(20) NOT NULL CHECK (
-        applies_to_group IN ('identificacion','dimensiones','metrado','totales')
+        applies_to_group IN ('identificacion','dimensiones','cantidad','metrado','totales')
     ),
     sort_order       INT NOT NULL DEFAULT 0
 );

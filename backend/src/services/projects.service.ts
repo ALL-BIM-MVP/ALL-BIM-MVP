@@ -21,7 +21,7 @@ export const getListProjectService = async (
         `SELECT
             p.project_id, p.name, p.description, p.location, p.client, p.contractor,
             p.start_date, p.end_date, p.created_at,
-            u.user_id, u.name AS user_name, u.role_id,
+            u.user_id, u.name AS user_name, u.last_name AS user_last_name, u.role_id,
             f.file_id AS image_file_id, f.file_path AS image_path,
             f.name AS image_name, f.mime_type AS image_mime_type
         FROM projects p
@@ -47,7 +47,7 @@ export const getProjectByIdService = async (
         `SELECT
             p.project_id, p.name, p.description, p.location, p.client, p.contractor,
             p.start_date, p.end_date, p.created_at,
-            u.user_id, u.name AS user_name, u.role_id,
+            u.user_id, u.name AS user_name, u.last_name AS user_last_name, u.role_id,
             f.file_id AS image_file_id, f.file_path AS image_path,
             f.name AS image_name, f.mime_type AS image_mime_type
         FROM projects p
@@ -87,6 +87,7 @@ export const createProjectService = async (
             project_id, name, description, location, client, contractor, start_date, end_date, created_at,
             owner_id AS user_id,
             (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
+            (SELECT last_name FROM users WHERE user_id = owner_id) AS user_last_name,
             (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
         [data.name, data.description, data.location, data.client, data.contractor, data.start_date, data.end_date, userId]
     );
@@ -124,6 +125,7 @@ export const updateProjectService = async(
             project_id, name, description, location, client, contractor, start_date, end_date, created_at,
             owner_id AS user_id,
             (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
+            (SELECT last_name FROM users WHERE user_id = owner_id) AS user_last_name,
             (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
         [...params, projectId, userId]
     );

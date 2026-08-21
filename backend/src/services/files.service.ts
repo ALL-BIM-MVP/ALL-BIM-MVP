@@ -95,6 +95,7 @@ export const saveFileService = async (
                 NULL AS ifc_status, NULL AS ifc_error_message,
                 uploaded_by AS user_id,
                 (SELECT name FROM users WHERE user_id = uploaded_by) AS user_name,
+                (SELECT last_name FROM users WHERE user_id = uploaded_by) AS user_last_name,
                 (SELECT email FROM users WHERE user_id = uploaded_by) AS user_email`,
             [projectId, fileType, multerFile.originalname, multerFile.path, multerFile.size, checksum, multerFile.mimetype, uploadedBy, thumbnailPath]
         );
@@ -122,7 +123,7 @@ export const getProjectFilesService = async (
             f.file_id, f.project_id, f.file_type, f.name, f.file_size, f.checksum, f.mime_type, f.uploaded_at,
             f.thumbnail_path,
             i.status AS ifc_status, i.error_message AS ifc_error_message,
-            u.user_id, u.name AS user_name, u.email AS user_email
+            u.user_id, u.name AS user_name, u.last_name AS user_last_name, u.email AS user_email
         FROM files f
         LEFT JOIN ifc_files i ON i.ifc_file_id = f.file_id
         INNER JOIN users u ON u.user_id = f.uploaded_by

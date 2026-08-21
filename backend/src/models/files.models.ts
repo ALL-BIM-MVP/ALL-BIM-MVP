@@ -2,9 +2,13 @@ import type { FileType } from "../schemas/file.schema.js";
 import type { IfcProcessingStatus } from "./ifc-files.models.js";
 import { buildSignedFileUrl } from "../utils/file-signing.js";
 
+// Sin imagen a propósito — es atribución (quién subió el archivo), no
+// una vitrina de la persona (ver docs/roadmap-modulos-y-permisos.md,
+// Fase 1).
 interface FileUploader {
     user_id : number;
     user_name : string;
+    user_last_name : string | null;
     user_email : string;
 };
 
@@ -45,6 +49,7 @@ export interface FileBase {
 export interface FileRow extends Omit<FileBase, "thumbnail_url"> {
     user_id : number;
     user_name : string;
+    user_last_name : string | null;
     user_email : string;
     thumbnail_path : string | null;
 };
@@ -69,6 +74,7 @@ export const transformFileToFull = (f : FileRow) : FileFull => {
         uploaded_by: {
             user_id: f.user_id,
             user_name: f.user_name,
+            user_last_name: f.user_last_name,
             user_email: f.user_email
         }
     };

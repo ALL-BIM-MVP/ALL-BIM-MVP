@@ -25,29 +25,75 @@ def _procesar_huecos_descuento(el, dims):
     """Área/volumen que hay que restarle al elemento por sus vanos
     (puertas/ventanas empotradas en un muro, por ejemplo). Devuelve
     (area_huecos, volumen_huecos), (0.0, 0.0) si no tiene o no se
-    pudieron medir."""
+    pudieron medir.
+
+    Bug real encontrado con datos (no solo de ordenamiento de ejes,
+    conceptual): un IfcOpeningElement se modela con una extrusión a
+    propósito MÁS PROFUNDA que el espesor real de cualquier capa
+    individual del muro (para garantizar que el vano atraviese TODAS
+    las capas de un muro compuesto de una sola vez) — confirmado con un
+    vano real: profundidad de extrusión 3.048m para una puerta de
+    0.8×2.15m. extraer_dimensiones_parametricas() SIEMPRE devuelve esa
+    profundidad como "Largo" (nunca una dimensión de la cara — ver su
+    propio código: depth->Largo, profile.XDim->Ancho, profile.YDim->Alto,
+    estructuralmente, no por casualidad), así que:
+      - El ÁREA real del vano es Ancho×Alto (el perfil, XDim×YDim) — NO
+        depende de reordenar por eje Z, el producto da lo mismo sea
+        cual sea la orientación real.
+      - El VOLUMEN a descontar NO debe salir de multiplicar por la
+        profundidad propia del vano (eso daría el volumen del vano
+        completo, atravesando capas que no son ESTA capa) — tiene que
+        ser área_vano × espesor de ESTE elemento (dims["Ancho"], ya
+        resuelto por obtener_dimensiones/geometria_proyeccion antes de
+        llegar acá). Con el bug: un vano normal en un muro de
+        tarrajeo de 1cm terminaba descontando ~17 m³ (la profundidad
+        completa del vano) de un muro que en total mide ~0.11 m³ —
+        alcanzaba de sobra para anular el metrado entero."""
     openings = get_openings(el)
     if not openings:
         return 0.0, 0.0
+    espesor_el = dims.get("Ancho") or 0.0
     area_total = 0.0
     vol_total = 0.0
     for opening in openings:
-        dims_op = extraer_dimensiones_parametricas(opening) or extraer_dimensiones_por_aristas(opening)
-        if dims_op and dims_op.get("Largo") and dims_op.get("Ancho") and dims_op.get("Alto"):
-            area_total += dims_op["Largo"] * dims_op["Alto"]
-            vol_total += dims_op["Largo"] * dims_op["Ancho"] * dims_op["Alto"]
+        dims_op = extraer_dimensiones_parametricas(opening)
+        if dims_op and dims_op.get("Ancho") and dims_op.get("Alto"):
+            area_opening = dims_op["Ancho"] * dims_op["Alto"]
+        else:
+            dims_edges = extraer_dimensiones_por_aristas(opening)
+            area_opening = dims_edges["Largo"] * dims_edges["Alto"] if dims_edges else None
+        if area_opening:
+            area_total += area_opening
+            vol_total += area_opening * espesor_el
     return area_total, vol_total
 
 
 def _aplicar_descuento_huecos(metrados, el, dims, unidad):
+    """Resta el área/volumen de los vanos SOLO del campo que todavía no
+    los tiene descontados. metrados_final marca cada campo con
+    _area_neta_huecos/_vol_neta_huecos=True cuando salió de la malla
+    real (obtener_dimensiones -> _area_geom/_vol_geom) — IfcOpenShell
+    ya resuelve los IfcRelVoidsElement al triangular el sólido por
+    default, así que ESE valor ya viene sin el material de los vanos.
+    Restar acá de nuevo sobre un valor así sería descontar el mismo
+    vano dos veces — confirmado con datos reales: muro 2045 de
+    desenlazado.ifc, 2 ventanas, volumen de malla ya neto = 1.30 m³;
+    con el descuento de acá aplicado igual (bug, antes de esta
+    bandera) bajaba a 0.74 m³, un ~43% de más. Cuando el campo NO es
+    neto (vino de la fórmula por clase de calcular_metrados, o de
+    Revit tipado/texto — sobre esos dos no hay evidencia de que ya
+    vengan netos, se mantiene el descuento como siempre) esta resta
+    sigue siendo necesaria."""
     if unidad not in ("m2", "m3"):
         return metrados
     area_huecos, vol_huecos = _procesar_huecos_descuento(el, dims)
     if area_huecos == 0.0 and vol_huecos == 0.0:
         return metrados
     metrados = dict(metrados)
-    metrados["area"] = max(0.0, metrados["area"] - area_huecos)
-    metrados["vol"] = max(0.0, metrados["vol"] - vol_huecos)
+    if not metrados.get("_area_neta_huecos"):
+        metrados["area"] = max(0.0, metrados["area"] - area_huecos)
+    if not metrados.get("_vol_neta_huecos"):
+        metrados["vol"] = max(0.0, metrados["vol"] - vol_huecos)
     return metrados
 
 
@@ -101,10 +147,11 @@ def clasificar_elementos(model, norma_index, hijos):
         dims = obtener_dimensiones(el, psets)
 
         revit_data = extraer_metrados_revit_completo(el)
-        metrados_revit = revit_data["metrados_revit"]
+        metrados_tipados = revit_data["metrados_tipados"]
+        metrados_texto = revit_data["metrados_texto"]
         propiedades = revit_data["propiedades"]
 
-        metrados = calcular_metrados_final(el, dims, metrados_revit)
+        metrados = calcular_metrados_final(el, dims, metrados_tipados, metrados_texto)
         storey, space = get_storey_and_space(el, model)
 
         # --- Sin especialidad activa (n1 fuera de ESPECIALIDADES_ACTIVAS) ---
@@ -225,7 +272,7 @@ def reasignar_sin_clasificacion(elementos_sin_clasificacion, elementos_clasifica
         psets = ifcopenshell.util.element.get_psets(el_ifc)
         dims = obtener_dimensiones(el_ifc, psets)
         revit_data = extraer_metrados_revit_completo(el_ifc)
-        metrados = calcular_metrados_final(el_ifc, dims, revit_data["metrados_revit"])
+        metrados = calcular_metrados_final(el_ifc, dims, revit_data["metrados_tipados"], revit_data["metrados_texto"])
         unidad = datos["unidad"] or inferir_unidad(dims)
         metrados = _aplicar_descuento_huecos(metrados, el_ifc, dims, unidad)
         storey, space = get_storey_and_space(el_ifc, model)

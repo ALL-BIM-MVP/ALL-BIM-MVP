@@ -1,21 +1,51 @@
 import pool from "../db/database.js";
+import type { PoolClient } from "pg";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { ProjectIdParam } from "../schemas/projects.schema.js";
-import { transformInvitationForUser, transformInvitationToInfoFull, type EssentialData, type ProjectInvitationForUser, type ProjectInvitationForUserRow, type ProjectInvitationFull, type ProjectInvitationRow } from "../models/project-invitations.models.js";
-import type { InviteToProjectData, MeInvitationsQuery, ProjectInvitationParams, RespondToTheInvitation, SearchUserQuery, updateStatusData } from "../schemas/project-invitations.schema.js";
+import {
+    transformInvitationForUser, transformInvitationToInfoFull,
+    type EssentialData, type ProjectInvitationForUser, type ProjectInvitationForUserRow,
+    type ProjectInvitationFull, type ProjectInvitationRow,
+} from "../models/project-invitations.models.js";
+import type {
+    InviteToProjectData, MeInvitationsQuery, ProjectInvitationParams,
+    RespondToTheInvitation, SearchUserQuery, updateStatusData,
+} from "../schemas/project-invitations.schema.js";
 import { AppError } from "../models/errors/app-error.js";
 import { PROJECT_INVITATION_ERRORS } from "../models/errors/project-invitations.errors.js";
+import { MODULE_ERRORS } from "../models/errors/modules.errors.js";
 import type { UserSuggestion } from "../models/users.models.js";
+import { toProfilePictureUrl } from "../models/users.models.js";
+import { assertProjectAdmin } from "./project-access.service.js";
 
+// JSON_AGG de project_invitation_module_roles, reusado en las 3
+// queries que devuelven una invitación completa.
+const MODULE_ROLES_SUBQUERY = `
+    COALESCE(
+        (SELECT JSON_AGG(
+            JSON_BUILD_OBJECT(
+                'module_code', m.code, 'module_name', m.name,
+                'module_role_id', mr.module_role_id, 'role_name', mr.name
+            )
+        )
+        FROM project_invitation_module_roles pimr
+        INNER JOIN module_roles mr USING(module_role_id)
+        INNER JOIN modules m ON m.module_id = pimr.module_id
+        WHERE pimr.invitation_id = pi.invitation_id),
+        '[]'
+    ) AS module_roles`;
 
 export const getListInvitationsOfProjectService= async (
     {user_id : userId} : DecodedToken, { projectId } : ProjectIdParam
 ) : Promise<ProjectInvitationFull[]> => {
 
+    await assertProjectAdmin(projectId, userId);
+
     const result = await pool.query<ProjectInvitationRow>(
         `SELECT pi.invitation_id, pi.email, pi.responded_at, pi.created_at, pi.expires_at, pi.project_id,
-            u.user_id AS host_id, u.name AS host_name, u.email AS host_email,
-            pr.project_role_id, pr.name AS project_role_name,
+            pi.is_admin,
+            u.user_id AS host_id, u.name AS host_name, u.last_name AS host_last_name, u.email AS host_email,
+            ${MODULE_ROLES_SUBQUERY},
             CASE
                 WHEN pi.status = 'pendiente'
                     AND pi.expires_at < NOW()
@@ -23,15 +53,11 @@ export const getListInvitationsOfProjectService= async (
                 ELSE pi.status
             END AS status
         FROM project_invitations pi
-        LEFT JOIN projects p 
-            USING(project_id)
         LEFT JOIN users u
             ON u.user_id = pi.invited_by
-        LEFT JOIN project_roles pr
-            USING(project_role_id) 
-        WHERE pi.project_id = $1 AND p.owner_id = $2
+        WHERE pi.project_id = $1
         ORDER BY pi.created_at DESC`,
-        [projectId, userId]
+        [projectId]
     );
 
     return result.rows.map( pi => transformInvitationToInfoFull(pi));
@@ -39,61 +65,99 @@ export const getListInvitationsOfProjectService= async (
 
 export const createInvitationToProjectService = async (
     {user_id : ownerId} : DecodedToken, { projectId } : ProjectIdParam,
-    { email, project_role_id : projectRoleId } : InviteToProjectData
+    { email, is_admin : isAdmin, module_roles : moduleRoles } : InviteToProjectData
 ) : Promise<ProjectInvitationFull> => {
+
+    await assertProjectAdmin(projectId, ownerId);
 
     const validationResult = await pool.query(
         `SELECT 1 FROM projects p
         INNER JOIN users u
             ON u.user_id = p.owner_id
-        WHERE p.project_id = $1 AND p.owner_id = $2 AND u.email != $3
+        WHERE p.project_id = $1 AND u.email != $2
             AND NOT EXISTS (
                 SELECT 1 FROM project_members pm
                 INNER JOIN users uu USING(user_id)
-                WHERE pm.project_id = p.project_id AND uu.email = $3
+                WHERE pm.project_id = p.project_id AND uu.email = $2
             )
             AND NOT EXISTS (
                 SELECT 1 FROM project_invitations pi
                 WHERE pi.project_id = p.project_id
-                    AND pi.email = $3
+                    AND pi.email = $2
                     AND pi.status = 'pendiente'
                     AND pi.expires_at > NOW()
             )`,
-        [projectId, ownerId, email]
+        [projectId, email]
     );
 
     if (validationResult.rowCount === 0) throw new AppError(PROJECT_INVITATION_ERRORS.INVALID_INVITATION_REQUEST);
 
     const userResult = await pool.query<{user_id : number}>(
-        `SELECT user_id FROM users WHERE email = $1`, 
+        `SELECT user_id FROM users WHERE email = $1`,
         [email]
     );
     const inviteeUserId = userResult.rows[0]?.user_id ?? null;
 
-    if (!inviteeUserId) throw new AppError(PROJECT_INVITATION_ERRORS.USER_NOT_FOUND_IN_APP); 
+    if (!inviteeUserId) throw new AppError(PROJECT_INVITATION_ERRORS.USER_NOT_FOUND_IN_APP);
 
-    const resultCreate = await pool.query<{invitation_id : number}>(
-        `INSERT INTO 
-            project_invitations(email, project_id, project_role_id, invited_by)
-        VALUES ($1, $2, $3, $4)
-        RETURNING invitation_id`,
-        [email, projectId, projectRoleId, ownerId]
-    );
-    const invitationId = resultCreate.rows[0]?.invitation_id
+    // Valida cada (module_code, module_role_id) contra el catálogo real
+    // ANTES de insertar nada — evita dejar una invitación a medio
+    // armar si el frontend manda una combinación que no existe.
+    const resolvedModuleRoles : Array<{ moduleId : number; moduleRoleId : number }> = [];
+    for (const { module_code : moduleCode, module_role_id : moduleRoleId } of moduleRoles) {
+        const moduleResult = await pool.query<{ module_id : number }>(
+            `SELECT module_id FROM modules WHERE code = $1`, [moduleCode]
+        );
+        const moduleRow = moduleResult.rows[0];
+        if (!moduleRow) throw new AppError(MODULE_ERRORS.MODULE_NOT_FOUND);
 
-    if (!invitationId) throw new AppError(PROJECT_INVITATION_ERRORS.CREATION_FAILED);
+        const roleCheck = await pool.query(
+            `SELECT 1 FROM module_roles WHERE module_role_id = $1 AND module_id = $2`,
+            [moduleRoleId, moduleRow.module_id]
+        );
+        if (roleCheck.rowCount === 0) throw new AppError(MODULE_ERRORS.MODULE_ROLE_NOT_FOUND);
+
+        resolvedModuleRoles.push({ moduleId: moduleRow.module_id, moduleRoleId });
+    }
+
+    const client : PoolClient = await pool.connect();
+    let invitationId : number;
+    try {
+        await client.query("BEGIN");
+
+        const resultCreate = await client.query<{invitation_id : number}>(
+            `INSERT INTO
+                project_invitations(email, project_id, is_admin, invited_by)
+            VALUES ($1, $2, $3, $4)
+            RETURNING invitation_id`,
+            [email, projectId, isAdmin, ownerId]
+        );
+        invitationId = resultCreate.rows[0]!.invitation_id;
+
+        for (const { moduleId, moduleRoleId } of resolvedModuleRoles) {
+            await client.query(
+                `INSERT INTO project_invitation_module_roles (invitation_id, module_id, module_role_id)
+                VALUES ($1, $2, $3)`,
+                [invitationId, moduleId, moduleRoleId]
+            );
+        }
+
+        await client.query("COMMIT");
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    }
 
     const resultInvitation = await pool.query<ProjectInvitationRow>(
-        `SELECT pi.invitation_id, pi.email, pi.status, pi.responded_at, pi.created_at, pi.expires_at, p.project_id,
-            u.user_id AS host_id, u.name AS host_name,u.email AS host_email,
-            pr.project_role_id, pr.name AS project_role_name
+        `SELECT pi.invitation_id, pi.email, pi.status, pi.responded_at, pi.created_at, pi.expires_at, pi.project_id,
+            pi.is_admin,
+            u.user_id AS host_id, u.name AS host_name, u.last_name AS host_last_name, u.email AS host_email,
+            ${MODULE_ROLES_SUBQUERY}
         FROM project_invitations pi
-        LEFT JOIN projects p 
-            USING(project_id)
         LEFT JOIN users u
             ON u.user_id = pi.invited_by
-        LEFT JOIN project_roles pr
-            USING(project_role_id) 
         WHERE pi.invitation_id = $1
         LIMIT 1`,
         [invitationId]
@@ -109,11 +173,11 @@ export const createInvitationToProjectService = async (
 
 export const updateStatusInvitationService= async (
     {user_id : userId} : DecodedToken, { projectId, invitationId } : ProjectInvitationParams,
-    { status } : updateStatusData 
+    { status } : updateStatusData
 ) : Promise<ProjectInvitationFull> => {
 
     const currentData = await pool.query<EssentialData>(
-        `SELECT pi.status, pi.email, pi.expires_at, pi.project_role_id, p.owner_id
+        `SELECT pi.status, pi.email, pi.expires_at, pi.is_admin, p.owner_id
             FROM project_invitations pi
         INNER JOIN projects p USING(project_id)
             WHERE pi.invitation_id = $1 AND pi.project_id = $2`,
@@ -123,10 +187,10 @@ export const updateStatusInvitationService= async (
     if (currentData.rowCount === 0) throw new AppError(PROJECT_INVITATION_ERRORS.NOT_FOUND);
 
     const { status: currentStatus, email: inviteeEmail, expires_at: expiresAt,
-        project_role_id: roleId, owner_id: projectOwnerId } = currentData.rows[0] as EssentialData;
+        is_admin: isAdmin, owner_id: projectOwnerId } = currentData.rows[0] as EssentialData;
 
     if (new Date(expiresAt) < new Date()) {
-        throw new AppError(PROJECT_INVITATION_ERRORS.INVITATION_EXPIRED); 
+        throw new AppError(PROJECT_INVITATION_ERRORS.INVITATION_EXPIRED);
     }
 
     if (currentStatus !== 'pendiente') {
@@ -137,7 +201,7 @@ export const updateStatusInvitationService= async (
         if (projectOwnerId !== userId) throw new AppError(PROJECT_INVITATION_ERRORS.UNAUTHORIZED);
     } else if (status === 'aceptado' || status === 'rechazado'){
         const verifyUser = await pool.query(
-            `SELECT 1 FROM users WHERE user_id = $1 AND email = $2`, 
+            `SELECT 1 FROM users WHERE user_id = $1 AND email = $2`,
             [userId, inviteeEmail]
         );
         if (verifyUser.rowCount === 0) throw new AppError(PROJECT_INVITATION_ERRORS.UNAUTHORIZED);
@@ -158,10 +222,23 @@ export const updateStatusInvitationService= async (
         if (resultUpdate.rowCount === 0) throw new AppError(PROJECT_INVITATION_ERRORS.NOT_FOUND);
 
         if (status === 'aceptado') {
+            const memberResult = await client.query<{ project_member_id : number }>(
+                `INSERT INTO project_members(project_id, user_id, is_admin)
+                 VALUES ($1, $2, $3)
+                 RETURNING project_member_id`,
+                [projectId, userId, isAdmin]
+            );
+            const projectMemberId = memberResult.rows[0]!.project_member_id;
+
+            // Copia 1:1 project_invitation_module_roles ->
+            // project_member_module_roles (vacío si is_admin=true, ya
+            // que ahí no se insertó ninguna al crear la invitación).
             await client.query(
-                `INSERT INTO project_members(project_id, user_id, project_role_id)
-                 VALUES ($1, $2, $3)`,
-                [projectId, userId, roleId]
+                `INSERT INTO project_member_module_roles (project_member_id, module_id, module_role_id)
+                SELECT $1, module_id, module_role_id
+                FROM project_invitation_module_roles
+                WHERE invitation_id = $2`,
+                [projectMemberId, invitationId]
             );
         }
 
@@ -174,16 +251,13 @@ export const updateStatusInvitationService= async (
     }
 
     const resultInvitation = await pool.query<ProjectInvitationRow>(
-        `SELECT pi.invitation_id, pi.email, pi.status, pi.responded_at, pi.created_at, pi.expires_at, p.project_id,
-            u.user_id AS host_id, u.name AS host_name,u.email AS host_email,
-            pr.project_role_id, pr.name AS project_role_name
+        `SELECT pi.invitation_id, pi.email, pi.status, pi.responded_at, pi.created_at, pi.expires_at, pi.project_id,
+            pi.is_admin,
+            u.user_id AS host_id, u.name AS host_name, u.last_name AS host_last_name, u.email AS host_email,
+            ${MODULE_ROLES_SUBQUERY}
         FROM project_invitations pi
-        LEFT JOIN projects p 
-            USING(project_id)
         LEFT JOIN users u
             ON u.user_id = pi.invited_by
-        LEFT JOIN project_roles pr
-            USING(project_role_id) 
         WHERE pi.invitation_id = $1
         LIMIT 1`,
         [invitationId]
@@ -194,7 +268,7 @@ export const updateStatusInvitationService= async (
     if (!pi) throw new AppError(PROJECT_INVITATION_ERRORS.NOT_FOUND);
 
     return transformInvitationToInfoFull(pi);
-};  
+};
 
 
 export const getMeInvitationsToProjectsService = async (
@@ -208,13 +282,14 @@ export const getMeInvitationsToProjectsService = async (
         statusQuery = "pi.status = 'pendiente' AND pi.expires_at > NOW()";
     } else if (filter === 'completed') {
         statusQuery = "(pi.status IN ('aceptado', 'rechazado') OR (pi.status = 'pendiente' AND pi.expires_at < NOW()))";
-    } 
+    }
 
     const result = await pool.query<ProjectInvitationForUserRow>(
         `SELECT pi.invitation_id, pi.responded_at, pi.created_at, pi.expires_at,
+            pi.is_admin,
             p.project_id, p.name AS project_name,
-            u.name AS host_name,
-            pr.name AS project_role_name,
+            u.name AS host_name, u.last_name AS host_last_name,
+            ${MODULE_ROLES_SUBQUERY},
             CASE
                 WHEN pi.status = 'pendiente'
                     AND pi.expires_at < NOW()
@@ -222,15 +297,13 @@ export const getMeInvitationsToProjectsService = async (
                 ELSE pi.status
             END AS status
         FROM project_invitations pi
-        LEFT JOIN projects p 
+        LEFT JOIN projects p
             USING(project_id)
         LEFT JOIN users u
             ON u.user_id = pi.invited_by
-        LEFT JOIN project_roles pr
-            USING(project_role_id) 
         WHERE pi.email = $1 AND
             ${statusQuery}
-        ORDER BY 
+        ORDER BY
             CASE
                 WHEN pi.status = 'pendiente' AND pi.expires_at > NOW() THEN 0
                 ELSE 1
@@ -244,26 +317,44 @@ export const getMeInvitationsToProjectsService = async (
 };
 
 
+// Trae last_name Y profile_picture_url — a diferencia de host_name/
+// uploaded_by/owner_id (atribución, solo apellido), acá el frontend YA
+// muestra un avatar real en el dropdown de búsqueda y en el panel de
+// "usuario seleccionado" (ColaboradoresTab.tsx), ver
+// docs/roadmap-modulos-y-permisos.md, Fase 1.
+//
+// assertProjectAdmin: se me había pasado en la Fase 2 — al sacar
+// requireRolePrivileges de las rutas de proyecto, esta función se
+// quedó SIN ningún chequeo de acceso (ni siquiera de membresía),
+// cualquier cuenta autenticada podía buscar usuarios de CUALQUIER
+// proyecto. Mismo criterio que crear/listar invitaciones — solo
+// owner/admin, encontrado en la revisión de acoplamiento del
+// 2026-08-20.
 export const getUsersSuggestionForInvitationToProjectService = async (
-   {attribute, value} : SearchUserQuery, { projectId } : ProjectIdParam
+   { user_id : actingUserId } : DecodedToken, {attribute, value} : SearchUserQuery, { projectId } : ProjectIdParam
 ): Promise<UserSuggestion[]> => {
+    await assertProjectAdmin(projectId, actingUserId);
+
     const searchQuery = `%${value.trim()}%`;
-    
+
     const column = attribute === 'email' ? 'email' : 'name';
 
-    const result = await pool.query<UserSuggestion>(
-        `SELECT u.user_id, u.name, u.email 
+    const result = await pool.query<{
+        user_id : number; name : string; last_name : string | null;
+        email : string; profile_picture_path : string | null;
+    }>(
+        `SELECT u.user_id, u.name, u.last_name, u.email, u.profile_picture_path
         FROM users u
-        WHERE u.active = true 
+        WHERE u.active = true
             AND (u.${column} ILIKE $1)
             AND NOT EXISTS (
-                SELECT 1 FROM project_members pm 
+                SELECT 1 FROM project_members pm
                 WHERE pm.project_id = $2 AND pm.user_id = u.user_id
             )
             AND NOT EXISTS (
-                SELECT 1 FROM project_invitations pi 
-                WHERE pi.project_id = $2 
-                    AND pi.email = u.email 
+                SELECT 1 FROM project_invitations pi
+                WHERE pi.project_id = $2
+                    AND pi.email = u.email
                     AND pi.status = 'pendiente'
            )
         ORDER BY u.${column} ASC
@@ -271,5 +362,7 @@ export const getUsersSuggestionForInvitationToProjectService = async (
         [searchQuery, projectId]
     );
 
-    return result.rows;
+    return result.rows.map(({ profile_picture_path, ...rest }) => ({
+        ...rest, profile_picture_url: toProfilePictureUrl(profile_picture_path),
+    }));
 };

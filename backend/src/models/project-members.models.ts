@@ -1,80 +1,70 @@
-interface MemberUserInfo {
-    user_id : number;
-    user_name : string;
-    user_email : string;
-};
+// project-members.models.ts — Fase 2 (reemplaza project_role_id por
+// is_admin + module_roles, ver docs/roadmap-modulos-y-permisos.md).
+//
+// last_name/profile_picture_url (Fase 1, ver users.models.ts) SÍ van
+// acá — este listado muestra a la persona de verdad (avatar dedicado
+// ya armado en el frontend, ColaboradoresTab.tsx), a diferencia de
+// campos de atribución como uploaded_by/owner_id/host, que solo
+// llevan apellido.
+import { toProfilePictureUrl } from "./users.models.js";
 
-interface MemberProjectRole {
-    project_role_id : number;
-    project_role_name : string;
-};
-
-export interface ProjectMemberBase {
-    project_member_id: number;
-    joined_at: Date;
-    project_id: number;
-};
-
-export interface ProjectMemberRow extends ProjectMemberBase {
-    user_id : number;
-    user_name : string;
-    user_email : string;
-    project_role_id : number;
-    project_role_name : string;
-};
-
-export interface ProjectMemberFull extends ProjectMemberBase {
-    user : MemberUserInfo;
-    project_role : MemberProjectRole;
-};
-
-export const transformMemberToFull = (pm : ProjectMemberRow) : ProjectMemberFull => {
-    return {
-        project_member_id: pm.project_member_id,
-        joined_at: pm.joined_at,
-        project_id: pm.project_id,
-        user: {
-            user_id: pm.user_id,
-            user_name: pm.user_name,
-            user_email: pm.user_email
-        },
-        project_role: {
-            project_role_id: pm.project_role_id,
-            project_role_name: pm.project_role_name
-        }
-    };
-};
-
-// Forma plana (sin anidar) para el listado — la usa el frontend ya
-// integrado con esta forma, a diferencia de ProjectMemberFull (que
-// sigue usando el PATCH de cambio de rol, sin tocar).
-export interface ProjectMemberListItem {
-    project_member_id : number;
-    user_id : number;
-    user_name : string;
-    email : string;
-    project_role_id : number;
-    project_role_name : string;
-};
-
-export const transformMemberToListItem = (pm : ProjectMemberListItem) : ProjectMemberListItem => pm;
-
-interface CurrentUserProjectRoleRow {
-    is_owner : boolean;
-    role_id : number | null;
-    role_name : string | null;
-};
-
-export interface CurrentUserProjectRole {
-    role_id : number | null;
+export interface MemberModuleRole {
+    module_code : string;
+    module_name : string;
+    module_role_id : number;
     role_name : string;
-    is_owner : boolean;
 };
 
-export const transformToCurrentUserProjectRole = (row : CurrentUserProjectRoleRow) : CurrentUserProjectRole => {
-    return {
-        role_id: row.role_id,
-        role_name: row.is_owner ? 'Propietario' : (row.role_name ?? 'Sin rol'),
-        is_owner: row.is_owner
-    };
+// Fila cruda tal como sale de la query (module_roles ya viene armado
+// como JSON agregado por Postgres, no un JOIN plano — un miembro puede
+// tener 0..N roles de módulo).
+export interface ProjectMemberRow {
+    project_member_id : number;
+    joined_at : Date;
+    project_id : number;
+    user_id : number;
+    user_name : string;
+    user_last_name : string | null;
+    user_email : string;
+    profile_picture_path : string | null;
+    is_admin : boolean;
+    module_roles : MemberModuleRole[];
 };
+
+// Lo que devuelve GET /:projectId/members — incluye al OWNER (fila
+// sintética, sin project_member_id real, is_owner=true) y marca cuál
+// fila sos vos mismo (is_me) para que el frontend no tenga que
+// comparar IDs a mano. module_roles queda [] para el owner y para
+// cualquier is_admin=true — no hay ninguna fila real de la que
+// sacarlo (acceso total es un bypass, ver project-access.service.ts),
+// inventar entradas "Administrador" ahí sería mostrar un dato que la
+// BD no tiene.
+export interface ProjectMemberListItem {
+    project_member_id : number | null;
+    user_id : number;
+    user_name : string;
+    user_last_name : string | null;
+    email : string;
+    profile_picture_url : string | null;
+    is_owner : boolean;
+    is_admin : boolean;
+    is_me : boolean;
+    joined_at : Date;
+    module_roles : MemberModuleRole[];
+};
+
+export const transformMemberToListItem = (
+    row : ProjectMemberRow, currentUserId : number
+) : ProjectMemberListItem => ({
+    project_member_id: row.project_member_id,
+    user_id: row.user_id,
+    user_name: row.user_name,
+    user_last_name: row.user_last_name,
+    email: row.user_email,
+    profile_picture_url: toProfilePictureUrl(row.profile_picture_path),
+    is_owner: false,
+    is_admin: row.is_admin,
+    is_me: row.user_id === currentUserId,
+    joined_at: row.joined_at,
+    module_roles: row.is_admin ? [] : (row.module_roles ?? []),
+});
