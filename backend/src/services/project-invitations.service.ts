@@ -322,9 +322,19 @@ export const getMeInvitationsToProjectsService = async (
 // muestra un avatar real en el dropdown de búsqueda y en el panel de
 // "usuario seleccionado" (ColaboradoresTab.tsx), ver
 // docs/roadmap-modulos-y-permisos.md, Fase 1.
+//
+// assertProjectAdmin: se me había pasado en la Fase 2 — al sacar
+// requireRolePrivileges de las rutas de proyecto, esta función se
+// quedó SIN ningún chequeo de acceso (ni siquiera de membresía),
+// cualquier cuenta autenticada podía buscar usuarios de CUALQUIER
+// proyecto. Mismo criterio que crear/listar invitaciones — solo
+// owner/admin, encontrado en la revisión de acoplamiento del
+// 2026-08-20.
 export const getUsersSuggestionForInvitationToProjectService = async (
-   {attribute, value} : SearchUserQuery, { projectId } : ProjectIdParam
+   { user_id : actingUserId } : DecodedToken, {attribute, value} : SearchUserQuery, { projectId } : ProjectIdParam
 ): Promise<UserSuggestion[]> => {
+    await assertProjectAdmin(projectId, actingUserId);
+
     const searchQuery = `%${value.trim()}%`;
 
     const column = attribute === 'email' ? 'email' : 'name';
