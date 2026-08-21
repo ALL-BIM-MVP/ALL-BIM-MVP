@@ -32,11 +32,19 @@ const Sidebar: React.FC = () => {
 
   return (
     <>
-      {/* Botón para volver a abrir, visible solo cuando está colapsado */}
+      {/* Botón para volver a abrir, visible solo cuando está colapsado.
+          top-20 (80px): el header (PageHeader.tsx) mide ~64px de alto —
+          con top-6 (24px) el botón caía DENTRO de esa franja y tapaba el
+          título. Lo bajamos para que quede claramente debajo del header,
+          no superpuesto.
+          z-50: el header usa z-40 — con el mismo z-index, el que está más
+          abajo en el DOM (el header, renderizado después del sidebar)
+          gana el empate y tapa el botón. z-50 lo deja garantizado por
+          encima sin depender del orden en el DOM. */}
       {isCollapsed && (
         <button
           onClick={() => setIsCollapsed(false)}
-          className="fixed top-6 left-0 z-40 bg-[#0056b3] text-white p-2 rounded-r-lg shadow-md hover:bg-[#004494] transition-colors"
+          className="fixed top-20 left-0 z-50 bg-[#0056b3] text-white p-2 rounded-r-lg shadow-md hover:bg-[#004494] transition-colors"
           title="Mostrar menú"
         >
           <ChevronRight size={20} />

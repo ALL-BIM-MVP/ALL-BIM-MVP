@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
-  Search, ChevronDown, ChevronRight, X as XIcon,
+  Search, ChevronDown, ChevronUp, ChevronRight, X as XIcon,
   Info, History, Box, Layers, Tag, ListTree, Shapes, Link2,
 } from 'lucide-react';
 import type { ParamIndexEntry } from '../hooks/useModelLoader';
@@ -33,11 +33,6 @@ const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   </div>
 );
 
-// 👉 CLAVE DEL FIX: SectionHeader ahora vive AFUERA del componente
-// PropertiesPanel, con identidad estable entre renders. Recibe collapsed/onToggle
-// como props en vez de leerlos por closure — así React nunca destruye y
-// recrea estos botones aunque el padre se re-renderice muchas veces por
-// segundo (por ejemplo, mientras el popup 3D recalcula su posición en loop).
 const SectionHeader: React.FC<{
   id: string;
   label: string;
@@ -66,6 +61,15 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const [collapsed, setCollapsed] = useState<Set<string>>(
     new Set(['caracteristicas', 'historial', 'material', 'capa', 'clasificacion', 'propiedades', 'tipo', 'definidopor'])
   );
+  // Todo el bloque de detalles (búsqueda por parámetro + las 8 secciones)
+  // arranca oculto detrás de este toggle — por defecto solo se ve el
+  // nombre y el GUID del elemento en el header. Se resetea a cerrado
+  // cada vez que cambia el elemento seleccionado.
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
+
+  useEffect(() => {
+    setDetailsExpanded(false);
+  }, [entity?.expressId]);
 
   const toggle = (key: string) => {
     setCollapsed((prev) => {
@@ -92,10 +96,27 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     return Array.from(grouped.values()).slice(0, 30);
   }, [paramIndex, query, entity]);
 
-  const elementParams = useMemo(
-    () => (entity ? paramIndex.filter((p) => p.expressId === entity.expressId) : []),
-    [paramIndex, entity]
-  );
+  const elementParams = useMemo(() => {
+    if (!entity) return [];
+
+    if (entity.propertySets && entity.propertySets.length > 0) {
+      const params: { category: string; paramName: string; paramValue: string }[] = [];
+      for (const pset of entity.propertySets) {
+        for (const prop of pset.properties || []) {
+          params.push({
+            category: pset.name,
+            paramName: prop.name,
+            paramValue: String(prop.value),
+          });
+        }
+      }
+      return params;
+    }
+
+    return paramIndex
+      .filter((p) => p.expressId === entity.expressId)
+      .map((p) => ({ category: p.category, paramName: p.paramName, paramValue: p.paramValue }));
+  }, [entity, paramIndex]);
 
   const { grouped, totalMatches } = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -114,6 +135,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
   if (!isOpen) return null;
 
+  const showSearchAndSections = !entity || detailsExpanded;
+
   return (
     <div className="bg-white border border-gray-200 rounded-xl shadow-2xl w-80 max-h-[440px] flex flex-col overflow-hidden">
       <div className="flex items-start justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
@@ -130,24 +153,36 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         </button>
       </div>
 
-      <div className="px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
-        <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-2.5 py-1.5">
-          <Search size={14} className="text-gray-400 flex-shrink-0" />
-          <input
-            type="text"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={entity ? 'Buscar parámetro o valor...' : 'Buscar en todo el modelo...'}
-            className="bg-transparent text-xs text-gray-800 placeholder-gray-400 outline-none w-full"
-            autoFocus
-          />
+      {entity && (
+        <button
+          onClick={() => setDetailsExpanded((prev) => !prev)}
+          className="flex items-center justify-center gap-1.5 w-full px-4 py-2 text-xs font-medium text-[#0056b3] hover:bg-blue-50 transition-colors border-b border-gray-100 flex-shrink-0"
+        >
+          {detailsExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {detailsExpanded ? 'Ocultar detalles' : 'Ver detalles'}
+        </button>
+      )}
+
+      {showSearchAndSections && (
+        <div className="px-3 py-2.5 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-center gap-2 bg-gray-50 rounded-lg px-2.5 py-1.5">
+            <Search size={14} className="text-gray-400 flex-shrink-0" />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={entity ? 'Buscar parámetro o valor...' : 'Buscar en todo el modelo...'}
+              className="bg-transparent text-xs text-gray-800 placeholder-gray-400 outline-none w-full"
+              autoFocus
+            />
+          </div>
+          {entity && (
+            <button onClick={onDeselect} className="text-[11px] text-[#0056b3] hover:underline mt-1.5">
+              ← Volver a la búsqueda general
+            </button>
+          )}
         </div>
-        {entity && (
-          <button onClick={onDeselect} className="text-[11px] text-[#0056b3] hover:underline mt-1.5">
-            ← Volver a la búsqueda general
-          </button>
-        )}
-      </div>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {!entity && (
@@ -176,7 +211,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           </>
         )}
 
-        {entity && (
+        {entity && detailsExpanded && (
           <>
             <SectionHeader id="caracteristicas" label="Características" count={4} collapsed={collapsed} onToggle={toggle} />
             {!collapsed.has('caracteristicas') && (
@@ -204,10 +239,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </div>
             )}
 
-            <SectionHeader id="material" label="Material" count={entity.materials.length || undefined} collapsed={collapsed} onToggle={toggle} />
+            <SectionHeader id="material" label="Material" count={entity.materials?.length || undefined} collapsed={collapsed} onToggle={toggle} />
             {!collapsed.has('material') && (
               <div className="px-4 pb-2">
-                {entity.materials.length > 0 ? (
+                {entity.materials && entity.materials.length > 0 ? (
                   entity.materials.map((m, i) => <Row key={i} label={`Material ${i + 1}`} value={m} />)
                 ) : (
                   <p className="text-[11px] text-gray-400 py-1.5">No disponible</p>
@@ -225,20 +260,23 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               <div className="px-4 pb-2"><p className="text-[11px] text-gray-400 py-1.5">No disponible</p></div>
             )}
 
-            <SectionHeader id="propiedades" label="Propiedades" count={elementParams.length} collapsed={collapsed} onToggle={toggle} />
+            <SectionHeader id="propiedades" label="Propiedades" count={entity.loadingDetails ? undefined : elementParams.length} collapsed={collapsed} onToggle={toggle} />
             {!collapsed.has('propiedades') && (
               <div className="pb-2">
-                {categories.length === 0 && (
+                {entity.loadingDetails ? (
+                  <p className="text-[11px] text-gray-400 text-center py-3">Cargando...</p>
+                ) : categories.length === 0 ? (
                   <p className="text-[11px] text-gray-400 text-center py-3">
                     {query.trim() ? 'Sin resultados' : 'Sin parámetros indexados'}
                   </p>
+                ) : (
+                  categories.map((category) => (
+                    <div key={category} className="px-4 pb-1.5">
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">{category}</p>
+                      {grouped.get(category)!.map((p, i) => <Row key={i} label={p.paramName} value={p.paramValue} />)}
+                    </div>
+                  ))
                 )}
-                {categories.map((category) => (
-                  <div key={category} className="px-4 pb-1.5">
-                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">{category}</p>
-                    {grouped.get(category)!.map((p, i) => <Row key={i} label={p.paramName} value={p.paramValue} />)}
-                  </div>
-                ))}
                 <p className="text-[10px] text-gray-400 px-4 pt-1">
                   {totalMatches} de {elementParams.length} parámetros
                 </p>

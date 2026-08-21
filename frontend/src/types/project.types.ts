@@ -29,6 +29,25 @@ export interface Project {
   cover_image: CoverImage;
 }
 
+export interface ProjectFileUploader {
+  user_id: number;
+  user_name: string;
+  user_email: string;
+}
+
+export interface ProjectFile {
+  file_id: string;
+  project_id: number;
+  file_type: string;
+  name: string;
+  file_size: string;
+  checksum: string;
+  mime_type: string;
+  uploaded_at: string;
+  uploaded_by: ProjectFileUploader;
+  processed?: boolean;
+}
+
 export interface IFCFile {
   id: number;
   name: string;

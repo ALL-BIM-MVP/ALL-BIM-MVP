@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Upload, FileText, X, Maximize2, Minimize2, FileSearch, Box,
   ChevronLeft, ChevronRight, Search, RefreshCw, FileDown,
-  HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2,
+  HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2, Info,
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
@@ -19,14 +19,10 @@ import {
 } from '../../services/ifcfiles.service';
 import { useAuth } from '../../context/AuthContext';
 
-
 interface Visor3DTabProps {
   projectId: number;
 }
 
-// Estado de procesamiento del archivo actualmente cargado en el visor.
-// 'unprocessed' cubre tanto "nunca se subió" (cargado con Solo graficar)
-// como "está subido pero ifc_status todavía es null".
 type PanelStatus = 'unprocessed' | 'processing' | 'done' | 'error';
 
 const InfoRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
@@ -49,7 +45,6 @@ function ifcStatusToPanelStatus(status: IfcStatus): PanelStatus {
   return 'unprocessed';
 }
 
-// Insignia de estado — usada en la lista del modal "Ya cargado" (doc sección 1.2)
 const IfcStatusBadge: React.FC<{ status: IfcFile['ifc_status'] }> = ({ status }) => {
   if (status === 'done') {
     return (
@@ -86,6 +81,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const [ifcLoading, setIfcLoading] = useState(false);
   const [ifcInfo, setIfcInfo] = useState<IfcFileInfo | null>(null);
   const [activePanelTab, setActivePanelTab] = useState<'resumen' | 'metrados'>('resumen');
+  const [infoPopoverOpen, setInfoPopoverOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
 
@@ -94,24 +90,17 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const [searchError, setSearchError] = useState<string | null>(null);
   const viewerRef = useRef<IFCViewerHandle>(null);
 
-  // ============ ESTADO DE PROCESAMIENTO del archivo cargado ============
-  // currentFileId: file_id en el backend, si el archivo ya está subido
-  // (viene de "Ya cargado", o de haber elegido "Procesar" alguna vez).
-  // null = todavía nunca se subió (cargado 100% local con "Solo graficar").
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [panelStatus, setPanelStatus] = useState<PanelStatus>('unprocessed');
   const [panelErrorMessage, setPanelErrorMessage] = useState<string | null>(null);
 
-  // ============ ENTRADA: Local / Ya cargado ============
   const [showEntryPopover, setShowEntryPopover] = useState<'center' | 'floating' | null>(null);
   const entryPopoverRef = useRef<HTMLDivElement>(null);
   const localInputRef = useRef<HTMLInputElement>(null);
 
-  // ============ POPUP: Solo graficar / Procesar (tras elegir Local) ============
   const [pendingLocalFile, setPendingLocalFile] = useState<File | null>(null);
   const [pendingLocalBuffer, setPendingLocalBuffer] = useState<ArrayBuffer | null>(null);
 
-  // ============ MODAL: Ya cargado ============
   const [showLoadedModal, setShowLoadedModal] = useState(false);
   const [loadedTab, setLoadedTab] = useState<'procesados' | 'no_procesados'>('procesados');
   const [loadedFiles, setLoadedFiles] = useState<IfcFile[]>([]);
@@ -125,8 +114,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     if (searchOpen) setSearchOpen(false);
   };
 
-  // ============ ANCHO DEL PANEL: arrastrable ============
-  const [panelWidth, setPanelWidth] = useState(384); // px, equivalente al w-96 original
+  const [panelWidth, setPanelWidth] = useState(384);
   const [isResizing, setIsResizing] = useState(false);
   const MIN_PANEL_WIDTH = 280;
   const MAX_PANEL_WIDTH = 640;
@@ -147,8 +135,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizingRef.current) return;
-      // El panel está pegado al borde derecho: arrastrar hacia la
-      // izquierda (clientX menor que el punto de inicio) debe agrandarlo.
       const delta = resizeStartXRef.current - e.clientX;
       const newWidth = Math.min(
         MAX_PANEL_WIDTH,
@@ -171,7 +157,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     };
   }, []);
 
-  // Cierra el popover de entrada si se hace click afuera
   useEffect(() => {
     if (!showEntryPopover) return;
     const handleClickOutside = (event: MouseEvent) => {
@@ -189,10 +174,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     setIfcFile(sourceFile);
   };
 
-  // ---------- Núcleo compartido: subir+procesar / procesar existente + polling ----------
-  // Se usa tanto desde el popup de "Local" (botón Procesar) como desde el
-  // botón "Procesar archivo" de la tab Metrados — un solo lugar con la
-  // lógica real, para no duplicar el manejo de estado/errores.
   const runProcessing = useCallback(
     async ({ file, existingFileId }: { file: File | null; existingFileId: string | null }) => {
       setPanelStatus('processing');
@@ -224,7 +205,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     [projectId]
   );
 
-  // ---------- Flujo LOCAL ----------
   const openLocalPicker = () => {
     setShowEntryPopover(null);
     localInputRef.current?.click();
@@ -232,7 +212,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
 
   const handleLocalFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    event.target.value = ''; // permite re-seleccionar el mismo archivo después
+    event.target.value = '';
     if (!file) return;
 
     setIfcLoading(true);
@@ -261,8 +241,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const handleChooseProcesar = async () => {
     if (!pendingLocalFile || !pendingLocalBuffer) return;
 
-    // Graficamos de inmediato con el buffer local — no hace falta
-    // esperar al backend para poder ver el modelo.
     loadBufferIntoViewer(pendingLocalBuffer, pendingLocalFile);
     setActivePanelTab('metrados');
 
@@ -278,9 +256,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     setPendingLocalBuffer(null);
   };
 
-  // Botón "Procesar archivo" dentro de la tab Metrados: si el archivo
-  // cargado ya tiene file_id en el backend (vino de "Ya cargado"), se
-  // reprocesa ese id; si es 100% local (Solo graficar), se sube recién ahora.
   const handleProcesarDesdeMetrados = () => {
     if (currentFileId) {
       runProcessing({ file: null, existingFileId: currentFileId });
@@ -289,7 +264,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     }
   };
 
-  // ---------- Flujo YA CARGADO ----------
   const fetchLoadedFiles = useCallback(async () => {
     setLoadedLoading(true);
     setLoadedError(null);
@@ -337,8 +311,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
       setActivePanelTab('resumen');
       setShowLoadedModal(false);
 
-      // Si justo estaba procesando cuando lo elegimos, seguimos el
-      // polling para que el panel se actualice solo cuando termine.
       if (initialStatus === 'processing') {
         try {
           const final = await pollIfcProcessStatus(selectedLoadedFileId);
@@ -382,24 +354,14 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     }
   };
 
-  // Click en una partida del árbol -> AÍSLA en el visor 3D todos los
-  // elementos de esa partida (oculta el resto del modelo). Simple
-  // passthrough hacia el ref del visor — PartidasTree ya resuelve los
-  // expressId (vía getPartidaElements) antes de llamar a esto.
   const handleSelectAllInViewer = useCallback((expressIds: number[]) => {
     viewerRef.current?.isolateElementsByIds(expressIds);
   }, []);
 
-  // NUEVO: click en una FILA de la tabla de metrados (un grupo) -> solo
-  // RESALTA esos elementos en el visor, sin ocultar nada más — a
-  // diferencia de handleSelectAllInViewer de arriba (que aísla),
-  // porque acá la intención es "mostrame dónde está esto puntual",
-  // no "quiero ver solo esto".
   const handleSelectGroupInViewer = useCallback((expressIds: number[]) => {
     viewerRef.current?.selectGroupInViewer(expressIds);
   }, []);
 
-  // ---------- Sub-componentes de UI reutilizados en los dos triggers ----------
   const EntryPopover: React.FC<{ align?: 'center' | 'up' }> = ({ align = 'center' }) => (
     <div
       ref={entryPopoverRef}
@@ -426,7 +388,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
 
   return (
     <div className="h-full">
-      {/* input file oculto, compartido por ambos triggers de "Local" */}
       <input
         ref={localInputRef}
         type="file"
@@ -443,7 +404,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         }
       >
         <div className="flex-1 min-h-0 flex relative overflow-hidden">
-         
+
           <div
             className="flex-1 flex flex-col items-center justify-center text-gray-700 relative overflow-hidden bg-[#EEEEEE]"
             onMouseDown={closeSearchOnInteract}
@@ -457,7 +418,12 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                 </div>
               </div>
             ) : ifcArrayBuffer ? (
-              <IFCViewer ref={viewerRef} fileBuffer={ifcArrayBuffer} />
+              <IFCViewer
+                ref={viewerRef}
+                fileBuffer={ifcArrayBuffer}
+                projectId={projectId}
+                viewCubeRightOffset={panelOpen ? panelWidth : 0}
+              />
             ) : (
               <div className="relative z-10 text-center flex flex-col items-center gap-4 px-6">
                 <div className="w-16 h-16 rounded bg-slate-100/70 border border-slate-300/60 flex items-center justify-center">
@@ -502,7 +468,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
             } ${isResizing ? '' : 'transition-transform duration-300 ease-in-out'}`}
             style={{ width: `${panelWidth}px` }}
           >
-            {/* Handle de arrastre — solo activo con el panel abierto */}
             {panelOpen && (
               <div
                 onMouseDown={handleResizeStart}
@@ -512,31 +477,17 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
             )}
 
             <div className="flex-shrink-0">
-              {/* ---------- Tabs del panel: Resumen / Metrados ---------- */}
-              <div className="flex gap-1.5 mb-3">
-                <button
-                  onClick={() => setActivePanelTab('resumen')}
-                  className={`px-3 py-1 rounded text-[11px] font-semibold transition-colors ${
-                    activePanelTab === 'resumen'
-                      ? "bg-[#0056b3] text-white"
-                      : "bg-slate-100/70 text-slate-500 hover:bg-slate-100"
-                  }`}
-                >
-                  Resumen
-                </button>
-                <button
-                  onClick={() => setActivePanelTab('metrados')}
-                  className={`px-3 py-1 rounded text-[11px] font-semibold transition-colors ${
-                    activePanelTab === 'metrados'
-                      ? "bg-[#0056b3] text-white"
-                      : "bg-slate-100/70 text-slate-500 hover:bg-slate-100"
-                  }`}
-                >
-                  Metrados
-                </button>
+              <div className="flex items-center gap-2.5 mb-3">
+                <h2 className="text-lg font-bold text-[#0056b3] tracking-tight">Metrados</h2>
+                {panelStatus === 'done' && (
+                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200">
+                    <CheckCircle2 size={10} className="text-emerald-600 flex-shrink-0" />
+                    <p className="text-[9px] font-semibold text-emerald-700 whitespace-nowrap">Metrados listos</p>
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center gap-2 bg-slate-100/60 border border-slate-300/60 rounded px-2 py-1.5 mb-2.5">
+              <div className="relative flex items-center gap-2 bg-slate-100/60 border border-slate-300/60 rounded px-2 py-1.5 mb-2.5">
                 <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${ifcFile ? 'bg-green-100' : 'bg-slate-200'}`}>
                   <FileText size={11} className={ifcFile ? 'text-green-600' : 'text-slate-400'} />
                 </div>
@@ -554,15 +505,31 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                     </p>
                   )}
                 </div>
-              </div>
-            </div>
 
-            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              {/* ---------- Tab RESUMEN ---------- */}
-              {activePanelTab === 'resumen' && (
-                <div className="h-full overflow-y-auto">
-                  {ifcInfo ? (
-                    <div className="space-y-3 py-2">
+                {ifcInfo && (
+                  <button
+                    onClick={() => setInfoPopoverOpen((prev) => !prev)}
+                    className={`w-6 h-6 flex-shrink-0 flex items-center justify-center rounded transition-colors ${
+                      infoPopoverOpen ? 'bg-[#0056b3] text-white' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-600'
+                    }`}
+                    title="Información del archivo IFC"
+                  >
+                    <Info size={13} />
+                  </button>
+                )}
+
+                {infoPopoverOpen && ifcInfo && (
+                  <div className="absolute top-full right-0 mt-1.5 z-50 w-72 bg-white rounded shadow-2xl border border-slate-200 p-3.5">
+                    <div className="flex items-center justify-between mb-2.5">
+                      <p className="text-xs font-bold text-slate-700">Información del proyecto</p>
+                      <button
+                        onClick={() => setInfoPopoverOpen(false)}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                    <div className="space-y-2.5 max-h-80 overflow-y-auto">
                       <InfoRow label="Proyecto" value={ifcInfo.projectName} />
                       <InfoRow label="Descripción" value={ifcInfo.projectDescription} />
                       <InfoRow label="Nombre largo" value={ifcInfo.projectLongName} />
@@ -572,101 +539,70 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                       <InfoRow label="Software de origen" value={ifcInfo.originatingSystem} />
                       <InfoRow label="Esquema IFC" value={ifcInfo.schema} />
                     </div>
-                  ) : (
-                    <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-8">
-                      <div className="w-12 h-12 rounded-full bg-slate-100/70 flex items-center justify-center">
-                        <FileSearch size={22} className="text-slate-400" />
-                      </div>
-                      <p className="text-sm font-medium text-slate-500">
-                        Carga un archivo para ver el resumen
-                      </p>
-                      <p className="text-xs text-slate-400 max-w-[220px]">
-                        La información aparecerá aquí una vez cargues un modelo IFC.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
+                  </div>
+                )}
+              </div>
+            </div>
 
-              {/* ---------- Tab METRADOS ---------- */}
-              {activePanelTab === 'metrados' && (
-                <div className="h-full min-h-0 flex flex-col overflow-hidden">
-                  {!ifcArrayBuffer ? (
-                    <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-8">
-                      <div className="w-12 h-12 rounded-full bg-slate-100/70 flex items-center justify-center">
-                        <FileSearch size={22} className="text-slate-400" />
-                      </div>
-                      <p className="text-sm font-medium text-slate-500">Carga un archivo para ver los metrados</p>
-                    </div>
-                  ) : panelStatus === 'unprocessed' ? (
-                    <div className="rounded bg-[#5B21B6] text-white p-6 flex flex-col items-center text-center gap-3">
-                      <p className="text-sm font-bold tracking-wide">ARCHIVO no procesado</p>
-                      <button
-                        onClick={handleProcesarDesdeMetrados}
-                        className="px-4 py-2 bg-white text-[#5B21B6] rounded text-xs font-bold hover:bg-slate-100 transition-colors"
-                      >
-                        Procesar archivo
-                      </button>
-                      <p className="text-xs text-white/80 mt-2">
-                        Se requiere procesar para ver metrados
-                      </p>
-                    </div>
-                  ) : panelStatus === 'processing' ? (
-                    <div className="rounded bg-[#5B21B6] text-white p-6 flex flex-col items-center text-center gap-3">
-                      <Loader2 size={22} className="animate-spin" />
-                      <p className="text-sm font-bold tracking-wide">Procesando archivo...</p>
-                      <p className="text-xs text-white/80">
-                        Esto puede tardar unos segundos, dependiendo del tamaño del modelo.
-                      </p>
-                    </div>
-                  ) : panelStatus === 'error' ? (
-                    <div className="rounded bg-[#5B21B6] text-white p-6 flex flex-col items-center text-center gap-3">
-                      <AlertTriangle size={22} />
-                      <p className="text-sm font-bold tracking-wide">Error al procesar</p>
-                      <p className="text-xs text-white/80">{panelErrorMessage || 'Ocurrió un error inesperado.'}</p>
-                      <button
-                        onClick={handleProcesarDesdeMetrados}
-                        className="px-4 py-2 bg-white text-[#5B21B6] rounded text-xs font-bold hover:bg-slate-100 transition-colors"
-                      >
-                        Reintentar
-                      </button>
-                    </div>
-                  ) : (
-                    // Altura acotada de punta a punta (h-full + flex-col
-                    // + flex-1 min-h-0) para que PartidasTree pueda
-                    // manejar SU PROPIO scroll interno (ambos ejes) en
-                    // vez de que este wrapper de afuera termine haciendo
-                    // todo el scroll vertical y esconda el scrollbar
-                    // horizontal al final del todo.
-                    <div className="h-full min-h-0">
-                      {currentFileId && (
-                        <PartidasTree
-                          ifcFileId={currentFileId}
-                          currentUserId={user?.id ?? undefined}
-                          onSelectAllInViewer={handleSelectAllInViewer}
-                          onSelectGroupInViewer={handleSelectGroupInViewer}
-                        />
-                      )}
-                    </div>
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+              {!ifcArrayBuffer ? (
+                <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-8">
+                  <div className="w-12 h-12 rounded-full bg-slate-100/70 flex items-center justify-center">
+                    <FileSearch size={22} className="text-slate-400" />
+                  </div>
+                  <p className="text-sm font-medium text-slate-500">Carga un archivo para ver los metrados</p>
+                </div>
+              ) : panelStatus === 'unprocessed' ? (
+                <div className="rounded bg-slate-200 text-slate-800 p-6 flex flex-col items-center text-center gap-3">
+                  <p className="text-sm font-bold tracking-wide">ARCHIVO no procesado</p>
+                  <button
+                    onClick={handleProcesarDesdeMetrados}
+                    className="px-4 py-2 bg-[#0056b3] text-white rounded text-xs font-bold hover:bg-[#004494] transition-colors"
+                  >
+                    Procesar archivo
+                  </button>
+                  <p className="text-xs text-slate-600 mt-2">
+                    Se requiere procesar para ver metrados
+                  </p>
+                </div>
+              ) : panelStatus === 'processing' ? (
+                <div className="rounded bg-slate-200 text-slate-800 p-6 flex flex-col items-center text-center gap-3">
+                  <Loader2 size={22} className="animate-spin" />
+                  <p className="text-sm font-bold tracking-wide">Procesando archivo...</p>
+                  <p className="text-xs text-slate-600">
+                    Esto puede tardar unos segundos, dependiendo del tamaño del modelo.
+                  </p>
+                </div>
+              ) : panelStatus === 'error' ? (
+                <div className="rounded bg-slate-200 text-slate-800 p-6 flex flex-col items-center text-center gap-3">
+                  <AlertTriangle size={22} />
+                  <p className="text-sm font-bold tracking-wide">Error al procesar</p>
+                  <p className="text-xs text-slate-600">{panelErrorMessage || 'Ocurrió un error inesperado.'}</p>
+                  <button
+                    onClick={handleProcesarDesdeMetrados}
+                    className="px-4 py-2 bg-[#0056b3] text-white rounded text-xs font-bold hover:bg-[#004494] transition-colors"
+                  >
+                    Reintentar
+                  </button>
+                </div>
+              ) : (
+                <div className="h-full min-h-0">
+                  {currentFileId && (
+                    <PartidasTree
+                      ifcFileId={currentFileId}
+                      currentUserId={user?.id ?? undefined}
+                      onSelectAllInViewer={handleSelectAllInViewer}
+                      onSelectGroupInViewer={handleSelectGroupInViewer}
+                    />
                   )}
                 </div>
               )}
             </div>
 
-            {ifcFile && (
-              <button
-                onClick={clearIFC}
-                className="flex-shrink-0 mt-4 text-sm text-slate-500 hover:text-red-500 transition-colors text-left font-medium"
-              >
-                Eliminar archivo
-              </button>
-            )}
           </div>
 
-          {/* --- BARRA FLOTANTE INFERIOR --- */}
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[9700] flex items-center bg-white/95 backdrop-blur-md border border-gray-200 rounded shadow-xl px-0.5 py-0.5">
 
-            {/* Grupo 1: Cargar/Cambiar IFC + Limpiar */}
             <div className="relative">
               <button
                 onClick={() => setShowEntryPopover(showEntryPopover === 'floating' ? null : 'floating')}
@@ -692,7 +628,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
 
             <div className="w-px h-6 bg-gray-200 mx-0.5" />
 
-            {/* Grupo 2: Buscador por ID o GUID */}
             <div className="relative">
               <button
                 onClick={() => setSearchOpen((prev) => !prev)}
@@ -735,7 +670,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
 
             <div className="w-px h-6 bg-gray-200 mx-0.5" />
 
-            {/* Grupo 3: Sincronizar con Revit — estático */}
             <button
               onClick={() => alert('Sincronización con Revit: próximamente disponible.')}
               className="flex flex-col items-center gap-0.5 px-2 py-1 rounded text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
@@ -746,7 +680,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
 
             <div className="w-px h-6 bg-gray-200 mx-0.5" />
 
-            {/* Grupo 4: Descargar datos — estático */}
             <button
               onClick={() => alert('Descarga de datos: próximamente disponible.')}
               className="flex flex-col items-center gap-0.5 px-2 py-1 rounded text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
@@ -759,7 +692,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         </div>
       </div>
 
-      {/* ============ POPUP: Solo graficar / Procesar (tras elegir archivo Local) ============ */}
       {pendingLocalFile && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10200]">
           <div className="bg-white rounded w-[420px] shadow-2xl border border-gray-200 overflow-hidden">
@@ -817,7 +749,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         </div>
       )}
 
-      {/* ============ MODAL: Ya cargado (Procesados / No procesados) ============ */}
       {showLoadedModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10200]">
           <div className="bg-white rounded w-[520px] max-h-[80vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
@@ -831,7 +762,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               </button>
             </div>
 
-            {/* Tabs */}
             <div className="px-5 pt-4 flex-shrink-0">
               <div className="flex gap-2">
                 <button
@@ -857,7 +787,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               </div>
             </div>
 
-            {/* Buscador */}
             <div className="px-5 pt-3 flex-shrink-0">
               <div className="flex items-center border border-gray-200 rounded px-3 py-2 gap-2 focus-within:ring-2 focus-within:ring-[#0056b3]">
                 <Search size={14} className="text-slate-400" />
@@ -878,7 +807,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               </div>
             </div>
 
-            {/* Lista */}
             <div className="flex-1 min-h-0 overflow-y-auto px-5 py-3 space-y-2">
               {loadedLoading ? (
                 <div className="text-center py-10 text-slate-400">
@@ -923,7 +851,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               )}
             </div>
 
-            {/* Footer */}
             <div className="px-5 py-3.5 border-t border-gray-100 bg-gray-50/70 flex justify-end gap-2 flex-shrink-0">
               <button
                 onClick={() => setShowLoadedModal(false)}

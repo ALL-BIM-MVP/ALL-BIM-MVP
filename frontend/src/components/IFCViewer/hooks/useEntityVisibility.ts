@@ -5,12 +5,6 @@ type IsolationTarget =
   | { kind: 'type'; value: string }
   | { kind: 'types'; value: Set<string> }
   | { kind: 'element'; value: number }
-  // NUEVO: aislar VARIOS elementos puntuales a la vez, por expressId —
-  // para "seleccionar todos los del mismo tipo en el visor" desde
-  // PartidasTree (click derecho en una partida del árbol). Distinto de
-  // 'types' (que agrupa por tipo IFC vía typeGroups) — acá los ids ya
-  // vienen resueltos de antemano (de POST .../elements, groups[].
-  // elements[].express_id), no hace falta mapear nada.
   | { kind: 'elements'; value: Set<number> }
   | null;
 
@@ -21,7 +15,6 @@ export function useEntityVisibility(
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
   const [hiddenElementIds, setHiddenElementIds] = useState<Set<number>>(new Set());
   const [isolation, setIsolation] = useState<IsolationTarget>(null);
-  // Selección del panel de categorías. Vacío = sin filtro (se ve todo).
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
 
   const applyVisibility = useCallback((
@@ -44,8 +37,6 @@ export function useEntityVisibility(
     } else if (isolationArg?.kind === 'element') {
       isolatedIds = new Set([isolationArg.value]);
     } else if (isolationArg?.kind === 'elements') {
-      // Los ids ya vienen resueltos (expressId reales de la partida) —
-      // se pasan directo, sin pasar por typeGroups.
       isolatedIds = new Set(isolationArg.value);
     }
     renderer.setIsolatedEntities?.(isolatedIds);
@@ -69,7 +60,7 @@ export function useEntityVisibility(
   }, [hiddenElementIds, isolation, applyVisibility]);
 
   const toggleIsolateType = useCallback((type: string) => {
-    setSelectedTypes(new Set()); // una isolation de un solo tipo reemplaza cualquier selección múltiple
+    setSelectedTypes(new Set());
     setIsolation((prev) => {
       const next: IsolationTarget = prev?.kind === 'type' && prev.value === type ? null : { kind: 'type', value: type };
       applyVisibility(hiddenTypes, hiddenElementIds, next);
@@ -77,9 +68,6 @@ export function useEntityVisibility(
     });
   }, [hiddenTypes, hiddenElementIds, applyVisibility]);
 
-  // 👉 selección múltiple del panel de categorías.
-  // Vacío = sin filtro, se ve el modelo completo.
-  // Con 1+ tipos tildados = se aísla el modelo a mostrar solo esos tipos.
   const toggleSelectType = useCallback((type: string) => {
     setSelectedTypes((prev) => {
       const next = new Set(prev);
@@ -118,7 +106,7 @@ export function useEntityVisibility(
   }, [hiddenTypes, isolation, applyVisibility]);
 
   const isolateElementById = useCallback((id: number) => {
-    setSelectedTypes(new Set()); // aislar un elemento puntual reemplaza la selección de categorías
+    setSelectedTypes(new Set());
     setIsolation((prev) => {
       const next: IsolationTarget = prev?.kind === 'element' && prev.value === id ? null : { kind: 'element', value: id };
       applyVisibility(hiddenTypes, hiddenElementIds, next);
@@ -126,11 +114,6 @@ export function useEntityVisibility(
     });
   }, [hiddenTypes, hiddenElementIds, applyVisibility]);
 
-  // NUEVO: aislar VARIOS elementos puntuales a la vez (ver comentario
-  // de IsolationTarget más arriba). A diferencia de isolateElementById,
-  // NO hace toggle (siempre aísla el set nuevo que se le pasa) — un
-  // click derecho sobre otra partida del árbol simplemente reemplaza
-  // la selección anterior, no la des-aísla.
   const isolateElementsByIds = useCallback((ids: number[]) => {
     setSelectedTypes(new Set());
     const next: IsolationTarget = ids.length > 0 ? { kind: 'elements', value: new Set(ids) } : null;
@@ -150,6 +133,23 @@ export function useEntityVisibility(
     applyVisibility(new Set(), new Set(), isolation);
   }, [isolation, applyVisibility]);
 
+  // Deshace aislamiento Y ocultamiento en UNA sola operación atómica —
+  // a diferencia de llamar clearIsolation() + clearAllHidden() seguidas
+  // (lo que hacía el botón "Mostrar todo" antes), que tenía un bug de
+  // closure obsoleta: clearAllHidden() todavía leía el `isolation` VIEJO
+  // en su cierre (React no había vuelto a renderizar todavía entre una
+  // llamada y la otra), así que terminaba reaplicando el aislamiento que
+  // clearIsolation() acababa de sacar, un instante después. Acá se
+  // resetean los 4 estados y se llama applyVisibility UNA sola vez, con
+  // valores definitivos (todo vacío/null), sin closures intermedias.
+  const clearAll = useCallback(() => {
+    setSelectedTypes(new Set());
+    setIsolation(null);
+    setHiddenTypes(new Set());
+    setHiddenElementIds(new Set());
+    applyVisibility(new Set(), new Set(), null);
+  }, [applyVisibility]);
+
   return {
     hiddenTypes,
     isolatedType: isolation?.kind === 'type' ? isolation.value : null,
@@ -167,5 +167,6 @@ export function useEntityVisibility(
     isolateElementById,
     isolateElementsByIds,
     clearAllHidden,
+    clearAll,
   };
 }
