@@ -15,6 +15,7 @@ import { AppError } from "../models/errors/app-error.js";
 import { PROJECT_INVITATION_ERRORS } from "../models/errors/project-invitations.errors.js";
 import { MODULE_ERRORS } from "../models/errors/modules.errors.js";
 import type { UserSuggestion } from "../models/users.models.js";
+import { toProfilePictureUrl } from "../models/users.models.js";
 import { assertProjectAdmin } from "./project-access.service.js";
 
 // JSON_AGG de project_invitation_module_roles, reusado en las 3
@@ -43,7 +44,7 @@ export const getListInvitationsOfProjectService= async (
     const result = await pool.query<ProjectInvitationRow>(
         `SELECT pi.invitation_id, pi.email, pi.responded_at, pi.created_at, pi.expires_at, pi.project_id,
             pi.is_admin,
-            u.user_id AS host_id, u.name AS host_name, u.email AS host_email,
+            u.user_id AS host_id, u.name AS host_name, u.last_name AS host_last_name, u.email AS host_email,
             ${MODULE_ROLES_SUBQUERY},
             CASE
                 WHEN pi.status = 'pendiente'
@@ -152,7 +153,7 @@ export const createInvitationToProjectService = async (
     const resultInvitation = await pool.query<ProjectInvitationRow>(
         `SELECT pi.invitation_id, pi.email, pi.status, pi.responded_at, pi.created_at, pi.expires_at, pi.project_id,
             pi.is_admin,
-            u.user_id AS host_id, u.name AS host_name, u.email AS host_email,
+            u.user_id AS host_id, u.name AS host_name, u.last_name AS host_last_name, u.email AS host_email,
             ${MODULE_ROLES_SUBQUERY}
         FROM project_invitations pi
         LEFT JOIN users u
@@ -252,7 +253,7 @@ export const updateStatusInvitationService= async (
     const resultInvitation = await pool.query<ProjectInvitationRow>(
         `SELECT pi.invitation_id, pi.email, pi.status, pi.responded_at, pi.created_at, pi.expires_at, pi.project_id,
             pi.is_admin,
-            u.user_id AS host_id, u.name AS host_name, u.email AS host_email,
+            u.user_id AS host_id, u.name AS host_name, u.last_name AS host_last_name, u.email AS host_email,
             ${MODULE_ROLES_SUBQUERY}
         FROM project_invitations pi
         LEFT JOIN users u
@@ -287,7 +288,7 @@ export const getMeInvitationsToProjectsService = async (
         `SELECT pi.invitation_id, pi.responded_at, pi.created_at, pi.expires_at,
             pi.is_admin,
             p.project_id, p.name AS project_name,
-            u.name AS host_name,
+            u.name AS host_name, u.last_name AS host_last_name,
             ${MODULE_ROLES_SUBQUERY},
             CASE
                 WHEN pi.status = 'pendiente'
@@ -316,6 +317,11 @@ export const getMeInvitationsToProjectsService = async (
 };
 
 
+// Trae last_name Y profile_picture_url — a diferencia de host_name/
+// uploaded_by/owner_id (atribución, solo apellido), acá el frontend YA
+// muestra un avatar real en el dropdown de búsqueda y en el panel de
+// "usuario seleccionado" (ColaboradoresTab.tsx), ver
+// docs/roadmap-modulos-y-permisos.md, Fase 1.
 export const getUsersSuggestionForInvitationToProjectService = async (
    {attribute, value} : SearchUserQuery, { projectId } : ProjectIdParam
 ): Promise<UserSuggestion[]> => {
@@ -323,8 +329,11 @@ export const getUsersSuggestionForInvitationToProjectService = async (
 
     const column = attribute === 'email' ? 'email' : 'name';
 
-    const result = await pool.query<UserSuggestion>(
-        `SELECT u.user_id, u.name, u.email
+    const result = await pool.query<{
+        user_id : number; name : string; last_name : string | null;
+        email : string; profile_picture_path : string | null;
+    }>(
+        `SELECT u.user_id, u.name, u.last_name, u.email, u.profile_picture_path
         FROM users u
         WHERE u.active = true
             AND (u.${column} ILIKE $1)
@@ -343,5 +352,7 @@ export const getUsersSuggestionForInvitationToProjectService = async (
         [searchQuery, projectId]
     );
 
-    return result.rows;
+    return result.rows.map(({ profile_picture_path, ...rest }) => ({
+        ...rest, profile_picture_url: toProfilePictureUrl(profile_picture_path),
+    }));
 };

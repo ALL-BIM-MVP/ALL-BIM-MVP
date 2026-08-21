@@ -8,9 +8,13 @@ export interface Project extends ProjectCreate {
     created_by : number;
 };
 
+// user_name/user_last_name, no image — es un campo de atribución
+// (quién es dueño), no una vitrina de la persona (ver
+// docs/roadmap-modulos-y-permisos.md, Fase 1).
 export interface ProjectOwner {
     user_id : number;
     user_name : string;
+    user_last_name : string | null;
     role_id : number;
 };
 
@@ -49,6 +53,7 @@ export const transformProjectFull = (p : ProjectRow) : ProjectFull => {
         owner: {
             user_id: p.user_id,
             user_name: p.user_name,
+            user_last_name: p.user_last_name,
             role_id: p.role_id,
         },
         cover_image: p.image_file_id && p.image_path

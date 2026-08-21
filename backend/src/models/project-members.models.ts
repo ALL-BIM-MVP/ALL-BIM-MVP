@@ -1,10 +1,12 @@
 // project-members.models.ts — Fase 2 (reemplaza project_role_id por
 // is_admin + module_roles, ver docs/roadmap-modulos-y-permisos.md).
 //
-// OJO: a propósito NO se agregaron acá last_name/profile_picture_url
-// (Fase 1, ver users.models.ts) — el usuario pidió explícitamente
-// dejar esa adaptación para el final, después de terminar los roles,
-// para no tener que tocar este listado dos veces.
+// last_name/profile_picture_url (Fase 1, ver users.models.ts) SÍ van
+// acá — este listado muestra a la persona de verdad (avatar dedicado
+// ya armado en el frontend, ColaboradoresTab.tsx), a diferencia de
+// campos de atribución como uploaded_by/owner_id/host, que solo
+// llevan apellido.
+import { toProfilePictureUrl } from "./users.models.js";
 
 export interface MemberModuleRole {
     module_code : string;
@@ -22,7 +24,9 @@ export interface ProjectMemberRow {
     project_id : number;
     user_id : number;
     user_name : string;
+    user_last_name : string | null;
     user_email : string;
+    profile_picture_path : string | null;
     is_admin : boolean;
     module_roles : MemberModuleRole[];
 };
@@ -39,7 +43,9 @@ export interface ProjectMemberListItem {
     project_member_id : number | null;
     user_id : number;
     user_name : string;
+    user_last_name : string | null;
     email : string;
+    profile_picture_url : string | null;
     is_owner : boolean;
     is_admin : boolean;
     is_me : boolean;
@@ -53,7 +59,9 @@ export const transformMemberToListItem = (
     project_member_id: row.project_member_id,
     user_id: row.user_id,
     user_name: row.user_name,
+    user_last_name: row.user_last_name,
     email: row.user_email,
+    profile_picture_url: toProfilePictureUrl(row.profile_picture_path),
     is_owner: false,
     is_admin: row.is_admin,
     is_me: row.user_id === currentUserId,

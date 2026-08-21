@@ -20,9 +20,14 @@ export interface InvitationModuleRole {
     role_name : string;
 };
 
+// Sin imagen a propósito — "quién invitó" es atribución, no una
+// vitrina de la persona (el frontend actual, ColaboradoresTab.tsx, ni
+// siquiera muestra el nombre del invitado en la fila de invitación,
+// solo su email — ver docs/roadmap-modulos-y-permisos.md, Fase 1).
 interface HostInfo {
     user_id : number,
     user_name : string,
+    user_last_name : string | null,
     user_email : string,
 };
 
@@ -51,6 +56,7 @@ export interface ProjectInvitationRow extends ProjectInvitationBase {
     module_roles: InvitationModuleRole[];
     host_id: number;
     host_name: string;
+    host_last_name: string | null;
     host_email: string;
 };
 
@@ -74,6 +80,7 @@ export const transformInvitationToInfoFull = (pi : ProjectInvitationRow) : Proje
         host: {
             user_id: pi.host_id,
             user_name : pi.host_name,
+            user_last_name: pi.host_last_name,
             user_email: pi.host_email
         }
     };
@@ -86,6 +93,7 @@ interface InvitationForUserBase {
     created_at: Date;
     expires_at: Date;
     host_name:string;
+    host_last_name: string | null;
     is_admin: boolean;
 }
 
@@ -108,6 +116,7 @@ export const transformInvitationForUser = (pi : ProjectInvitationForUserRow) : P
         created_at: pi.created_at,
         expires_at: pi.expires_at,
         host_name: pi.host_name,
+        host_last_name: pi.host_last_name,
         is_admin: pi.is_admin,
         module_roles: pi.module_roles ?? [],
         project: {

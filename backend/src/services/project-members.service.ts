@@ -8,6 +8,7 @@ import type {
 import {
     transformMemberToListItem, type ProjectMemberListItem, type ProjectMemberRow,
 } from "../models/project-members.models.js";
+import { toProfilePictureUrl } from "../models/users.models.js";
 import { AppError } from "../models/errors/app-error.js";
 import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
 import { PROJECT_MEMBER_ERRORS } from "../models/errors/project-members.errors.js";
@@ -24,9 +25,11 @@ export const getListProjectMembersService = async (
     await assertProjectAccess(projectId, currentUserId);
 
     const ownerResult = await pool.query<{
-        owner_id : number; user_name : string; user_email : string; created_at : Date;
+        owner_id : number; user_name : string; user_last_name : string | null;
+        user_email : string; profile_picture_path : string | null; created_at : Date;
     }>(
-        `SELECT p.owner_id, u.name AS user_name, u.email AS user_email, p.created_at
+        `SELECT p.owner_id, u.name AS user_name, u.last_name AS user_last_name,
+            u.email AS user_email, u.profile_picture_path, p.created_at
         FROM projects p
         INNER JOIN users u ON u.user_id = p.owner_id
         WHERE p.project_id = $1`,
@@ -37,7 +40,8 @@ export const getListProjectMembersService = async (
 
     const membersResult = await pool.query<ProjectMemberRow>(
         `SELECT pm.project_member_id, pm.joined_at, pm.project_id,
-            u.user_id, u.name AS user_name, u.email AS user_email, pm.is_admin,
+            u.user_id, u.name AS user_name, u.last_name AS user_last_name,
+            u.email AS user_email, u.profile_picture_path, pm.is_admin,
             COALESCE(
                 JSON_AGG(
                     JSON_BUILD_OBJECT(
@@ -53,7 +57,8 @@ export const getListProjectMembersService = async (
         LEFT JOIN module_roles mr ON mr.module_role_id = pmmr.module_role_id
         LEFT JOIN modules m ON m.module_id = pmmr.module_id
         WHERE pm.project_id = $1
-        GROUP BY pm.project_member_id, pm.joined_at, pm.project_id, u.user_id, u.name, u.email, pm.is_admin
+        GROUP BY pm.project_member_id, pm.joined_at, pm.project_id, u.user_id, u.name, u.last_name,
+            u.email, u.profile_picture_path, pm.is_admin
         ORDER BY pm.joined_at DESC`,
         [projectId]
     );
@@ -62,7 +67,9 @@ export const getListProjectMembersService = async (
         project_member_id: null,
         user_id: owner.owner_id,
         user_name: owner.user_name,
+        user_last_name: owner.user_last_name,
         email: owner.user_email,
+        profile_picture_url: toProfilePictureUrl(owner.profile_picture_path),
         is_owner: true,
         is_admin: true,
         is_me: owner.owner_id === currentUserId,

@@ -6,6 +6,7 @@ import { generateAccessToken, generateRefreshToken, getRefreshTokenExpiresAt, ve
 import type { InvitationRequest, LoginRequest, RegisterRequest } from '../schemas/auth.schema.js';
 import { sendInvitation } from '../utils/resend.js';
 import type { UserLayout } from '../models/users.models.js';
+import { toProfilePictureUrl } from '../models/users.models.js';
 import { createSession } from './session.service.js';
 import { hashToken } from '../utils/hashing.js';
 import { AUTH_ERRORS } from '../models/errors/auth.errors.js';
@@ -45,7 +46,11 @@ export const loginService = async ({email, password} : LoginRequest) : Promise<A
         user: {
             id: user.user_id,
             name: user.name,
-            correo: user.email,  
+            last_name: user.last_name,
+            correo: user.email,
+            // Evita el round-trip a GET /users/me justo después de
+            // loguearse (Fase 1, ver docs/roadmap-modulos-y-permisos.md).
+            profile_picture_url: toProfilePictureUrl(user.profile_picture_path),
         }
     }
 };

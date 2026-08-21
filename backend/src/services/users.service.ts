@@ -1,6 +1,7 @@
 import pool from "../db/database.js";
 import bcrypt from 'bcrypt';
 import type { ProfilePictureInfo, UserLayout, UserResponse } from "../models/users.models.js";
+import { toProfilePictureUrl } from "../models/users.models.js";
 import type { RegisterRequest } from "../schemas/auth.schema.js";
 import type { GetUsersQuery, SetUserActiveRequest, UpdateMeRequest, UserIdParam } from "../schemas/users.schema.js";
 import { hashToken } from "../utils/hashing.js";
@@ -12,15 +13,7 @@ import { INVITATION_ERRRORS } from "../models/errors/invitation.errors.js";
 import { USER_ERRORS } from "../models/errors/user.errors.js";
 import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 import { AppError } from "../models/errors/app-error.js";
-import { toPublicUploadsUrl } from "../models/project-images.models.js";
 import { saveProfilePicture, deleteProfilePicture } from "../utils/avatar.js";
-
-// profile_picture_path (interno, del servidor) -> profile_picture_url
-// (lo que ve el cliente) — reusa el mismo helper que ya sirve las
-// portadas de proyecto, es genérico (solo hace path.relative contra
-// PUBLIC_UPLOADS_DIR), no hay razón para duplicarlo acá.
-const toProfilePictureUrl = (path : string | null) : string | null =>
-    path ? toPublicUploadsUrl(path) : null;
 
 export const registerService = async ({name, last_name, password, token} : RegisterRequest) : Promise< AuthResponse >=> {
 
@@ -73,7 +66,12 @@ export const registerService = async ({name, last_name, password, token} : Regis
             user: {
                 id: user.user_id,
                 name: user.name,
+                last_name: user.last_name,
                 correo: user.email,
+                // Siempre null acá — recién creada la cuenta, todavía
+                // no hay foto que subir (RETURNING * ya trae la
+                // columna real de todos modos, no se hardcodea).
+                profile_picture_url: toProfilePictureUrl(user.profile_picture_path),
             }
         }
     } catch (error) {
