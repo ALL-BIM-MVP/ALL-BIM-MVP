@@ -150,9 +150,9 @@ export const deleteProjectByIdService = async(
     if (result.rowCount === 0) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
 
     // El DELETE de arriba ya se llevó puestas todas las filas relacionadas
-    // en la BD vía ON DELETE CASCADE (files, ifc_files y todo lo de
-    // metrados colgado de ahí, project_images, project_members,
-    // project_invitations) — pero eso no borra los BYTES reales del
+    // en la BD vía ON DELETE CASCADE (files, ifc_files, ifc_documents
+    // (Fase 3) y todo lo de metrados colgado de ahí, project_images,
+    // project_members, project_invitations) — pero eso no borra los BYTES reales del
     // disco, ninguna de esas cascadas toca el filesystem. Todo archivo
     // de este proyecto (subidas normales Y la imagen de portada) vive
     // bajo uploads/<projectId>/ porque así arma la ruta multer en

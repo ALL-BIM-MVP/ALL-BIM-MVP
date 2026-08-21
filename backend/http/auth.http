@@ -587,13 +587,23 @@ Authorization: Bearer {{accessToken}}
 ### =========================================================================
 
 ### 1. Procesar un IFC nuevo (multipart: sube + procesa en un solo paso)
-### Responde 202 casi al instante con status="processing" — el procesamiento
-### real sigue corriendo en background (puede tardar ~1 min con este archivo).
+### Responde 202 casi al instante con status="processing" y is_current=false
+### — is_current recién pasa a true cuando termina bien (Fase 3, ver
+### docs/roadmap-modulos-y-permisos.md). specialty_id es OBLIGATORIO acá
+### porque no viene replaces_ifc_document_id (esto crea un ifc_documents
+### nuevo) — ver la lista de especialidades en el MÓDULO DE
+### ESPECIALIDADES/DOCUMENTOS IFC más abajo si 2 (Estructuras) no existe
+### en tu BD. El procesamiento real sigue corriendo en background (puede
+### tardar ~1 min con este archivo).
 # @name processIfcUpload
 POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
 Authorization: Bearer {{accessToken}}
 Content-Type: multipart/form-data; boundary=WebAppBoundary
 
+--WebAppBoundary
+Content-Disposition: form-data; name="specialty_id"
+
+2
 --WebAppBoundary
 Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
 Content-Type: application/octet-stream
@@ -601,8 +611,9 @@ Content-Type: application/octet-stream
 < ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
 --WebAppBoundary--
 
-### Capturar el ifc_file_id devuelto
+### Capturar el ifc_file_id y el ifc_document_id devueltos
 @processedIfcFileId = {{processIfcUpload.response.body.ifc_file_id}}
+@processedIfcDocumentId = {{processIfcUpload.response.body.ifc_document_id}}
 
 
 ### 2. Consultar el estado del procesamiento (polling)
@@ -649,6 +660,106 @@ Content-Type: application/json
 {
   "file_id": 99999
 }
+
+
+### =========================================================================
+### ESPECIALIDADES Y VERSIONADO DE IFC (Fase 3, ver
+### docs/roadmap-modulos-y-permisos.md) — documentos IFC + versiones,
+### complementa el MÓDULO DE METRADOS IFC de arriba.
+### =========================================================================
+
+### 1. Catálogo de especialidades (no depende de proyecto)
+GET {{baseUrl}}/ifc-specialties
+Authorization: Bearer {{accessToken}}
+
+
+### 2. Documentos IFC del proyecto, con todas sus versiones — lo que arma
+### el selector "reemplazar esta versión" del frontend.
+GET {{baseUrl}}/projects/{{createdProjectId}}/ifc-documents
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Subir una VERSIÓN NUEVA del documento creado en la request 1 del
+### MÓDULO DE METRADOS IFC (replaces_ifc_document_id, no specialty_id —
+### la especialidad es del documento, no de la versión). Al terminar
+### bien, esta versión pasa a is_current=true y la vieja
+### ({{processedIfcFileId}}) pierde sus datos derivados (tombstone) pero
+### su fila sigue viva como historial — ver insertarResultado en
+### ifc-processing-runner.ts.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="replaces_ifc_document_id"
+
+{{processedIfcDocumentId}}
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 4. Caso de error: subir un archivo NUEVO sin specialty_id ni
+### replaces_ifc_document_id -> 400 IFC_SPECIALTY_REQUIRED
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 5. Caso de error: specialty_id y replaces_ifc_document_id juntos -> 400
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="replaces_ifc_document_id"
+
+{{processedIfcDocumentId}}
+--WebAppBoundary
+Content-Disposition: form-data; name="specialty_id"
+
+2
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 6. Caso de error: replaces_ifc_document_id de un documento que no
+### existe (o es de otro proyecto) -> 404
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="replaces_ifc_document_id"
+
+999999
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 7. Lista de archivos del proyecto CON los campos de versión —
+### only_current=true reduce a solo la versión vigente de cada documento
+### (útil para no listar tombstones viejos en la UI principal).
+GET {{baseUrl}}/projects/{{createdProjectId}}/files?file_type=ifc&only_current=true
+Authorization: Bearer {{accessToken}}
 
 
 ### =========================================================================

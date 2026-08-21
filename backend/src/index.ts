@@ -12,6 +12,7 @@ import routerFiles, { fileContentRouter } from './routes/files.routes.js';
 import routerIfcMetrados, { ifcFilesRouter } from './routes/ifc-metrados.routes.js';
 import routerTemplates from './routes/templates.routes.js';
 import routerModules, { projectModulesRouter } from './routes/modules.routes.js';
+import routerIfcSpecialties, { projectIfcDocumentsRouter } from './routes/ifc-documents.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
 import { PUBLIC_UPLOADS_DIR } from './middlewares/upload.midleware.js';
@@ -47,6 +48,8 @@ app.use('/api/ifc-files', ifcFilesRouter );
 app.use('/api/templates', routerTemplates );
 app.use('/api/modules', routerModules );
 app.use('/api/projects', projectModulesRouter );
+app.use('/api/ifc-specialties', routerIfcSpecialties );
+app.use('/api/projects', projectIfcDocumentsRouter );
 
 
 app.use(errorHandler)

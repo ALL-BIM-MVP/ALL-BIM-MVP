@@ -94,6 +94,20 @@ END $$;
 
 
 -- ------------------------------------------------------------
+-- ESPECIALIDADES DE IFC (Fase 3 — ver
+-- docs/roadmap-modulos-y-permisos.md)
+-- ------------------------------------------------------------
+-- Catálogo inicial pedido por el cliente. Se pueden agregar más
+-- después sin migración (INSERT nuevo, is_active=true) — nada del
+-- backend depende de un code fijo salvo Zod validando "existe y está
+-- activa", igual que con modules.
+INSERT INTO ifc_specialties (code, name, is_active) VALUES
+    ('arquitectura', 'Arquitectura', true),
+    ('estructuras',  'Estructuras',  true),
+    ('sanitarias',   'Sanitarias',   true);
+
+
+-- ------------------------------------------------------------
 -- CATALOGO DE COLUMNAS BUILTIN PARA PLANTILLAS DE METRADO
 -- ------------------------------------------------------------
 -- Catálogo fijo de campos "de fábrica" que cualquier plantilla de

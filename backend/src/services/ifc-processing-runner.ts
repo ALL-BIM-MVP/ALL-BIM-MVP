@@ -227,10 +227,45 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
     try {
         await client.query("BEGIN");
 
+        // Versionado (Fase 3): esta fila puede ser la versión vigente
+        // de su documento, una versión nueva que va a REEMPLAZAR a la
+        // vigente, o un reintento de una versión que nunca llegó a ser
+        // vigente (status='error' previo) — los tres casos se resuelven
+        // igual acá, recién al confirmarse el éxito del procesamiento
+        // (nunca antes, ver decideProcessingState en
+        // ifc-metrados.service.ts: is_current arranca en false siempre).
+        //
+        // Si hay OTRA fila vigente para el mismo documento, es la
+        // versión "tombstone" saliente: se le borran los datos
+        // derivados (mismo mecanismo de abajo) y se le apaga
+        // is_current — su fila en ifc_files/files queda intacta como
+        // registro histórico (quién subió, cuándo, el .ifc físico sigue
+        // descargable), simplemente deja de tener metrado cargado.
+        const { rows: selfRows } = await client.query<{ ifc_document_id: string }>(
+            `SELECT ifc_document_id FROM ifc_files WHERE ifc_file_id = $1 FOR UPDATE`,
+            [ifcFileId]
+        );
+        const ifcDocumentId = selfRows[0]!.ifc_document_id;
+
+        const { rows: currentRows } = await client.query<{ ifc_file_id: string }>(
+            `SELECT ifc_file_id FROM ifc_files WHERE ifc_document_id = $1 AND is_current = true FOR UPDATE`,
+            [ifcDocumentId]
+        );
+        const oldCurrentId = currentRows[0] ? Number(currentRows[0].ifc_file_id) : null;
+
+        if (oldCurrentId !== null && oldCurrentId !== ifcFileId) {
+            await client.query(`DELETE FROM ifc_elements WHERE ifc_file_id = $1`, [oldCurrentId]);
+            await client.query(`DELETE FROM ifc_properties WHERE ifc_file_id = $1`, [oldCurrentId]);
+            await client.query(`DELETE FROM metrado_partidas WHERE ifc_file_id = $1`, [oldCurrentId]);
+            await client.query(`UPDATE ifc_files SET is_current = false WHERE ifc_file_id = $1`, [oldCurrentId]);
+        }
+
         // Los ON DELETE CASCADE del schema se llevan puestos
         // ifc_element_property_values/ifc_property_values (vía
         // ifc_elements/ifc_properties) y metrado_elements/
-        // metrado_partida_totals (vía metrado_partidas).
+        // metrado_partida_totals (vía metrado_partidas). Para una fila
+        // recién creada esto es un no-op — solo importa de verdad en
+        // force=true (reproceso en el lugar).
         await client.query(`DELETE FROM ifc_elements WHERE ifc_file_id = $1`, [ifcFileId]);
         await client.query(`DELETE FROM ifc_properties WHERE ifc_file_id = $1`, [ifcFileId]);
         await client.query(`DELETE FROM metrado_partidas WHERE ifc_file_id = $1`, [ifcFileId]);
@@ -324,7 +359,7 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
 
         await client.query(
             `UPDATE ifc_files
-                SET status = 'done', schema_version = $2, processed_at = NOW(), error_message = NULL
+                SET status = 'done', schema_version = $2, processed_at = NOW(), error_message = NULL, is_current = true
             WHERE ifc_file_id = $1`,
             [ifcFileId, resultado.schema_version]
         );

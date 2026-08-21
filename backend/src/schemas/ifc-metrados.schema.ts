@@ -11,9 +11,33 @@ export type IfcFileIdParam = z.infer<typeof IfcFileIdParamSchema>;
 // Variante JSON de POST /:projectId/ifc-metrados/process — "archivo ya
 // guardado" (en vez de multipart con un archivo nuevo). Si vino un
 // archivo por multipart, este body no se usa (el controller decide).
+//
+// replaces_ifc_document_id/specialty_id/document_name (Fase 3, ver
+// docs/roadmap-modulos-y-permisos.md) SOLO importan cuando el
+// procesamiento va a crear una fila ifc_files nueva (primera vez que
+// se procesa este file_id) — si ya existe (reproceso/force), el
+// service los ignora, la versión/documento de esa fila ya está fijada.
+// multer también deja los campos de texto de un multipart en req.body,
+// así este mismo schema sirve para las dos variantes del endpoint.
+//
+// - replaces_ifc_document_id: sube esta versión como una nueva versión
+//   de un ifc_documents YA existente (el flujo "reemplazar" del
+//   frontend) — no se manda specialty_id junto (la especialidad es del
+//   documento, no de la versión).
+// - specialty_id: obligatorio cuando NO viene replaces_ifc_document_id
+//   — crea un ifc_documents nuevo (documento de primera versión). Se
+//   valida en el service (existe + is_active), no acá.
+// - document_name: nombre del ifc_documents nuevo; si no viene, el
+//   service usa el nombre del archivo subido.
 export const ProcessIfcMetradosBodySchema = z.object({
     file_id: z.coerce.number().optional(),
-});
+    replaces_ifc_document_id: z.coerce.number().optional(),
+    specialty_id: z.coerce.number().optional(),
+    document_name: z.string().trim().min(1).max(150).optional(),
+}).refine(
+    (body) => !(body.replaces_ifc_document_id !== undefined && body.specialty_id !== undefined),
+    { message: "No se puede mandar replaces_ifc_document_id y specialty_id al mismo tiempo — la especialidad es del documento, no de la versión.", path: ["specialty_id"] }
+);
 
 export type ProcessIfcMetradosBody = z.infer<typeof ProcessIfcMetradosBodySchema>;
 

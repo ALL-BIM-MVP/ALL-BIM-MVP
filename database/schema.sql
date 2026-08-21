@@ -211,14 +211,70 @@ CREATE TABLE files (
     uploaded_by INT NOT NULL REFERENCES users(user_id)
 );
 
+-- ------------------------------------------------------------
+-- ESPECIALIDADES Y VERSIONADO DE IFC (Fase 3, ver
+-- docs/roadmap-modulos-y-permisos.md)
+-- ------------------------------------------------------------
+
+-- Catálogo en BD, mismo patrón que "modules" (code estable para
+-- referencias/Zod, name para mostrar). is_active permite desactivar
+-- una especialidad sin borrar el historial de documentos que ya la
+-- usan (specialty_id no se toca al desactivar).
+CREATE TABLE ifc_specialties (
+    ifc_specialty_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code VARCHAR(40) UNIQUE NOT NULL,
+    name VARCHAR(80) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Identidad ESTABLE de "un IFC" a través de sus versiones (ej. "Modelo
+-- de Estructuras" — v1, v2, v3...). Las subidas concretas (cada .ifc
+-- físico, con su propia fila en files/ifc_files) cuelgan de acá vía
+-- ifc_files.ifc_document_id, ver abajo. specialty_id es nullable
+-- porque los documentos del backfill (IFCs subidos antes de esta
+-- fase) no tienen especialidad asignada — los documentos nuevos SÍ la
+-- piden por Zod al crearse (backend, no acá).
+CREATE TABLE ifc_documents (
+    ifc_document_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    name VARCHAR(150) NOT NULL,
+    specialty_id INT REFERENCES ifc_specialties(ifc_specialty_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id)
+);
+
 CREATE TABLE ifc_files (
     ifc_file_id BIGINT PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,
+    ifc_document_id BIGINT NOT NULL REFERENCES ifc_documents(ifc_document_id) ON DELETE CASCADE,
+    -- version_number SIEMPRE lo calcula el backend (MAX actual + 1
+    -- dentro de una transacción con lock, ver ifc-documents.service.ts)
+    -- nunca lo manda el cliente — así no hace falta (ni tiene sentido)
+    -- una restricción de "no saltar números": el backend físicamente
+    -- no puede generar un hueco.
+    version_number INT NOT NULL,
+    -- Solo una versión "vigente" por documento a la vez — la única que
+    -- tiene datos derivados cargados (ifc_elements/ifc_properties/
+    -- metrado_partidas/...). Cuando una versión nueva pasa a vigente,
+    -- la vieja queda como "tombstone": su fila ifc_files (y la de
+    -- files) persiste como registro histórico (quién subió, cuándo, el
+    -- .ifc físico sigue descargable) pero sus datos derivados se
+    -- borran — ver insertarResultado en ifc-processing-runner.ts. Por
+    -- eso ifc_elements/metrado_partidas de una versión is_current=false
+    -- nunca deberían existir en la práctica (invariante de aplicación,
+    -- reforzada por ese mismo flujo, no hay forma limpia de expresarlo
+    -- como CHECK entre tablas en Postgres).
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
     schema_version VARCHAR(10),
     status VARCHAR(20) NOT NULL DEFAULT 'processing'
         CHECK (status IN ('processing','done','error')),
     processed_at TIMESTAMPTZ,
-    error_message TEXT
+    error_message TEXT,
+
+    UNIQUE (ifc_document_id, version_number)
 );
+-- Como mucho una versión vigente por documento — ídem
+-- idx_un_project_cover/idx_un_template_default más abajo.
+CREATE UNIQUE INDEX idx_un_ifc_document_current ON ifc_files (ifc_document_id) WHERE is_current = true;
 
 -- "files" es el archivo físico (metadata + ruta en disco); esta tabla
 -- es el ROL que cumple ese archivo para un proyecto — hoy solo se usa
