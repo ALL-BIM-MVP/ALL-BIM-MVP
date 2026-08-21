@@ -22,9 +22,13 @@ export const ProtectedRoute = ({ children, allowedRoles }: ProtectedRouteProps) 
     return <Navigate to="/login" replace />;
   }
 
-  // Con sesión, pero el rol no está en la lista permitida -> a dashboard
+  // Con sesión, pero el rol no está en la lista permitida -> a dashboard.
+  // OJO: la ruta real registrada en App.tsx es "/dashboard/projects", NO
+  // "/projects" (esa no existe — causaba "No routes matched location
+  // '/projects'" en consola cada vez que alguien sin el rol correcto
+  // entraba a una ruta protegida).
   if (allowedRoles && (!user || !allowedRoles.includes(user.rol_id))) {
-    return <Navigate to="/projects" replace />;
+    return <Navigate to="/dashboard/projects" replace />;
   }
 
   return <>{children}</>;

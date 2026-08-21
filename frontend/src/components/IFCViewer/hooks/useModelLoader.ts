@@ -1,14 +1,8 @@
-// Carga IFC con web-ifc. Fusiona geometría por color (menos draw calls = más fps
-// al orbitar), en vez de 1 malla por elemento IFC. Indexa parámetros de todos
-// los elementos (con su categoría/Pset) en un segundo paso ASÍNCRONO, después
-// de mostrar el modelo.
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import * as THREE from 'three';
-import * as WebIFC from 'web-ifc';
-import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { TypeGroup, ModelBounds, ViewPreset } from '../types';
 import { ThreeSceneController } from '../utils/ThreeSceneController';
-import { getIfcTypeName } from '../utils/ifcTypeNames';
+import { IfcWorkerClient } from '../workers/ifcWorkerClient';
 
 export interface ParamIndexEntry {
   expressId: number;
@@ -17,6 +11,11 @@ export interface ParamIndexEntry {
   category: string;
   paramName: string;
   paramValue: string;
+}
+
+export interface PendingScreenshot {
+  blob: Blob;
+  previewUrl: string;
 }
 
 interface ModelLoaderRefs {
@@ -48,13 +47,22 @@ export function useModelLoader(
   const [ready, setReady] = useState(false);
   const [typeGroups, setTypeGroups] = useState<TypeGroup[]>([]);
   const [paramIndex, setParamIndex] = useState<ParamIndexEntry[]>([]);
+  const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null);
+  const pendingScreenshotRef = useRef<PendingScreenshot | null>(null);
+  useEffect(() => { pendingScreenshotRef.current = pendingScreenshot; }, [pendingScreenshot]);
+
+  const [edgesVisible, setEdgesVisible] = useState(false);
+  const toggleEdges = useCallback(() => setEdgesVisible((prev) => !prev), []);
+  useEffect(() => {
+    rendererRef.current?.setEdgesVisible?.(edgesVisible);
+  }, [edgesVisible, ready, rendererRef]);
 
   useEffect(() => {
     let isMounted = true;
     let rafId: number | null = null;
     let resizeObserver: ResizeObserver | null = null;
     let controller: ThreeSceneController | null = null;
-    let api: WebIFC.IfcAPI | null = null;
+    let client: IfcWorkerClient | null = null;
 
     const loadModel = async () => {
       if (!fileBuffer || !canvasRef.current || !containerRef.current) {
@@ -85,74 +93,103 @@ export function useModelLoader(
         }
         canvas.style.width = '100%';
         canvas.style.height = '100%';
+        setProgress(10);
 
-        setDebugInfo('Inicializando web-ifc...');
-        api = new WebIFC.IfcAPI();
-        api.SetWasmPath('/wasm/', true);
-        await api.Init();
-        if (!isMounted) return;
-
-        setDebugInfo('Parseando archivo IFC...');
-        const modelID = api.OpenModel(new Uint8Array(fileBuffer), {
-          COORDINATE_TO_ORIGIN: true,
-          CIRCLE_SEGMENTS: 6,  // en gemetria poligiono
-        });
-        storeRef.current = { api, modelID };
+        setDebugInfo('Inicializando web-ifc (worker)...');
+        client = new IfcWorkerClient();
+        storeRef.current = { client };
+        setProgress(20);
 
         controller = new ThreeSceneController(canvas);
         rendererRef.current = controller;
 
-        setDebugInfo('Generando geometría...');
-        const { meshes, typeGroups: groups, expressIdToType } = buildMeshesFromModel(api, modelID);
-        if (!isMounted) return;
-        if (meshes.length === 0) throw new Error('No se generó geometría. ¿El IFC tiene geometría 3D?');
+        const bufferForWorker = fileBuffer.slice(0);
 
-        setTypeGroups(groups);
+        await new Promise<void>((resolve, reject) => {
+          if (!client) { reject(new Error('No se pudo inicializar el worker de IFC.')); return; }
 
-        const bounds = computeBoundsFromMeshes(meshes);
-        modelBoundsRef.current = bounds;
-        controller.setModelBounds(bounds);
+          client.openModel(bufferForWorker, {
+            onProgress: (percent, label) => {
+              if (!isMounted) return;
+              setProgress(percent);
+              setDebugInfo(label);
+            },
 
-        controller.loadGeometry(meshes);
-        controller.fitToView();
+            onShellReady: ({ shellMeshes, typeGroups: groups, expressIdToTypeEntries }) => {
+              if (!isMounted || !controller) return;
 
-        let lastTime = performance.now();
-        const renderLoop = () => {
-          if (!isMounted || !controller) return;
-          const now = performance.now();
-          const dt = Math.min((now - lastTime) / 1000, 0.1);
-          lastTime = now;
+              const meshes = shellMeshes.map(materializeMesh);
+              if (meshes.length === 0) {
+                reject(new Error('No se generó geometría. ¿El IFC tiene geometría 3D?'));
+                return;
+              }
+              setProgress(85);
 
-          onFrame?.(dt);
-          controller.getCamera().update(dt);
+              setTypeGroups(groups);
 
-          controller.render({
-            clearColor: getClearColor?.() ?? [0.9333, 0.9333, 0.9333, 1],
-            sectionPlane: getSectionPlane?.(),
+              const bounds = computeBoundsFromMeshes(meshes);
+              modelBoundsRef.current = bounds;
+              controller.setModelBounds(bounds);
+
+              controller.loadGeometry(meshes);
+              controller.fitToView();
+
+              let lastTime = performance.now();
+              const renderLoop = () => {
+                if (!isMounted || !controller) return;
+                const now = performance.now();
+                const dt = Math.min((now - lastTime) / 1000, 0.1);
+                lastTime = now;
+
+                onFrame?.(dt);
+                controller.getCamera().update(dt);
+
+                controller.render({
+                  clearColor: getClearColor?.() ?? [0.9333, 0.9333, 0.9333, 1],
+                  sectionPlane: getSectionPlane?.(),
+                });
+                rafId = requestAnimationFrame(renderLoop);
+              };
+              renderLoop();
+
+              const resizeCanvasToContainer = () => {
+                const dpr = Math.min(window.devicePixelRatio || 1, 2);
+                const newRect = container.getBoundingClientRect();
+                const w = Math.max(1, Math.round(newRect.width * dpr));
+                const h = Math.max(1, Math.round(newRect.height * dpr));
+                if (canvas.width === w && canvas.height === h) return;
+                controller?.resize(w, h);
+              };
+              requestAnimationFrame(() => requestAnimationFrame(resizeCanvasToContainer));
+              resizeObserver = new ResizeObserver(resizeCanvasToContainer);
+              resizeObserver.observe(container);
+
+              setDebugInfo('');
+              setLoading(false);
+              setProgress(100);
+              setReady(true);
+
+              const clientRef = client;
+              setTimeout(async () => {
+                try {
+                  const index = await clientRef?.indexAllParams();
+                  if (isMounted && index) setParamIndex(index);
+                } catch { /* indexado opcional */ }
+              }, 1000);
+
+              resolve();
+              void expressIdToTypeEntries;
+            },
+
+            onDetailMesh: (payload) => {
+              if (!isMounted || !controller) return;
+              controller.loadGeometry([materializeMesh(payload)]);
+            },
+
+            onDetailDone: () => {
+              // Detalle terminado
+            },
           });
-          rafId = requestAnimationFrame(renderLoop);
-        };
-        renderLoop();
-
-        const resizeCanvasToContainer = () => {
-          const dpr = Math.min(window.devicePixelRatio || 1, 2);
-          const newRect = container.getBoundingClientRect();
-          const w = Math.max(1, Math.round(newRect.width * dpr));
-          const h = Math.max(1, Math.round(newRect.height * dpr));
-          if (canvas.width === w && canvas.height === h) return;
-          controller?.resize(w, h);
-        };
-        requestAnimationFrame(() => requestAnimationFrame(resizeCanvasToContainer));
-        resizeObserver = new ResizeObserver(resizeCanvasToContainer);
-        resizeObserver.observe(container);
-
-        setDebugInfo('');
-        setLoading(false);
-        setProgress(100);
-        setReady(true);
-
-        indexAllParameters(api, modelID, expressIdToType, (idx) => {
-          if (isMounted) setParamIndex(idx);
         });
       } catch (err) {
         if (!isMounted) return;
@@ -171,8 +208,12 @@ export function useModelLoader(
       if (rafId !== null) cancelAnimationFrame(rafId);
       resizeObserver?.disconnect();
       controller?.dispose();
+      client?.dispose();
       rendererRef.current = null;
       storeRef.current = null;
+      if (pendingScreenshotRef.current) {
+        URL.revokeObjectURL(pendingScreenshotRef.current.previewUrl);
+      }
     };
   }, [fileBuffer]);
 
@@ -189,16 +230,114 @@ export function useModelLoader(
   const takeScreenshot = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const link = document.createElement('a');
-    link.download = `modelo-ifc-${Date.now()}.png`;
-    link.href = canvas.toDataURL('image/png');
-    link.click();
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const previewUrl = URL.createObjectURL(blob);
+      if (pendingScreenshotRef.current) {
+        URL.revokeObjectURL(pendingScreenshotRef.current.previewUrl);
+      }
+      setPendingScreenshot({ blob, previewUrl });
+    }, 'image/png');
   }, [canvasRef]);
 
-  return { loading, error, progress, debugInfo, ready, typeGroups, paramIndex, handleFitToView, setPresetView, takeScreenshot };
+  const discardScreenshot = useCallback(() => {
+    if (pendingScreenshotRef.current) {
+      URL.revokeObjectURL(pendingScreenshotRef.current.previewUrl);
+    }
+    setPendingScreenshot(null);
+  }, []);
+
+  const downloadScreenshot = useCallback(() => {
+    const current = pendingScreenshotRef.current;
+    if (!current) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const link = document.createElement('a');
+      link.download = `modelo-ifc-${Date.now()}.png`;
+      link.href = reader.result as string;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+    reader.readAsDataURL(current.blob);
+    URL.revokeObjectURL(current.previewUrl);
+    setPendingScreenshot(null);
+  }, []);
+
+  return {
+    loading, error, progress, debugInfo, ready, typeGroups, paramIndex,
+    handleFitToView, setPresetView,
+    takeScreenshot, pendingScreenshot, discardScreenshot, downloadScreenshot,
+    edgesVisible, toggleEdges,
+  };
 }
 
-// --- helpers de geometría ---
+function materializeMesh(payload: MeshPayload): THREE.Mesh {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(payload.position, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(payload.normal, 3));
+  geometry.setIndex(new THREE.BufferAttribute(payload.index, 1));
+  geometry.setAttribute('expressId', new THREE.BufferAttribute(payload.expressId, 1));
+  geometry.setAttribute('hidden', new THREE.BufferAttribute(new Float32Array(payload.expressId.length), 1));
+  geometry.setAttribute('selected', new THREE.BufferAttribute(new Float32Array(payload.expressId.length), 1));
+
+  const material = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(payload.color.r, payload.color.g, payload.color.b),
+    transparent: payload.opacity < 1,
+    opacity: payload.opacity,
+    side: THREE.DoubleSide,
+    roughness: 0.6,
+    metalness: 0.0,
+    polygonOffset: true,
+    polygonOffsetFactor: 0.5,
+    polygonOffsetUnits: 0.5,
+  });
+  applyPerElementShader(material);
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.expressIdRanges = payload.ranges;
+
+  const edgesGeometry = new THREE.BufferGeometry();
+  edgesGeometry.setAttribute('position', new THREE.BufferAttribute(payload.edgePosition, 3));
+  edgesGeometry.setAttribute('expressId', new THREE.BufferAttribute(payload.edgeExpressId, 1));
+  edgesGeometry.setAttribute('hidden', new THREE.BufferAttribute(new Float32Array(payload.edgeExpressId.length), 1));
+
+  const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x5a5a5a, transparent: true, opacity: 0.3 });
+  applyEdgeHiddenShader(edgesMaterial);
+  const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+  edges.userData.candidateIdsPerVertex = payload.edgeCandidateIds;
+  edges.visible = false;
+  edges.raycast = () => {};
+  mesh.add(edges);
+
+  return mesh;
+}
+
+function computeBoundsFromMeshes(meshes: THREE.Mesh[]): ModelBounds | null {
+  const box = new THREE.Box3();
+  let found = false;
+  for (const mesh of meshes) {
+    mesh.geometry.computeBoundingBox();
+    if (mesh.geometry.boundingBox) {
+      box.union(mesh.geometry.boundingBox);
+      found = true;
+    }
+  }
+  if (!found) return null;
+  return {
+    min: { x: box.min.x, y: box.min.y, z: box.min.z },
+    max: { x: box.max.x, y: box.max.y, z: box.max.z },
+  };
+}
+
+function boostSaturation(color: THREE.Color, factor: number): THREE.Color {
+  const hsl = { h: 0, s: 0, l: 0 };
+  color.getHSL(hsl);
+  const boosted = new THREE.Color();
+  boosted.setHSL(hsl.h, Math.min(1, hsl.s * factor), hsl.l);
+  return boosted;
+}
+void boostSaturation;
 
 function applyPerElementShader(material: THREE.MeshStandardMaterial) {
   material.onBeforeCompile = (shader) => {
@@ -237,202 +376,15 @@ function applyEdgeHiddenShader(material: THREE.LineBasicMaterial) {
   material.customProgramCacheKey = () => 'edge-hidden';
 }
 
-function buildMeshesFromModel(api: WebIFC.IfcAPI, modelID: number) {
-  const byType = new Map<string, number[]>();
-  const colorGroups = new Map<string, { color: THREE.Color; opacity: number; geometries: THREE.BufferGeometry[] }>();
-  const expressIdToType = new Map<number, string>();
-
-  api.StreamAllMeshes(modelID, (flatMesh: any) => {
-    const expressId = flatMesh.expressID;
-
-    let typeName = 'UNKNOWN';
-    try {
-      const typeCode = api.GetLineType(modelID, expressId);
-      typeName = getIfcTypeName(api, typeCode);
-    } catch { /* si falla, se agrupa como UNKNOWN */ }
-    if (!byType.has(typeName)) byType.set(typeName, []);
-    byType.get(typeName)!.push(expressId);
-    expressIdToType.set(expressId, typeName);
-
-    const placedGeometries = flatMesh.geometries;
-    for (let i = 0; i < placedGeometries.size(); i++) {
-      try {
-        const placed = placedGeometries.get(i);
-        const ifcGeom = api.GetGeometry(modelID, placed.geometryExpressID);
-
-        const vertexData = api.GetVertexArray(ifcGeom.GetVertexData(), ifcGeom.GetVertexDataSize());
-        const rawIndexData = api.GetIndexArray(ifcGeom.GetIndexData(), ifcGeom.GetIndexDataSize());
-        const indexData = new Uint32Array(rawIndexData);
-
-        if (!vertexData?.length || !indexData?.length) continue;
-
-        const vertCount = vertexData.length / 6;
-        const positions = new Float32Array(vertCount * 3);
-        const normals = new Float32Array(vertCount * 3);
-        for (let v = 0, p = 0; v < vertexData.length; v += 6, p += 3) {
-          positions[p] = vertexData[v]; positions[p + 1] = vertexData[v + 1]; positions[p + 2] = vertexData[v + 2];
-          normals[p] = vertexData[v + 3]; normals[p + 1] = vertexData[v + 4]; normals[p + 2] = vertexData[v + 5];
-        }
-
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-        geometry.setIndex(new THREE.BufferAttribute(indexData, 1));
-
-        const matrix = new THREE.Matrix4().fromArray(placed.flatTransformation);
-        geometry.applyMatrix4(matrix);
-
-        geometry.setAttribute('expressId', new THREE.BufferAttribute(new Float32Array(vertCount).fill(expressId), 1));
-        geometry.setAttribute('hidden', new THREE.BufferAttribute(new Float32Array(vertCount), 1));
-        geometry.setAttribute('selected', new THREE.BufferAttribute(new Float32Array(vertCount), 1));
-       
-
-        const c = placed.color;
-        const key = `${Math.round(c.x * 255)}_${Math.round(c.y * 255)}_${Math.round(c.z * 255)}_${Math.round(c.w * 100)}`;
-        if (!colorGroups.has(key)) {
-          colorGroups.set(key, { color: new THREE.Color(c.x, c.y, c.z), opacity: c.w, geometries: [] });
-        }
-        colorGroups.get(key)!.geometries.push(geometry);
-      } catch (err) {
-        console.warn(`Geometría inválida en expressId ${expressId}, se omite:`, err);
-        continue;
-      }
-    }
-  });
-
-  const meshes: THREE.Mesh[] = [];
-  colorGroups.forEach(({ color, opacity, geometries }) => {
-    if (geometries.length === 0) return;
-
-    let merged = mergeGeometries(geometries, false);
-    geometries.forEach((g) => g.dispose());
-    if (!merged) return;
-
-    merged = mergeVertices(merged, 1e-4);
-    merged.computeVertexNormals();
-
-    const expressIdAttr = merged.getAttribute('expressId') as THREE.BufferAttribute;
-    const ranges: { expressId: number; start: number; end: number }[] = [];
-    let rangeStart = 0;
-    let currentId = expressIdAttr.getX(0);
-    for (let i = 1; i <= expressIdAttr.count; i++) {
-      const val = i < expressIdAttr.count ? expressIdAttr.getX(i) : NaN;
-      if (val !== currentId) {
-        ranges.push({ expressId: currentId, start: rangeStart, end: i });
-        rangeStart = i;
-        currentId = val;
-      }
-    }
-
-    const material = new THREE.MeshStandardMaterial({
-      color,
-      transparent: opacity < 1,
-      opacity,
-      side: THREE.DoubleSide,
-      roughness: 0.85,
-      metalness: 0.0,
-      polygonOffset: true,
-      polygonOffsetFactor: 0.5,
-      polygonOffsetUnits: 0.5,
-    });
-    applyPerElementShader(material);
-
-    const mesh = new THREE.Mesh(merged, material);
-    mesh.userData.expressIdRanges = ranges;
-
-    const posAttrMerged = merged.getAttribute('position') as THREE.BufferAttribute;
-    const posToExpressId = new Map<string, number>();
-    for (let i = 0; i < posAttrMerged.count; i++) {
-      const key = `${posAttrMerged.getX(i).toFixed(4)}_${posAttrMerged.getY(i).toFixed(4)}_${posAttrMerged.getZ(i).toFixed(4)}`;
-      posToExpressId.set(key, expressIdAttr.getX(i));
-    }
-
-    const edgesGeometry = new THREE.EdgesGeometry(merged, 40);
-    const edgePos = edgesGeometry.getAttribute('position') as THREE.BufferAttribute;
-    const edgeExpressId = new Float32Array(edgePos.count);
-    const edgeHidden = new Float32Array(edgePos.count);
-    for (let i = 0; i < edgePos.count; i++) {
-      const key = `${edgePos.getX(i).toFixed(4)}_${edgePos.getY(i).toFixed(4)}_${edgePos.getZ(i).toFixed(4)}`;
-      edgeExpressId[i] = posToExpressId.get(key) ?? -1;
-    }
-    edgesGeometry.setAttribute('expressId', new THREE.BufferAttribute(edgeExpressId, 1));
-    edgesGeometry.setAttribute('hidden', new THREE.BufferAttribute(edgeHidden, 1));
-
-    const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x5a5a5a, transparent: true, opacity: 0.3 });
-    applyEdgeHiddenShader(edgesMaterial);
-    const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
-    edges.raycast = () => {};
-    mesh.add(edges);
-
-    meshes.push(mesh);
-  });
-
-  const typeGroups: TypeGroup[] = Array.from(byType.entries())
-    .map(([type, ids]) => ({ type, ids }))
-    .sort((a, b) => b.ids.length - a.ids.length);
-
-  return { meshes, typeGroups, expressIdToType };
-}
-
-async function indexAllParameters(
-  api: WebIFC.IfcAPI,
-  modelID: number,
-  expressIdToType: Map<number, string>,
-  onDone: (index: ParamIndexEntry[]) => void
-) {
-  const paramIndex: ParamIndexEntry[] = [];
-  const ids = Array.from(expressIdToType.keys());
-
-  for (const expressId of ids) {
-    try {
-      const line = api.GetLine(modelID, expressId, true);
-      const elementName = line.Name?.value || `#${expressId}`;
-      const typeName = expressIdToType.get(expressId) ?? 'UNKNOWN';
-
-      const psetLines = (await api.properties?.getPropertySets?.(modelID, expressId, true)) ?? [];
-
-      for (const pset of psetLines) {
-        const category = pset.Name?.value ?? 'General';
-        for (const propRef of pset.HasProperties || []) {
-          try {
-            // propRef puede venir como el objeto de propiedad completo (con
-            // Name/NominalValue directo) o como referencia numérica a resolver
-            // con GetLine — depende de la versión de web-ifc.
-            let propLine: any = propRef;
-            if (propRef?.Name === undefined && propRef?.NominalValue === undefined) {
-              const propId = typeof propRef === 'number' ? propRef : propRef?.value;
-              if (typeof propId === 'number') {
-                propLine = api.GetLine(modelID, propId);
-              } else {
-                continue;
-              }
-            }
-
-            const paramName = propLine.Name?.value ?? 'Propiedad';
-            const rawValue = propLine.NominalValue?.value ?? propLine.NominalValue ?? '';
-            paramIndex.push({ expressId, elementName, typeName, category, paramName, paramValue: String(rawValue) });
-          } catch { /* propiedad individual no disponible, se sigue con la siguiente */ }
-        }
-      }
-    } catch { /* elemento sin propiedades legibles, se sigue sin indexar */ }
-  }
-
-  onDone(paramIndex);
-}
-
-function computeBoundsFromMeshes(meshes: THREE.Mesh[]): ModelBounds | null {
-  const box = new THREE.Box3();
-  let found = false;
-  for (const mesh of meshes) {
-    mesh.geometry.computeBoundingBox();
-    if (mesh.geometry.boundingBox) {
-      box.union(mesh.geometry.boundingBox);
-      found = true;
-    }
-  }
-  if (!found) return null;
-  return {
-    min: { x: box.min.x, y: box.min.y, z: box.min.z },
-    max: { x: box.max.x, y: box.max.y, z: box.max.z },
-  };
+interface MeshPayload {
+  color: { r: number; g: number; b: number };
+  opacity: number;
+  position: Float32Array;
+  normal: Float32Array;
+  index: Uint32Array;
+  expressId: Float32Array;
+  ranges: { expressId: number; start: number; end: number }[];
+  edgePosition: Float32Array;
+  edgeExpressId: Float32Array;
+  edgeCandidateIds: number[][];
 }

@@ -54,3 +54,26 @@ export const createInvitation = async (data: { email: string; role_id: number}) 
 export const getRoles = async () => {
   return await api.get('/api/roles');
 };
+
+// 6. Historial de invitaciones enviadas (solo ADMINISTRADOR/SUPERVISOR
+// — mismo criterio que createInvitation). "status" ya viene calculado
+// del backend ("pendiente" | "usado" | "vencido"), no hace falta
+// derivarlo de used/expires_at del lado del frontend.
+export interface InvitationHistoryItem {
+  invitation_id: number;
+  email: string;
+  created_at: string;
+  expires_at: string;
+  used: boolean;
+  status: 'pendiente' | 'usado' | 'vencido';
+  role: {
+    role_id: number;
+    role_name: string;
+  };
+}
+
+export const getInvitations = async (limit?: number): Promise<InvitationHistoryItem[]> => {
+  const qs = limit ? `?limit=${limit}` : '';
+  const response = await api.get(`/api/invitations${qs}`);
+  return response || [];
+};

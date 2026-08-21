@@ -4,13 +4,8 @@ import type { ModelBounds, ViewPreset } from '../types';
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-// 👇 GROSOR DEL TRAZO DE PINTADO — modificá este valor (en metros/unidades del
-// modelo) para hacerlo más ancho o más fino. 0.008 = 8mm de radio (~16mm de
-// diámetro). Subilo un poco (ej: 0.012) si lo querés más grueso, bajalo (ej:
-// 0.005) si lo querés más fino. No lo subas demasiado o se va a ver como un
-// caño en vez de un marcador.
 const STROKE_RADIUS = 0.015;
-const STROKE_RADIAL_SEGMENTS = 12; // 6 = hexagonal, suficiente y liviano. 8+ = más redondo pero más caro.
+const STROKE_RADIAL_SEGMENTS = 12;
 
 class OrbitCameraController {
   camera: THREE.PerspectiveCamera;
@@ -86,8 +81,6 @@ class OrbitCameraController {
     this.animT = 0;
   }
 
-  // Vuela hacia un punto arbitrario del espacio (no una vista predefinida) —
-  // usado para centrar la cámara sobre un elemento buscado/seleccionado.
   flyToPoint(point: { x: number; y: number; z: number }, radius = 5) {
     this.animStart = { target: this.target.clone(), spherical: this.spherical.clone() };
     const endSpherical = this.spherical.clone();
@@ -160,17 +153,19 @@ export class ThreeSceneController {
   private selectedIds = new Set<number>();
   private clipPlane: THREE.Plane | null = null;
   private ghostedIds = new Set<number>();
-  private lightBgTexture: THREE.CanvasTexture;
+  private lightBgColor: THREE.Color;
   private darkBgTexture: THREE.CanvasTexture;
   private elementMarker: THREE.Box3Helper | null = null;
 
-  // Trazos de pintado: cada uno es un Mesh (tubo), no una Line — así tiene
-  // grosor real que se ve consistente desde cualquier ángulo de cámara.
   private paintStrokes = new Map<string, THREE.Mesh>();
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      preserveDrawingBuffer: true,
+    });
     this.renderer.localClippingEnabled = true;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.NoToneMapping;
@@ -179,12 +174,12 @@ export class ThreeSceneController {
     this.cameraController = new OrbitCameraController(canvas.width / Math.max(1, canvas.height));
 
     this.scene.add(
-      new THREE.HemisphereLight(0xffffff, 0x8899aa, 0.9),
-      (() => { const l = new THREE.DirectionalLight(0xffffff, 0.9); l.position.set(5, 10, 7); return l; })(),
-      (() => { const l = new THREE.DirectionalLight(0xffffff, 0.4); l.position.set(-5, 5, -7); return l; })()
+      new THREE.HemisphereLight(0xffffff, 0x8899aa, 1.0),
+      (() => { const l = new THREE.DirectionalLight(0xffffff, 1.0); l.position.set(5, 10, 7); return l; })(),
+      (() => { const l = new THREE.DirectionalLight(0xffffff, 0.5); l.position.set(-5, 5, -7); return l; })()
     );
 
-    this.lightBgTexture = this.buildGradientTexture('#f5f6f8', '#c8ccd1');
+    this.lightBgColor = new THREE.Color('#f0f1f3');
     this.darkBgTexture = this.buildGradientTexture('#2a2e33', '#0d0f11');
   }
 
@@ -225,9 +220,6 @@ export class ThreeSceneController {
 
   getCamera() { return this.cameraController; }
 
-  // Marca el elemento con un box outline rojo que ignora el depth buffer —
-  // se ve "atravesando" cualquier geometría que esté delante, desde cualquier
-  // ángulo, como un láser de contorno. Reemplaza cualquier marcador anterior.
   showElementMarker(expressId: number) {
     this.clearElementMarker();
 
@@ -248,10 +240,10 @@ export class ThreeSceneController {
 
     const marker = new THREE.Box3Helper(box, new THREE.Color(0x00e5ff));
     const material = marker.material as THREE.LineBasicMaterial;
-    material.depthTest = false;   // clave: ignora qué hay delante, siempre visible
+    material.depthTest = false;
     material.depthWrite = false;
     material.transparent = true;
-    marker.renderOrder = 9999;    // se dibuja último, por encima de todo lo demás
+    marker.renderOrder = 9999;
 
     this.scene.add(marker);
     this.elementMarker = marker;
@@ -304,13 +296,17 @@ export class ThreeSceneController {
 
       const edges = mesh.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
       if (edges) {
-        const edgeExpressIdAttr = edges.geometry.getAttribute('expressId') as THREE.BufferAttribute;
         const edgeHiddenAttr = edges.geometry.getAttribute('hidden') as THREE.BufferAttribute;
-        for (let i = 0; i < edgeExpressIdAttr.count; i++) {
-          const id = edgeExpressIdAttr.getX(i);
-          const isHidden = id === -1
-            ? false
-            : (this.isolatedIds ? !this.isolatedIds.has(id) : false) || this.hiddenIds.has(id);
+        const candidatesPerVertex = (edges.userData.candidateIdsPerVertex as number[][] | undefined) ?? [];
+        const isElementHidden = (id: number) =>
+          (this.isolatedIds ? !this.isolatedIds.has(id) : false) || this.hiddenIds.has(id);
+        const anyFilterActive = this.isolatedIds !== null || this.hiddenIds.size > 0;
+
+        for (let i = 0; i < edgeHiddenAttr.count; i++) {
+          const candidates = candidatesPerVertex[i];
+          const isHidden = !candidates || candidates.length === 0
+            ? anyFilterActive
+            : candidates.some(isElementHidden);
           edgeHiddenAttr.setX(i, isHidden ? 1 : 0);
         }
         edgeHiddenAttr.needsUpdate = true;
@@ -318,19 +314,16 @@ export class ThreeSceneController {
     }
   }
   setHiddenEntities(ids: Set<number>) { this.hiddenIds = ids; this.applyVisibilityFlags(); }
+
+  setEdgesVisible(visible: boolean) {
+    for (const mesh of this.meshes) {
+      const edges = mesh.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
+      if (edges) edges.visible = visible;
+    }
+  }
   setIsolatedEntities(ids: Set<number> | null) { this.isolatedIds = ids; this.applyVisibilityFlags(); }
   getHiddenIds() { return this.hiddenIds; }
 
-  // FIX: la ocultación (ocultar puntual / aislar) NO usa mesh.visible —
-  // usa un atributo custom por vértice ("hidden") leído por el shader,
-  // porque un solo THREE.Mesh agrupa MUCHOS elementos IFC juntos en la
-  // misma geometría (no hay un mesh por elemento). Por eso el raycaster
-  // de Three.js (que solo entiende object.visible, no atributos custom)
-  // sigue "pegándole" a triángulos ocultos — visualmente invisibles,
-  // pero geométricamente presentes. Este helper chequea el vértice
-  // PUNTUAL que golpeó el rayo contra ese mismo atributo, para poder
-  // saltearlo en pick()/raycastSceneMagnetic()/raycastFaceCross() y
-  // seguir buscando el próximo hit real (lo que sí se puede ver).
   private isHitOnHiddenVertex(mesh: THREE.Mesh, faceIndex: number): boolean {
     const geom = mesh.geometry;
     const hiddenAttr = geom.getAttribute('hidden') as THREE.BufferAttribute | undefined;
@@ -380,8 +373,6 @@ export class ThreeSceneController {
     return null;
   }
 
-  // Volumen (m³) y área (m²) calculados geométricamente a partir de los
-  // triángulos reales del elemento.
   getElementStats(expressId: number): { volume: number; area: number } | null {
     const locations = this.idToLocation.get(expressId);
     if (!locations || locations.length === 0) return null;
@@ -413,12 +404,6 @@ export class ThreeSceneController {
     return { volume: Math.abs(volume), area };
   }
 
-  // Vuela la cámara hacia el bounding box real del elemento — usado al
-  // seleccionar por búsqueda/ID, para que quede centrado en pantalla sin
-  // importar dónde esté ni si estaba fuera de vista.
-  // Calcula centro, radio y posición final de cámara para volar hacia un
-  // elemento — SIN animar todavía. Separado de flyToElement() para poder
-  // chequear qué hay en el camino antes de mover la cámara de verdad.
   computeFlyToElementTarget(expressId: number): { center: THREE.Vector3; radius: number; cameraPosition: THREE.Vector3 } | null {
     const locations = this.idToLocation.get(expressId);
     if (!locations || locations.length === 0) return null;
@@ -440,8 +425,6 @@ export class ThreeSceneController {
     const maxDimension = Math.max(size.x, size.y, size.z);
     const radius = Math.max(size.length() * 0.8, maxDimension * 0.75, 1.5);
 
-    // Mismo ángulo de vista actual — flyToElement no rota la cámara, solo
-    // cambia el punto al que mira y la distancia.
     const currentOffset = this.cameraController.camera.position.clone().sub(this.cameraController.target);
     const direction = currentOffset.lengthSq() > 0 ? currentOffset.normalize() : new THREE.Vector3(0, 0, 1);
     const cameraPosition = center.clone().addScaledVector(direction, radius);
@@ -449,16 +432,11 @@ export class ThreeSceneController {
     return { center, radius, cameraPosition };
   }
 
-  // Centro del elemento — usado para anclar el popup cuando la selección
-  // viene del buscador (no hay punto de click disponible).
   getElementCenter(expressId: number): { x: number; y: number; z: number } | null {
     const result = this.computeFlyToElementTarget(expressId);
     return result ? { x: result.center.x, y: result.center.y, z: result.center.z } : null;
   }
 
-  // Vuela la cámara hacia el bounding box real del elemento — usado al
-  // seleccionar por búsqueda/ID, para que quede centrado en pantalla sin
-  // importar dónde esté ni si estaba fuera de vista.
   flyToElement(expressId: number) {
     const result = this.computeFlyToElementTarget(expressId);
     if (!result) return;
@@ -468,9 +446,6 @@ export class ThreeSceneController {
     );
   }
 
-  // Elementos (distintos del buscado) que quedan en la línea entre la
-  // posición final de cámara y el centro del elemento — lo que bloquearía
-  // la vista una vez que la cámara llegue ahí.
   getElementsBlockingView(cameraPosition: THREE.Vector3, targetCenter: THREE.Vector3, excludeExpressId: number): number[] {
     const direction = targetCenter.clone().sub(cameraPosition);
     const distanceToTarget = direction.length();
@@ -478,9 +453,9 @@ export class ThreeSceneController {
     direction.normalize();
 
     this.raycaster.set(cameraPosition, direction);
-    this.raycaster.far = distanceToTarget - 0.01; // corta antes de llegar al elemento buscado
+    this.raycaster.far = distanceToTarget - 0.01;
     const hits = this.raycaster.intersectObjects(this.meshes, false);
-    this.raycaster.far = Infinity; // restaurar, para no afectar pick()/raycastSceneMagnetic
+    this.raycaster.far = Infinity;
 
     const blockingIds = new Set<number>();
     for (const hit of hits) {
@@ -627,7 +602,16 @@ export class ThreeSceneController {
   // llegan hasta su borde real, más un tercer brazo perpendicular que sale hacia
   // el lado VISIBLE (el que mira la cámara) y busca si hay otro elemento ahí
   // adelante — como un láser de profundidad. Si no hay nada, ese brazo es null.
-  raycastFaceCross(cssX: number, cssY: number): {
+  //
+  // fast=true (usado durante el ARRASTRE en vivo, una vez por frame) hace
+  // DOS recortes para que sea barato en elementos con muchos triángulos:
+  // 1) salta el recorrido de todos los triángulos del elemento para armar
+  //    el contorno exacto de la cara — usa directo el triángulo golpeado
+  //    como aproximación (igual de liviano que el snap de la medición).
+  // 2) salta el raycast extra de profundidad (recorre TODO el modelo).
+  // Al soltar el mouse se llama una vez más con fast=false para el
+  // resultado final, exacto en ambos aspectos.
+  raycastFaceCross(cssX: number, cssY: number, fast = false): {
     center: { x: number; y: number; z: number };
     normal: { x: number; y: number; z: number };
     uPos: { x: number; y: number; z: number };
@@ -645,7 +629,7 @@ export class ThreeSceneController {
 
     const ndc = this.ndcFromCanvasPixels(pxX, pxY);
     this.raycaster.setFromCamera(ndc, this.cameraController.camera);
-    const rayDirection = this.raycaster.ray.direction.clone(); // guardarla: se pisa en el 2do raycast
+    const rayDirection = this.raycaster.ray.direction.clone();
 
     const hits = this.raycaster.intersectObjects(this.meshes, false);
     const hit = hits.find(
@@ -683,10 +667,6 @@ export class ThreeSceneController {
     if (normal.lengthSq() < 1e-12) return null;
     normal.normalize();
 
-    // El orden de vértices del triángulo no garantiza hacia dónde apunta la
-    // normal. La forzamos a apuntar hacia la cámara (el lado que estás viendo):
-    // si va "en el mismo sentido" que el rayo (hacia adentro de la pantalla),
-    // se invierte.
     if (normal.dot(rayDirection) > 0) normal.negate();
 
     const origin = hit.point.clone();
@@ -696,27 +676,40 @@ export class ThreeSceneController {
 
     type Tri = { a: number; b: number; c: number };
     const coplanarTris: Tri[] = [];
-    const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
-    const tmpNormal = new THREE.Vector3();
 
-    for (let t = 0; t < index.count; t += 3) {
-      const a = index.getX(t), b = index.getX(t + 1), c = index.getX(t + 2);
-      if (a < range.start || a >= range.end) continue;
+    // fast=true (durante el arrastre en vivo): saltea el recorrido de
+    // TODOS los triángulos del elemento — en un elemento con miles de
+    // triángulos (ej. una losa grande) ese loop es el costo real por
+    // frame, no el raycast de profundidad. Se usa directo el triángulo
+    // que golpeó el rayo como aproximación de la cara (igual de rápido
+    // que la medición simple, que también trabaja solo cerca del punto).
+    // Al soltar el mouse se recalcula completo (fast=false) para que el
+    // contorno de la cara quede exacto, no aproximado.
+    if (fast) {
+      coplanarTris.push({ a: va0, b: vb0, c: vc0 });
+    } else {
+      const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
+      const tmpNormal = new THREE.Vector3();
 
-      tmpA.fromBufferAttribute(posAttr, a).applyMatrix4(matrixWorld);
-      tmpB.fromBufferAttribute(posAttr, b).applyMatrix4(matrixWorld);
-      tmpC.fromBufferAttribute(posAttr, c).applyMatrix4(matrixWorld);
+      for (let t = 0; t < index.count; t += 3) {
+        const a = index.getX(t), b = index.getX(t + 1), c = index.getX(t + 2);
+        if (a < range.start || a >= range.end) continue;
 
-      tmpNormal.subVectors(tmpB, tmpA).cross(new THREE.Vector3().subVectors(tmpC, tmpA));
-      if (tmpNormal.lengthSq() < 1e-12) continue;
-      tmpNormal.normalize();
+        tmpA.fromBufferAttribute(posAttr, a).applyMatrix4(matrixWorld);
+        tmpB.fromBufferAttribute(posAttr, b).applyMatrix4(matrixWorld);
+        tmpC.fromBufferAttribute(posAttr, c).applyMatrix4(matrixWorld);
 
-      if (Math.abs(tmpNormal.dot(normal)) < NORMAL_DOT_EPS) continue;
-      if (Math.abs(normal.dot(tmpA.clone().sub(origin))) > PLANE_EPS) continue;
+        tmpNormal.subVectors(tmpB, tmpA).cross(new THREE.Vector3().subVectors(tmpC, tmpA));
+        if (tmpNormal.lengthSq() < 1e-12) continue;
+        tmpNormal.normalize();
 
-      coplanarTris.push({ a, b, c });
+        if (Math.abs(tmpNormal.dot(normal)) < NORMAL_DOT_EPS) continue;
+        if (Math.abs(normal.dot(tmpA.clone().sub(origin))) > PLANE_EPS) continue;
+
+        coplanarTris.push({ a, b, c });
+      }
+      if (coplanarTris.length === 0) coplanarTris.push({ a: va0, b: vb0, c: vc0 });
     }
-    if (coplanarTris.length === 0) coplanarTris.push({ a: va0, b: vb0, c: vc0 });
 
     const edgeCount = new Map<string, { a: THREE.Vector3; b: THREE.Vector3; count: number }>();
     const posKey = (v: THREE.Vector3) => `${v.x.toFixed(4)}_${v.y.toFixed(4)}_${v.z.toFixed(4)}`;
@@ -786,26 +779,29 @@ export class ThreeSceneController {
       return { x: p.x, y: p.y, z: p.z };
     };
 
-    // 3er eje: hacia afuera (normal, ya asegurada del lado de cámara), buscando
-    // el próximo elemento distinto en esa dirección. Pequeño offset para no
-    // autointersectar la misma cara desde la que salimos.
-    const DEPTH_EPS = 1e-4;
-    const depthOrigin = origin.clone().addScaledVector(normal, DEPTH_EPS);
-    this.raycaster.set(depthOrigin, normal);
-    const depthHits = this.raycaster.intersectObjects(this.meshes, false);
-    const depthHit = depthHits.find((h) => {
-      if (!h.object.visible || h.faceIndex === undefined) return false;
-      if (this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)) return false;
-      const hMesh = h.object as THREE.Mesh;
-      const hIndex = hMesh.geometry.getIndex();
-      if (!hIndex) return false;
-      const hVIdx = hIndex.getX(h.faceIndex! * 3);
-      const hExpressId = this.findExpressIdForVertex(hMesh, hVIdx);
-      return hExpressId !== expressId; // ignora el mismo elemento (autointersección)
-    });
-    const depthPos = depthHit
-      ? { x: depthHit.point.x, y: depthHit.point.y, z: depthHit.point.z }
-      : null;
+    // 3er eje (profundidad): el raycast más caro de toda la función,
+    // porque vuelve a intersectar TODO el modelo (this.meshes) desde
+    // cero. Se saltea completo cuando fast=true.
+    let depthPos: { x: number; y: number; z: number } | null = null;
+    if (!fast) {
+      const DEPTH_EPS = 1e-4;
+      const depthOrigin = origin.clone().addScaledVector(normal, DEPTH_EPS);
+      this.raycaster.set(depthOrigin, normal);
+      const depthHits = this.raycaster.intersectObjects(this.meshes, false);
+      const depthHit = depthHits.find((h) => {
+        if (!h.object.visible || h.faceIndex === undefined) return false;
+        if (this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)) return false;
+        const hMesh = h.object as THREE.Mesh;
+        const hIndex = hMesh.geometry.getIndex();
+        if (!hIndex) return false;
+        const hVIdx = hIndex.getX(h.faceIndex! * 3);
+        const hExpressId = this.findExpressIdForVertex(hMesh, hVIdx);
+        return hExpressId !== expressId;
+      });
+      depthPos = depthHit
+        ? { x: depthHit.point.x, y: depthHit.point.y, z: depthHit.point.z }
+        : null;
+    }
 
     return {
       center: { x: origin.x, y: origin.y, z: origin.z },
@@ -819,12 +815,6 @@ export class ThreeSceneController {
     };
   }
 
-  // --- PINTADO (dibujo libre 3D pegado a superficie) ---
-
-  // Raycast puro contra la geometría, sin snap a vértice/arista (para pintar
-  // a mano libre el snap se sentiría raro). Devuelve el punto exacto bajo el
-  // mouse, levantado un poquito sobre la superficie según su normal para
-  // evitar z-fighting (parpadeo) contra la cara del modelo.
   raycastSurfacePoint(cssX: number, cssY: number): { point: { x: number; y: number; z: number }; normal: { x: number; y: number; z: number } } | null {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
@@ -848,9 +838,9 @@ export class ThreeSceneController {
     const normal = (hit.face?.normal.clone() ?? new THREE.Vector3(0, 1, 0))
       .transformDirection(hit.object.matrixWorld)
       .normalize();
-    if (normal.dot(rayDirection) > 0) normal.negate(); // siempre hacia la cámara
+    if (normal.dot(rayDirection) > 0) normal.negate();
 
-    const OFFSET = 0.004; // ~4mm — evita que el trazo parpadee contra la superficie
+    const OFFSET = 0.004;
     const offsetPoint = hit.point.clone().addScaledVector(normal, OFFSET);
 
     return {
@@ -859,17 +849,11 @@ export class ThreeSceneController {
     };
   }
 
-  // Crea o actualiza un trazo de pintado como un TUBO 3D (no una línea de
-  // 1px) — así tiene grosor real y consistente desde cualquier ángulo. Se
-  // llama en cada mousemove mientras se dibuja: reconstruye la geometría del
-  // tubo completo a partir de todos los puntos acumulados hasta ahora.
   setPaintStroke(id: string, points: { x: number; y: number; z: number }[], color: string) {
     if (points.length < 2) return;
     const vecPoints = points.map((p) => new THREE.Vector3(p.x, p.y, p.z));
     const curve = new THREE.CatmullRomCurve3(vecPoints, false, 'catmullrom', 0.2);
 
-    // Segmentos a lo largo del tubo: proporcional a la cantidad de puntos,
-    // con un mínimo para que no se vea poligonal en trazos cortos.
     const tubularSegments = Math.max(vecPoints.length * 2, 8);
     const geometry = new THREE.TubeGeometry(curve, tubularSegments, STROKE_RADIUS, STROKE_RADIAL_SEGMENTS, false);
 
@@ -905,7 +889,7 @@ export class ThreeSceneController {
     if (opts.clearColor) {
       const [r, g, b] = opts.clearColor;
       const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-      this.scene.background = luminance < 0.3 ? this.darkBgTexture : this.lightBgTexture;
+      this.scene.background = luminance < 0.3 ? this.darkBgTexture : this.lightBgColor;
     }
 
     if (opts.sectionPlane?.enabled && this.modelBounds) {
@@ -959,7 +943,6 @@ export class ThreeSceneController {
         (obj.material as THREE.Material)?.dispose();
       }
     });
-    this.lightBgTexture.dispose();
     this.darkBgTexture.dispose();
     this.renderer.dispose();
     this.clearElementMarker();

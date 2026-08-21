@@ -1,18 +1,6 @@
 // src/components/tabs/PartidasTree.tsx
-//
-// Árbol de partidas (GET /ifc-files/:id/partidas). Al hacer clic en una
-// partida hoja (unit !== null), se reemplaza la vista completa por una
-// pantalla de detalle (POST /ifc-files/:id/partidas/:partidaId/elements)
-// con columnas de Identificación/Dimensiones/Metrado — con flecha
-// "atrás" para volver al árbol.
-//
-// CAMBIOS de esta versión: agrega un flotante chico (esquina inferior
-// derecha de la tabla) con "Guardar"/"Borrar" plantilla — visible solo
-// cuando la plantilla activa es PROPIA (isOwn). 100% autocontenido acá
-// adentro, no requiere tocar Visor3DTab.tsx para nada.
-
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, CheckCircle2, Save, Trash2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, Save, Trash2 } from 'lucide-react';
 import {
   PartidaNode,
   getPartidasTree,
@@ -34,15 +22,7 @@ import MetradosTable from './Templates/MetradosTable';
 interface PartidasTreeProps {
   ifcFileId: string;
   currentUserId?: number;
-  // Click sobre una partida (hoja) del árbol -> se llama con TODOS los
-  // expressId de esa partida, para que el padre (Visor3DTab) los
-  // AÍSLE en el visor 3D (oculta el resto). Sin esta prop, el click
-  // no dispara nada especial en el visor.
   onSelectAllInViewer?: (expressIds: number[]) => void;
-  // NUEVO: click en una FILA de la tabla de metrados (un grupo) -> se
-  // llama con los expressId de ESE grupo puntual, para que el padre
-  // los RESALTE en el visor 3D — sin ocultar nada más (a diferencia
-  // de onSelectAllInViewer). Se usa adentro de PartidaDetailScreen.
   onSelectGroupInViewer?: (expressIds: number[]) => void;
 }
 
@@ -51,9 +31,7 @@ function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString('es-PE', { maximumFractionDigits: 4 });
 }
 
-// ============================================================
-// PANTALLA DE DETALLE — reemplaza toda la vista (drill-down)
-// ============================================================
+// Pantalla de detalle: reemplaza el árbol al hacer click en una partida hoja.
 const PartidaDetailScreen: React.FC<{
   ifcFileId: string;
   node: PartidaNode;
@@ -83,9 +61,6 @@ const PartidaDetailScreen: React.FC<{
     ? { ...activeTemplate, sets: effectiveSets }
     : null;
 
-  // "Estamos en una plantilla" = la activa es tuya (no default, no de
-  // otro usuario) — mismo criterio que isOwn en TemplateEditor. El
-  // flotante de Guardar/Borrar solo aparece en este caso.
   const isOwn =
     !!activeTemplate && !activeTemplate.is_system && activeTemplate.created_by === currentUserId;
 
@@ -126,11 +101,6 @@ const PartidaDetailScreen: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOwn, activeTemplate]);
 
-  // Reordenar arrastrando un header en MetradosTable — mismo criterio
-  // que el editor (mover con flechas): solo dentro del mismo set. Se
-  // aplica como vista previa en vivo (setPreviewSets), igual que
-  // cualquier otro cambio del editor — no pega al backend hasta que se
-  // guarde con el flotante 💾 o desde el modal.
   const handleReorderColumn = useCallback(
     (setIndex: number, fromColIndex: number, toColIndex: number) => {
       const orderedSets = [...effectiveSets].sort((a, b) => a.sort_order - b.sort_order);
@@ -146,9 +116,6 @@ const PartidaDetailScreen: React.FC<{
       const [moved] = visible.splice(fromColIndex, 1);
       visible.splice(toColIndex, 0, moved);
 
-      // Reasigna column_order 1..n según el nuevo orden visible, y
-      // mergea con las columnas NO visibles del mismo set (que no
-      // participan del drag, pero hay que conservarlas igual).
       const hidden = target.columns.filter((c) => !c.is_visible);
       const reordered = [...visible.map((c, i) => ({ ...c, column_order: i + 1 })), ...hidden];
 
@@ -158,11 +125,6 @@ const PartidaDetailScreen: React.FC<{
     [effectiveSets]
   );
 
-  // NUEVO: click en una fila de la tabla (un grupo) -> aísla en el
-  // visor 3D SOLO los elementos de ese grupo puntual, no toda la
-  // partida. A diferencia de isolatePartidaInViewer, no hace falta
-  // pedir nada al backend — group.elements ya viene cargado en
-  // `detail` desde que se abrió la partida.
   const handleSelectGroupInViewer = useCallback(
     (group: PartidaGroup) => {
       if (!onSelectGroupInViewer) return;
@@ -198,7 +160,6 @@ const PartidaDetailScreen: React.FC<{
   }, [node.partida_id, activeTemplate?.template_id, loadingActive, propertyColumnsSignature]);
 
   return (
-    // relative: ancla del flotante Guardar/Borrar de más abajo.
     <div className="flex flex-col h-full relative">
       <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
@@ -286,11 +247,6 @@ const PartidaDetailScreen: React.FC<{
         </div>
       )}
 
-      {/* Flotante: Guardar/Borrar plantilla — solo si la activa es
-          tuya. Anclado a la esquina inferior derecha DE LA TABLA (este
-          contenedor), no del visor — no molesta ni se superpone con la
-          barra flotante del visor 3D. Fondo de color sólido (no solo
-          ícono coloreado) + tamaño más grande, para que se note. */}
       {isOwn && !loading && (
         <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 bg-white border border-gray-200 rounded-full shadow-xl px-2 py-2">
           <button
@@ -339,9 +295,7 @@ const PartidaDetailScreen: React.FC<{
   );
 };
 
-// ============================================================
-// FILA DEL ÁRBOL — carpetas se expanden inline; hojas navegan al detalle
-// ============================================================
+// Fila del árbol: carpetas se expanden inline; hojas navegan al detalle.
 const PartidaTableRow: React.FC<{
   node: PartidaNode;
   depth: number;
@@ -419,9 +373,7 @@ const PartidaTableRow: React.FC<{
   );
 };
 
-// ============================================================
-// COMPONENTE PRINCIPAL — alterna entre árbol y pantalla de detalle
-// ============================================================
+// Componente principal: alterna entre árbol y pantalla de detalle.
 const PartidasTree: React.FC<PartidasTreeProps> = ({
   ifcFileId,
   currentUserId = -1,
@@ -432,9 +384,6 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<PartidaNode | null>(null);
-  // partida_id de la que se están resolviendo los elementos para
-  // aislar en el visor 3D (click derecho) — null = ninguna en curso.
-  // Muestra el spinner puntual en esa fila mientras se resuelve.
   const [isolatingPartidaId, setIsolatingPartidaId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -456,23 +405,15 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
     };
   }, [ifcFileId]);
 
-  // Lógica compartida: resuelve TODOS los expressId de una partida
-  // (sin pedir ninguna columna de propiedad, no hace falta acá) y
-  // avisa al padre (Visor3DTab) para que los aísle en el visor 3D. La
-  // usan TANTO el click izquierdo (que además navega a la tabla) COMO
-  // el click derecho (que se queda en el árbol).
   const isolatePartidaInViewer = useCallback(
     async (node: PartidaNode) => {
       if (!onSelectAllInViewer) return;
       setIsolatingPartidaId(node.partida_id);
       try {
         const detail = await getPartidaElements(ifcFileId, node.partida_id);
-        // OJO: express_id llega como STRING desde el backend (mismo
-        // patrón BIGINT-como-string que file_id/ifc_file_id) — el
-        // visor 3D compara contra números reales. Sin este Number(),
-        // "5842" (string) nunca matchea 5842 (number), y el aislamiento
-        // termina sin encontrar nada = el modelo entero desaparece.
         const expressIds = detail.groups.flatMap((g) => g.elements.map((el) => Number(el.express_id)));
+        console.log('[DEBUG] PartidasTree va a aislar', expressIds.length, 'elementos:', expressIds);
+
         onSelectAllInViewer(expressIds);
       } catch (err: any) {
         alert(err.message || 'No se pudieron cargar los elementos de esta partida.');
@@ -483,9 +424,6 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
     [ifcFileId, onSelectAllInViewer]
   );
 
-  // Click izquierdo: navega a la tabla Y, al mismo tiempo, aísla en el
-  // visor 3D — no se espera a que termine el aislamiento para navegar
-  // (son dos cosas que pasan en paralelo, no una atrás de la otra).
   const handleSelectLeaf = useCallback(
     (node: PartidaNode) => {
       setSelectedNode(node);
@@ -538,10 +476,6 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 flex items-center gap-1.5 mb-1.5 px-2 py-1 rounded bg-emerald-50 border border-emerald-200 w-fit">
-        <CheckCircle2 size={12} className="text-emerald-600 flex-shrink-0" />
-        <p className="text-[10px] font-semibold text-emerald-700">Metrados listos</p>
-      </div>
       <div className="flex-1 min-h-0 overflow-auto rounded border border-gray-300">
         <table className="w-full text-[11px] border-collapse min-w-[600px]">
           <thead>
@@ -570,11 +504,4 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   );
 };
 
-// React.memo: PartidasTree puede contener cientos de filas (árbol o
-// tabla de detalle). Sin memo, cada pixel del arrastre para cambiar el
-// ancho del panel (setPanelWidth en Visor3DTab, en cada mousemove)
-// re-renderiza TODO el panel padre, incluida esta tabla completa —
-// notoriamente lento. Con memo, solo se vuelve a renderizar cuando
-// cambia su prop real (ifcFileId), no por re-renders del padre que no
-// le afectan.
 export default React.memo(PartidasTree);

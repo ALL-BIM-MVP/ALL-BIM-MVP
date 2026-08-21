@@ -100,12 +100,12 @@ export function useCrossTool(
     depthPosScreen: result.depthPos ? projectPoint(result.depthPos) : null,
   }), [projectPoint]);
 
-  const computeCrossAt = useCallback((clientX: number, clientY: number, id: string): CrossEntry | null => {
+  const computeCrossAt = useCallback((clientX: number, clientY: number, id: string, fast = false): CrossEntry | null => {
     const renderer = rendererRef.current;
     const css = clientToCanvasCss(clientX, clientY);
     if (!renderer?.raycastFaceCross || !css) return null;
     try {
-      const result: CrossData | null = renderer.raycastFaceCross(css.x, css.y);
+      const result: CrossData | null = renderer.raycastFaceCross(css.x, css.y, fast);
       return result ? withScreen(result, id) : null;
     } catch (err) {
       console.warn('Error en raycastFaceCross:', err);
@@ -171,7 +171,9 @@ export function useCrossTool(
     // Armado: coloca una cruz nueva en el punto del click y se desarma — el
     // próximo click (sin volver a apretar el botón) vuelve a mover la cámara.
     const id = nextCrossId();
-    const next = computeCrossAt(clientX, clientY, id);
+    // Durante el arrastre se usa la aproximacion rapida: el calculo exacto
+    // se reserva para la colocacion inicial y evita recorrer todo el modelo.
+    const next = computeCrossAt(clientX, clientY, id, true);
     setArmed(false);
     if (next) {
       setCrosses(prev => [...prev, next]);

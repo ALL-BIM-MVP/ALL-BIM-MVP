@@ -1,6 +1,6 @@
 // src/components/PageHeader.tsx
 import React, { useState } from "react";
-import { Search, HelpCircle, Bell, Mail, Check, X, Clock, RefreshCw } from "lucide-react";
+import { Search, HelpCircle, Bell, Mail, Check, X, Clock, RefreshCw, User, Settings, LogOut } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useInvitations } from "../context/InvitationsContext";
 
@@ -150,7 +150,9 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
           )}
         </div>
 
+        {/* ========================== */}
         {/* USUARIO */}
+        {/* ========================== */}
         <div className="relative">
           <button
             onClick={() => {
@@ -173,48 +175,68 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
             </svg>
           </button>
 
+          {/* Mismo lenguaje visual que el resto de la app (Invitations,
+              AdminUsers, el menú de perfil de DashboardProjects): card
+              rounded-2xl con ring sutil, avatar con ring blanco, badge de
+              rol, íconos de lucide en vez de emojis. */}
           {isMenuOpen && (
-            <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-              <div className="px-4 py-3 border-b border-gray-200">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white text-xl font-semibold">
-                    {user?.name?.charAt(0).toUpperCase() || "U"}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-gray-800">{user?.name || "Usuario"}</p>
-                    <p className="text-sm text-gray-500">{user?.email || "Sin email"}</p>
-                    <p className="text-xs text-blue-600 mt-1">Rol: {user?.role || "Sin rol"}</p>
-                  </div>
+            <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 border border-gray-100 py-5 px-5 z-50 animate-fadeInUp">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-14 h-14 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-xl font-bold ring-2 ring-white shadow-sm flex-shrink-0">
+                  {user?.name?.charAt(0).toUpperCase() || "U"}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-bold text-base text-gray-800 truncate">{user?.name || "Usuario"}</p>
+                  <p className="text-xs text-gray-400 truncate">{user?.email || "Sin email"}</p>
                 </div>
               </div>
 
-              <div className="py-1">
+              {user?.role && (
+                <div className="mb-4">
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-[#0056b3] ring-1 ring-blue-200">
+                    {user.role}
+                  </span>
+                </div>
+              )}
+
+              <div className="border-t border-gray-100 pt-2 space-y-0.5">
                 <button
                   onClick={() => { setIsMenuOpen(false); handleViewInfo(); }}
-                  className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-xl flex items-center gap-2.5 text-sm font-medium transition-colors"
                 >
-                  <span>👤</span> Mi Perfil
+                  <User size={16} className="text-gray-400" />
+                  Mi Perfil
                 </button>
                 <button
                   onClick={() => setIsMenuOpen(false)}
-                  className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-xl flex items-center gap-2.5 text-sm font-medium transition-colors"
                 >
-                  <span>⚙️</span> Configuración
+                  <Settings size={16} className="text-gray-400" />
+                  Configuración
                 </button>
               </div>
 
-              <div className="border-t border-gray-200 py-1">
+              <div className="border-t border-gray-100 pt-2 mt-2">
                 <button
                   onClick={() => { setIsMenuOpen(false); logout(); }}
-                  className="w-full text-left px-4 py-2 text-red-600 hover:bg-red-50 flex items-center gap-2"
+                  className="w-full text-left px-3 py-2.5 text-red-600 hover:bg-red-50 rounded-xl flex items-center gap-2.5 text-sm font-semibold transition-colors"
                 >
-                  <span>🚪</span> Cerrar Sesión
+                  <LogOut size={16} />
+                  Cerrar sesión
                 </button>
               </div>
             </div>
           )}
         </div>
       </div>
+
+      <style>{`
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeInUp { animation: fadeInUp 0.18s ease-out; }
+      `}</style>
     </header>
   );
 };

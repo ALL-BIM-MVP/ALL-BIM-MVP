@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { 
   Plus, Pencil, Trash2, X, Check, Users, CheckCircle, Tag,
   Mail, Send, RefreshCw, Clock, Search, UserPlus, AlertCircle,
-  Crown, Shield, AtSign
+  Crown, Shield, AtSign, Lock
 } from 'lucide-react';
 import { useProjectInvitations } from '../../hooks/useProjectInvitations';
 import { getProjectRoles, createProjectRole, updateProjectRole, deleteProjectRole } from '../../services/project-roles.service';
@@ -467,279 +467,280 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
           </div>
         )}
 
-        {/* ============ 🔍 BUSCADOR + ROL + BOTÓN - TODO EN UNA FILA ============ */}
-        <div className="bg-gray-50/70 rounded-md p-5 mb-6 border border-gray-100 shadow-sm">
-          <div className="flex flex-wrap items-end gap-4">
+        {/* ============ TODO LO SIGUIENTE ES SOLO PARA EL OWNER ============
+            Invitar, gestionar invitaciones pendientes y administrar
+            etiquetas son acciones exclusivas del dueño del proyecto. Un
+            colaborador que no es owner solo debe ver "Lista de Miembros",
+            más abajo. Mientras se confirma quién es el owner
+            (checkingOwner) no mostramos nada de esto para evitar un
+            parpadeo (aparece y desaparece de golpe). */}
+        {isOwner && !checkingOwner && (
+          <>
+            {/* ============ 🔍 BUSCADOR + ROL + BOTÓN ============ */}
+            <div className="bg-gray-50/70 rounded-md p-5 mb-6 border border-gray-100 shadow-sm">
+              <div className="flex flex-wrap items-end gap-4">
 
-            {/* Buscar usuario — el ref ahora envuelve INPUT + DROPDOWN,
-                así un click dentro del dropdown ya no se considera "afuera"
-                y no se cierra antes de que el onClick del resultado dispare. */}
-            <div className="flex-1 min-w-[200px]" ref={searchBoxRef}>
-              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
-                Buscar usuario <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <div className="flex items-center border border-gray-200 rounded-md shadow-sm focus-within:ring-2 focus-within:ring-[#0056b3] focus-within:border-[#0056b3] bg-white transition-shadow">
-                  <Search size={18} className="ml-3.5 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Escribe para buscar por nombre o correo..."
-                    value={searchUserQuery}
-                    onChange={(e) => setSearchUserQuery(e.target.value)}
-                    onFocus={handleSearchFocus}
-                    className="flex-1 px-3 py-2.5 outline-none text-sm bg-transparent"
-                  />
-                  {isSearching && (
-                    <RefreshCw size={16} className="mr-3 text-gray-400 animate-spin" />
-                  )}
-                  {selectedUser && (
-                    <button
-                      onClick={handleClearSelectedUser}
-                      aria-label="Quitar usuario seleccionado"
-                      className="mr-2 p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-gray-100"
-                    >
-                      <X size={16} />
-                    </button>
-                  )}
-                </div>
-
-                {/* 👥 Resultados de búsqueda — ahora DENTRO del div ref'd y
-                    posicionado absoluto para flotar debajo del input sin
-                    salirse del contenedor que el listener de "click afuera"
-                    reconoce como "adentro". */}
-                {showUserSearch && (
-                  <div className="absolute left-0 right-0 mt-2 border border-gray-100 rounded-md max-h-48 overflow-y-auto bg-white shadow-xl ring-1 ring-black/5 z-20">
-                    {searchUserResults.length === 0 ? (
-                      <div className="p-4 text-center text-sm text-gray-400">
-                        {searchUserQuery.trim() ? 'No se encontraron usuarios' : 'Escribe para buscar usuarios'}
-                      </div>
-                    ) : (
-                      searchUserResults.map((user) => (
+                {/* Buscar usuario — el ref ahora envuelve INPUT + DROPDOWN,
+                    así un click dentro del dropdown ya no se considera "afuera"
+                    y no se cierra antes de que el onClick del resultado dispare. */}
+                <div className="flex-1 min-w-[200px]" ref={searchBoxRef}>
+                  <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
+                    Buscar usuario <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <div className="flex items-center border border-gray-200 rounded-md shadow-sm focus-within:ring-2 focus-within:ring-[#0056b3] focus-within:border-[#0056b3] bg-white transition-shadow">
+                      <Search size={18} className="ml-3.5 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Escribe para buscar por nombre o correo..."
+                        value={searchUserQuery}
+                        onChange={(e) => setSearchUserQuery(e.target.value)}
+                        onFocus={handleSearchFocus}
+                        className="flex-1 px-3 py-2.5 outline-none text-sm bg-transparent"
+                      />
+                      {isSearching && (
+                        <RefreshCw size={16} className="mr-3 text-gray-400 animate-spin" />
+                      )}
+                      {selectedUser && (
                         <button
-                          key={user.user_id}
-                          onClick={() => handleSelectUser(user)}
-                          className={`w-full text-left p-3 hover:bg-blue-50/70 transition-colors border-b border-gray-100 last:border-0 flex items-center gap-3 ${
-                            selectedUser?.user_id === user.user_id ? 'bg-blue-50/70' : ''
-                          }`}
+                          onClick={handleClearSelectedUser}
+                          aria-label="Quitar usuario seleccionado"
+                          className="mr-2 p-1 text-gray-400 hover:text-red-500 rounded-md hover:bg-gray-100"
                         >
-                          <MemberAvatar name={user.name} email={user.email} />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-700">{user.name}</p>
-                            <p className="text-xs text-gray-400 flex items-center gap-1">
-                              <AtSign size={12} />
-                              {user.email}
-                            </p>
-                          </div>
-                          {selectedUser?.user_id === user.user_id && (
-                            <Check size={18} className="text-[#0056b3]" />
-                          )}
+                          <X size={16} />
                         </button>
-                      ))
+                      )}
+                    </div>
+
+                    {/* 👥 Resultados de búsqueda — ahora DENTRO del div ref'd y
+                        posicionado absoluto para flotar debajo del input sin
+                        salirse del contenedor que el listener de "click afuera"
+                        reconoce como "adentro". */}
+                    {showUserSearch && (
+                      <div className="absolute left-0 right-0 mt-2 border border-gray-100 rounded-md max-h-48 overflow-y-auto bg-white shadow-xl ring-1 ring-black/5 z-20">
+                        {searchUserResults.length === 0 ? (
+                          <div className="p-4 text-center text-sm text-gray-400">
+                            {searchUserQuery.trim() ? 'No se encontraron usuarios' : 'Escribe para buscar usuarios'}
+                          </div>
+                        ) : (
+                          searchUserResults.map((user) => (
+                            <button
+                              key={user.user_id}
+                              onClick={() => handleSelectUser(user)}
+                              className={`w-full text-left p-3 hover:bg-blue-50/70 transition-colors border-b border-gray-100 last:border-0 flex items-center gap-3 ${
+                                selectedUser?.user_id === user.user_id ? 'bg-blue-50/70' : ''
+                              }`}
+                            >
+                              <MemberAvatar name={user.name} email={user.email} />
+                              <div className="flex-1">
+                                <p className="text-sm font-medium text-gray-700">{user.name}</p>
+                                <p className="text-xs text-gray-400 flex items-center gap-1">
+                                  <AtSign size={12} />
+                                  {user.email}
+                                </p>
+                              </div>
+                              {selectedUser?.user_id === user.user_id && (
+                                <Check size={18} className="text-[#0056b3]" />
+                              )}
+                            </button>
+                          ))
+                        )}
+                      </div>
                     )}
                   </div>
+                </div>
+
+                {/* Rol a asignar */}
+                <div className="min-w-[180px]">
+                  <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
+                    Rol a asignar <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={inviteRoleId}
+                    onChange={(e) => setInviteRoleId(Number(e.target.value))}
+                    disabled={rolesLoading}
+                    className="w-full px-3 py-2.5 border border-gray-200 rounded-md shadow-sm text-sm focus:ring-2 focus:ring-[#0056b3] focus:border-[#0056b3] outline-none bg-white disabled:opacity-60 transition-shadow"
+                  >
+                    <option value={0}>{rolesLoading ? 'Cargando roles...' : 'Seleccionar rol...'}</option>
+                    {etiquetas.map((rol) => (
+                      <option key={rol.project_role_id} value={rol.project_role_id}>
+                        {rol.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Botón Enviar invitación */}
+                <div className="min-w-[180px]">
+                  <button
+                    onClick={handleSendInvitation}
+                    disabled={!isInviteButtonEnabled}
+                    className={`w-full px-6 py-2.5 rounded-md text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
+                      isInviteButtonEnabled
+                        ? 'bg-[#0056b3] text-white shadow-md shadow-blue-900/15 hover:bg-[#004494] hover:-translate-y-0.5 hover:shadow-lg cursor-pointer'
+                        : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <Send size={16} />
+                    {submitting ? 'Enviando...' : 'Invitar colaborador'}
+                  </button>
+                </div>
+              </div>
+
+              {/* ✅ Usuario seleccionado */}
+              {selectedUser && (
+                <div className="mt-3 p-3 bg-gradient-to-r from-blue-50 to-blue-50/40 border border-blue-100 rounded-md flex items-center justify-between shadow-sm animate-slideDown">
+                  <div className="flex items-center gap-3">
+                    <MemberAvatar name={selectedUser.name} email={selectedUser.email} />
+                    <div>
+                      <p className="text-sm font-medium text-gray-700">{selectedUser.name}</p>
+                      <p className="text-xs text-gray-500">{selectedUser.email}</p>
+                    </div>
+                  </div>
+                  <Check size={20} className="text-green-500" />
+                </div>
+              )}
+
+              {/* 📋 Estado del botón */}
+              <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-2.5">
+                {!selectedUser && (
+                  <>
+                    <AlertCircle size={13} className="text-gray-400 shrink-0" />
+                    Selecciona un usuario para continuar
+                  </>
+                )}
+                {selectedUser && !inviteRoleId && (
+                  <>
+                    <AlertCircle size={13} className="text-amber-500 shrink-0" />
+                    Selecciona un rol para el usuario
+                  </>
+                )}
+                {selectedUser && inviteRoleId > 0 && (
+                  <>
+                    <CheckCircle size={13} className="text-green-500 shrink-0" />
+                    Listo para enviar la invitación
+                  </>
                 )}
               </div>
             </div>
 
-            {/* Rol a asignar */}
-            <div className="min-w-[180px]">
-              <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1.5">
-                Rol a asignar <span className="text-red-500">*</span>
-              </label>
-              <select
-                value={inviteRoleId}
-                onChange={(e) => setInviteRoleId(Number(e.target.value))}
-                disabled={rolesLoading}
-                className="w-full px-3 py-2.5 border border-gray-200 rounded-md shadow-sm text-sm focus:ring-2 focus:ring-[#0056b3] focus:border-[#0056b3] outline-none bg-white disabled:opacity-60 transition-shadow"
-              >
-                <option value={0}>{rolesLoading ? 'Cargando roles...' : 'Seleccionar rol...'}</option>
-                {etiquetas.map((rol) => (
-                  <option key={rol.project_role_id} value={rol.project_role_id}>
-                    {rol.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* ============ BARRA DE ACCIONES ============ */}
+            <div className="bg-gray-50/70 rounded-md p-4 mb-6 border border-gray-100 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-500">
+                    {invitationsPendientes?.length ?? 0} invitaciones pendientes
+                  </span>
+                  <button
+                    onClick={loadInvitations}
+                    aria-label="Actualizar invitaciones"
+                    className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md p-1 ml-1 transition-colors"
+                    disabled={invitationsLoading}
+                  >
+                    <RefreshCw size={16} className={invitationsLoading ? 'animate-spin' : ''} />
+                  </button>
+                </div>
 
-            {/* Botón Enviar invitación */}
-            <div className="min-w-[180px]">
-              <button
-                onClick={handleSendInvitation}
-                disabled={!isInviteButtonEnabled}
-                className={`w-full px-6 py-2.5 rounded-md text-sm font-semibold flex items-center justify-center gap-2 transition-all ${
-                  isInviteButtonEnabled
-                    ? 'bg-[#0056b3] text-white shadow-md shadow-blue-900/15 hover:bg-[#004494] hover:-translate-y-0.5 hover:shadow-lg cursor-pointer'
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                }`}
-              >
-                <Send size={16} />
-                {submitting ? 'Enviando...' : 'Invitar colaborador'}
-              </button>
-            </div>
-          </div>
+                <div className="flex gap-2 flex-wrap">
 
-          {/* ✅ Usuario seleccionado */}
-          {selectedUser && (
-            <div className="mt-3 p-3 bg-gradient-to-r from-blue-50 to-blue-50/40 border border-blue-100 rounded-md flex items-center justify-between shadow-sm animate-slideDown">
-              <div className="flex items-center gap-3">
-                <MemberAvatar name={selectedUser.name} email={selectedUser.email} />
-                <div>
-                  <p className="text-sm font-medium text-gray-700">{selectedUser.name}</p>
-                  <p className="text-xs text-gray-500">{selectedUser.email}</p>
+                  <button
+                    onClick={() => setShowTagsModal(true)}
+                    className="px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium border border-gray-200 shadow-sm flex items-center gap-2 hover:-translate-y-0.5 hover:shadow-md transition-all"
+                  >
+                    <Tag size={16} />
+                    Etiquetas ({etiquetas.length ?? 0})
+                  </button>
                 </div>
               </div>
-              <Check size={20} className="text-green-500" />
-            </div>
-          )}
-
-          {/* 📋 Estado del botón */}
-          <div className="flex items-center gap-1.5 text-xs text-gray-400 mt-2.5">
-            {!selectedUser && (
-              <>
-                <AlertCircle size={13} className="text-gray-400 shrink-0" />
-                Selecciona un usuario para continuar
-              </>
-            )}
-            {selectedUser && !inviteRoleId && (
-              <>
-                <AlertCircle size={13} className="text-amber-500 shrink-0" />
-                Selecciona un rol para el usuario
-              </>
-            )}
-            {selectedUser && inviteRoleId > 0 && (
-              <>
-                <CheckCircle size={13} className="text-green-500 shrink-0" />
-                Listo para enviar la invitación
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* ============ BARRA DE ACCIONES ============ */}
-        <div className="bg-gray-50/70 rounded-md p-4 mb-6 border border-gray-100 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">
-                {invitationsPendientes?.length ?? 0} invitaciones pendientes
-              </span>
-              <button
-                onClick={loadInvitations}
-                aria-label="Actualizar invitaciones"
-                className="text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md p-1 ml-1 transition-colors"
-                disabled={invitationsLoading}
-              >
-                <RefreshCw size={16} className={invitationsLoading ? 'animate-spin' : ''} />
-              </button>
             </div>
 
-            <div className="flex gap-2 flex-wrap">
-              
-              <button
-                onClick={() => setShowTagsModal(true)}
-                className="px-4 py-2 bg-white hover:bg-gray-50 text-gray-700 rounded-md text-sm font-medium border border-gray-200 shadow-sm flex items-center gap-2 hover:-translate-y-0.5 hover:shadow-md transition-all"
-              >
-                <Tag size={16} />
-                Etiquetas ({etiquetas.length ?? 0})
-              </button>
-            </div>
-          </div>
-        </div>
+            {/* ============ TABLA DE INVITACIONES PENDIENTES ============ */}
+            <div className="bg-white rounded-md overflow-hidden border border-gray-100 shadow-sm ring-1 ring-black/5 mb-6">
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="font-semibold text-gray-800">
+                  Invitaciones Pendientes
+                  <span className="ml-2 text-sm font-normal text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md">
+                    {invitationsPendientes?.length ?? 0}
+                  </span>
+                </h3>
+              </div>
 
-        {/* ============ TABLA DE INVITACIONES PENDIENTES ============ */}
-        <div className="bg-white rounded-md overflow-hidden border border-gray-100 shadow-sm ring-1 ring-black/5 mb-6">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h3 className="font-semibold text-gray-800">
-              Invitaciones Pendientes
-              <span className="ml-2 text-sm font-normal text-gray-400 bg-gray-100 px-2 py-0.5 rounded-md">
-                {invitationsPendientes?.length ?? 0}
-              </span>
-            </h3>
-            {!isOwner && !checkingOwner && invitationsPendientes?.length > 0 && (
-              <span className="text-xs text-gray-400 flex items-center gap-1">
-                <Shield size={14} />
-                Solo el owner puede gestionar
-              </span>
-            )}
-          </div>
+              {invitationsLoading ? (
+                <div className="text-center py-10">
+                  <RefreshCw size={22} className="animate-spin mx-auto text-[#0056b3]" />
+                  <p className="mt-2 text-sm text-gray-400">Cargando invitaciones...</p>
+                </div>
+              ) : invitationsError ? (
+                <div className="text-center py-10 text-red-500">
+                  <AlertCircle size={22} className="mx-auto mb-2" />
+                  <p className="text-sm">{invitationsError}</p>
+                  <button onClick={loadInvitations} className="mt-2 text-sm text-[#0056b3] hover:underline font-medium">
+                    Reintentar
+                  </button>
+                </div>
+              ) : invitationsPendientes?.length === 0 ? (
+                <div className="text-center py-10 text-gray-400">
+                  <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-50 mb-2">
+                    <Mail size={22} className="opacity-50" />
+                  </span>
+                  <p className="text-sm">No hay invitaciones pendientes</p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Correo</th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Rol</th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Invitado por</th>
+                        <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Expira</th>
+                        <th className="px-6 py-3 text-right text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {invitationsPendientes.map((inv) => (
+                        <tr key={inv.invitation_id} className="hover:bg-blue-50/30 transition-colors">
+                          <td className="px-6 py-3 font-medium text-gray-700">
+                            <div className="flex items-center gap-2.5">
+                              <MemberAvatar email={inv.email} />
+                              {inv.email}
+                            </div>
+                          </td>
+                          <td className="px-6 py-3">
+                            <span className={`px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${getRoleColor(inv.project_role?.project_role_id || 10)}`}>
+                              {inv.project_role?.project_role_name || 'Sin rol'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3">
+                            <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${getStatusBadge(inv.status)}`}>
+                              {getStatusIcon(inv.status)}
+                              <span className="ml-1 capitalize">{inv.status}</span>
+                            </span>
+                          </td>
+                          <td className="px-6 py-3 text-sm text-gray-600">{inv.host?.user_name || 'Desconocido'}</td>
+                          <td className="px-6 py-3 text-sm text-gray-600">
+                            {new Date(inv.expires_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            <button
+                              onClick={() => handleCancelInvitation(inv.invitation_id)}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 text-sm font-medium flex items-center gap-1 ml-auto px-2 py-1 rounded-md transition-colors"
+                            >
+                              <Trash2 size={14} /> Cancelar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
-          {invitationsLoading ? (
-            <div className="text-center py-10">
-              <RefreshCw size={22} className="animate-spin mx-auto text-[#0056b3]" />
-              <p className="mt-2 text-sm text-gray-400">Cargando invitaciones...</p>
-            </div>
-          ) : invitationsError ? (
-            <div className="text-center py-10 text-red-500">
-              <AlertCircle size={22} className="mx-auto mb-2" />
-              <p className="text-sm">{invitationsError}</p>
-              <button onClick={loadInvitations} className="mt-2 text-sm text-[#0056b3] hover:underline font-medium">
-                Reintentar
-              </button>
-            </div>
-          ) : invitationsPendientes?.length === 0 ? (
-            <div className="text-center py-10 text-gray-400">
-              <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-50 mb-2">
-                <Mail size={22} className="opacity-50" />
-              </span>
-              <p className="text-sm">No hay invitaciones pendientes</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Correo</th>
-                    <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Rol</th>
-                    <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Estado</th>
-                    <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Invitado por</th>
-                    <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Expira</th>
-                    {isOwner && !checkingOwner && (
-                      <th className="px-6 py-3 text-right text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Acciones</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {invitationsPendientes.map((inv) => (
-                    <tr key={inv.invitation_id} className="hover:bg-blue-50/30 transition-colors">
-                      <td className="px-6 py-3 font-medium text-gray-700">
-                        <div className="flex items-center gap-2.5">
-                          <MemberAvatar email={inv.email} />
-                          {inv.email}
-                        </div>
-                      </td>
-                      <td className="px-6 py-3">
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${getRoleColor(inv.project_role?.project_role_id || 10)}`}>
-                          {inv.project_role?.project_role_name || 'Sin rol'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-3">
-                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${getStatusBadge(inv.status)}`}>
-                          {getStatusIcon(inv.status)}
-                          <span className="ml-1 capitalize">{inv.status}</span>
-                        </span>
-                      </td>
-                      <td className="px-6 py-3 text-sm text-gray-600">{inv.host?.user_name || 'Desconocido'}</td>
-                      <td className="px-6 py-3 text-sm text-gray-600">
-                        {new Date(inv.expires_at).toLocaleDateString()}
-                      </td>
-                      {isOwner && !checkingOwner && (
-                        <td className="px-6 py-3 text-right">
-                          <button
-                            onClick={() => handleCancelInvitation(inv.invitation_id)}
-                            className="text-red-500 hover:text-red-700 hover:bg-red-50 text-sm font-medium flex items-center gap-1 ml-auto px-2 py-1 rounded-md transition-colors"
-                          >
-                            <Trash2 size={14} /> Cancelar
-                          </button>
-                        </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        {/* ============ TABLA DE MIEMBROS ============ */}
+        {/* ============ TABLA DE MIEMBROS — visible para TODOS ============ */}
         <div className="bg-white rounded-md overflow-hidden border border-gray-100 shadow-sm ring-1 ring-black/5">
           <div className="px-6 py-4 border-b border-gray-100">
             <h3 className="font-semibold text-gray-800">
