@@ -1,30 +1,28 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, ChevronDown, Search, Crosshair, Paintbrush,Layers} from 'lucide-react';
+import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, Search, Crosshair, Paintbrush, Layers, Download, FolderOpen, RefreshCw, SeparatorHorizontal } from 'lucide-react';
 import { useIfcModel } from './hooks/useIfcModel';
 import { ViewPreset } from './types';
 import PropertiesPanel from "./PropertiesPanel/PropertiesPanel";
 import ViewCube3D from './Viewcube3d';
 import CategoryFilterPanel from './CategoryFilterPanel';
+import { projectService } from '../../services/project.service';
+
 interface IFCViewerProps {
   fileBuffer: ArrayBuffer | null;
+  projectId?: number;
+  onFileUploaded?: () => void;
+  // Cuánto restarle a la posición horizontal del ViewCube, en píxeles —
+  // pasar el ancho del panel lateral superpuesto (ej. Metrados) para que
+  // el cubo no quede tapado y se deslice junto con el panel al abrirlo,
+  // cerrarlo, o cambiar su ancho. 0 (default) si no hay panel superpuesto.
+  viewCubeRightOffset?: number;
 }
 
 export interface IFCViewerHandle {
   selectEntityById: (expressId: number) => void;
   selectByIdOrGuid: (value: string) => Promise<boolean>;
-  // NUEVO: aísla varios elementos a la vez por expressId (oculta todo
-  // lo demás del modelo) — usado desde PartidasTree al hacer click
-  // sobre una partida del árbol, para ver en 3D solo los elementos de
-  // esa partida.
   isolateElementsByIds: (expressIds: number[]) => void;
-  // NUEVO: resalta varios elementos a la vez Y muestra la ficha de
-  // propiedades del primero — usado desde la tabla de metrados al
-  // clickear una fila (un grupo). Comportamiento "normal" de click,
-  // aplicado a varios elementos: selección + popup, sin ocultar el
-  // resto del modelo.
   selectGroupInViewer: (expressIds: number[]) => void;
-  // NUEVO: vuelve a mostrar el modelo completo (deshace cualquier
-  // aislamiento, sea el de una sola partida, un tipo, o varios tipos).
   clearIsolation: () => void;
 }
 
@@ -132,7 +130,7 @@ const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, 
 
 const PAINT_COLORS = ['#ff3b30', '#34c759', '#0056b3', '#ffcc00', '#ffffff'];
 
-const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, ref) => {
+const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, projectId, onFileUploaded, viewCubeRightOffset = 0 }, ref) => {
   const {
     canvasRef,
     containerRef,
@@ -145,9 +143,14 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     isWalkMode,
     toggleWalkMode,
     takeScreenshot,
+    pendingScreenshot,
+    discardScreenshot,
+    downloadScreenshot,
     isDarkBackground,
     toggleBackground,
-    // --- Medición simple (varias a la vez, colocación armada) ---
+    edgesVisible,
+    toggleEdges,
+
     measureMode,
     enableAndArmMeasure,
     exitMeasureMode,
@@ -156,14 +159,12 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     removeMeasurement,
     measureHoverPoint,
     hoverEdge,
-    // --- Cruz de ejes locales de la cara (varias a la vez, colocación armada) ---
     crossMode,
     enableAndArm,
     exitCrossMode,
     crosses,
     clearCross,
     removeCross,
-    // --- Pintar (dibujo libre 3D pegado a la superficie) ---
     paintMode,
     togglePaintMode,
     exitPaintMode,
@@ -172,7 +173,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     strokes,
     clearStrokes,
     removeStroke,
-    // --- Sección ---
     sectionAxis,
     sectionPosition,
     sectionEnabled,
@@ -182,38 +182,31 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     setSectionPosition,
     toggleSectionFlipped,
     resetSection,
-    // --- Selección de entidad ---
     selectedEntity,
     clearSelection,
     hideElementById,
     isolateElementById,
     isolatedElementId,
-    // NUEVO: aislar varios expressId a la vez (click desde el árbol de partidas)
     isolateElementsByIds,
     isolatedElementIds,
     popupVisible,
     popupScreenPos,
     selectEntityById,
-    // NUEVO: resalta varios elementos a la vez Y muestra la ficha del
-    // primero (click en una fila/grupo de la tabla de metrados) —
-    // distinto de isolateElementsByIds, que oculta todo lo demás. Esto
-    // solo selecciona/resalta, sin tocar la visibilidad de nada más.
     selectGroupInViewer,
     selectByIdOrGuid,
     paramIndex,
-    // --- Filtro por categoría ---
-     // --- Filtro por categoría ---
     typeGroups,
     selectedTypes,
     toggleSelectType,
     clearSelectedTypes,
-    
+
     hiddenTypes,
+    hiddenElementIds,
     isolatedType,
     toggleHideType,
     toggleIsolateType,
-    clearAllHidden,
     clearIsolation,
+    clearAll,
   } = useIfcModel(fileBuffer);
 
   useImperativeHandle(ref, () => ({
@@ -224,30 +217,34 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     clearIsolation: () => clearIsolation(),
   }));
 
-  // Panel unificado (buscador global + categorías del elemento). Se abre solo
-  // al clickear un elemento en el 3D, o manualmente con el ícono de lupa.
   const [panelOpen, setPanelOpen] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
+  // Antes solo abría el panel al seleccionar un elemento, pero nunca lo
+  // cerraba al deseleccionar (ej. al tocar la X del popup flotante
+  // Ocultar/Aislar/Cortar) — el panel se quedaba abierto y, sin
+  // elemento, caía en su modo "sin selección" = buscador general
+  // ("Buscar en el modelo"), apareciendo sin que nadie lo pidiera.
   useEffect(() => {
-    if (selectedEntity) 
-      setPanelOpen(true);
-    setCategoryPanelOpen(false); 
+    setPanelOpen(!!selectedEntity);
+    setCategoryPanelOpen(false);
   }, [selectedEntity]);
 
-  // Submenú del botón Regla: elegir entre Medición simple y Láser.
   const [rulerMenuOpen, setRulerMenuOpen] = useState(false);
+
+  const [savingScreenshot, setSavingScreenshot] = useState(false);
+  const [saveScreenshotError, setSaveScreenshotError] = useState<string | null>(null);
 
   const handleSelectMeasure = () => {
     if (crossMode) exitCrossMode();
     if (paintMode) exitPaintMode();
-    enableAndArmMeasure(); // activa el modo (si no estaba) y arma el punto 1
+    enableAndArmMeasure();
     setRulerMenuOpen(false);
   };
 
   const handleSelectCross = () => {
     if (measureMode) exitMeasureMode();
     if (paintMode) exitPaintMode();
-    enableAndArm(); // activa el modo (si no estaba) y arma UNA colocación nueva
+    enableAndArm();
     setRulerMenuOpen(false);
   };
 
@@ -261,17 +258,39 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
     togglePaintMode();
   };
 
-  // NUEVO: "Mostrar todo" — solo aparece si hay algún tipo de
-  // aislamiento activo (una partida del árbol, un elemento puntual, un
-  // tipo IFC, o varios tipos seleccionados en el panel de categorías).
-  // Vive acá adentro (no en Visor3DTab/PartidasTree) porque no
-  // necesita ningún trigger externo — clearIsolation() ya está
-  // disponible localmente.
+  const handleSaveScreenshotToProject = async () => {
+    if (!pendingScreenshot || !projectId) return;
+    setSavingScreenshot(true);
+    setSaveScreenshotError(null);
+    try {
+      const file = new File([pendingScreenshot.blob], `captura-visor-${Date.now()}.png`, { type: 'image/png' });
+      await projectService.uploadFile(projectId, file);
+      discardScreenshot();
+      onFileUploaded?.();
+    } catch (err: any) {
+      setSaveScreenshotError(err.message || 'No se pudo guardar la captura en el proyecto.');
+    } finally {
+      setSavingScreenshot(false);
+    }
+  };
+
+  const handleCloseScreenshotModal = () => {
+    if (savingScreenshot) return;
+    setSaveScreenshotError(null);
+    discardScreenshot();
+  };
+
+  // Cubre TANTO aislamiento (ver solo X) COMO ocultamiento puntual (ver
+  // todo MENOS X) — antes solo miraba aislamiento, así que si ocultabas
+  // un elemento con "Ocultar" no había forma de volver a mostrarlo: el
+  // botón "Mostrar todo" ni aparecía.
   const hasAnyIsolation =
     isolatedElementId !== null ||
     isolatedType !== null ||
     (isolatedElementIds !== null && isolatedElementIds.size > 0) ||
-    selectedTypes.size > 0;
+    selectedTypes.size > 0 ||
+    hiddenElementIds.size > 0 ||
+    hiddenTypes.size > 0;
 
   return (
     <div className="flex h-full w-full">
@@ -280,23 +299,10 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
         className="bg-[#EEEEEE] flex-1 relative"
         style={{ minHeight: '400px' }}
       >
-        <div className="absolute top-2 left-2 text-xs text-gray-400 z-20 bg-black/70 px-3 py-2 rounded-lg max-w-md">
-          <div className="font-mono whitespace-pre-wrap break-words max-w-xs">{debugInfo}</div>
-          {loading && (
-            <div className="w-full h-1 bg-gray-700 rounded-full mt-1 overflow-hidden">
-              <div
-                className="h-full bg-blue-500 transition-all duration-300"
-                style={{ width: `${Math.min(progress, 100)}%` }}
-              />
-            </div>
-          )}
-        </div>
-
         {ready && (
           <>
-            <ViewCube3D onSelect={setPresetView} anchorRef={containerRef} />
+            <ViewCube3D onSelect={setPresetView} anchorRef={containerRef} rightOffset={viewCubeRightOffset} />
 
-            {/* Fila horizontal de íconos */}
             <div className="absolute top-2 left-24 z-20 flex flex-row gap-1.5">
               <button
                 onClick={() => { setPanelOpen((p) => !p); setCategoryPanelOpen(false); }}
@@ -336,7 +342,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
                 <Footprints size={16} />
               </button>
 
-              {/* Botón Regla con submenú: Medición simple / Láser */}
               <div className="relative">
                 <button
                   onClick={() => setRulerMenuOpen((prev) => !prev)}
@@ -370,7 +375,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
                 )}
               </div>
 
-              {/* Botón Pintar: dibujo libre 3D pegado a la superficie del modelo */}
               <button
                 onClick={handleTogglePaint}
                 className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
@@ -390,6 +394,16 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
               </button>
 
               <button
+                onClick={toggleEdges}
+                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+                  edgesVisible ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
+                }`}
+                title={edgesVisible ? 'Ocultar líneas de contorno' : 'Mostrar líneas de contorno'}
+              >
+                <SeparatorHorizontal size={16} />
+              </button>
+
+              <button
                 onClick={takeScreenshot}
                 className="w-9 h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
                 title="Capturar imagen del visor"
@@ -399,9 +413,9 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
 
               {hasAnyIsolation && (
                 <button
-                  onClick={clearIsolation}
+                  onClick={clearAll}
                   className="w-9 h-9 flex items-center justify-center rounded-lg bg-[#0056b3] hover:bg-[#004494] text-white transition-colors"
-                  title="Mostrar todo el modelo (deshacer aislamiento)"
+                  title="Mostrar todo el modelo (deshacer aislamiento y elementos ocultos)"
                 >
                   <Eye size={16} />
                 </button>
@@ -409,7 +423,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
 
             </div>
 
-            {/* Panel unificado: buscador global o categorías del elemento seleccionado */}
             {panelOpen && (
               <div className="absolute top-14 left-2 z-50">
                 <PropertiesPanel
@@ -422,7 +435,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
                 />
               </div>
             )}
-              
+
               {categoryPanelOpen && (
   <div className="absolute top-14 left-8 z-50">
     <CategoryFilterPanel
@@ -442,7 +455,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
               </div>
             )}
 
-            {/* --- Overlay: Mediciones simples (una o varias) --- */}
             {measureMode && (
               <>
                 <svg
@@ -533,7 +545,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
               </>
             )}
 
-            {/* --- Overlay: Cruces de ejes locales de la cara (una o varias) --- */}
             {crossMode && (
               <>
                 <svg
@@ -545,23 +556,19 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
                     if (!ready) return null;
                     return (
                       <g key={c.id}>
-                        {/* eje "u" de la cara */}
                         <line
                           x1={c.uNegScreen!.x} y1={c.uNegScreen!.y}
                           x2={c.uPosScreen!.x} y2={c.uPosScreen!.y}
                           stroke="#22c55e" strokeWidth={2}
                         />
-                        {/* eje "v" de la cara, perpendicular al anterior */}
                         <line
                           x1={c.vNegScreen!.x} y1={c.vNegScreen!.y}
                           x2={c.vPosScreen!.x} y2={c.vPosScreen!.y}
                           stroke="#eab308" strokeWidth={2}
                         />
-                        {/* remates en cada punta */}
                         {[c.uPosScreen!, c.uNegScreen!, c.vPosScreen!, c.vNegScreen!].map((p, i) => (
                           <circle key={i} cx={p.x} cy={p.y} r={4} fill="#fff" stroke="#0056b3" strokeWidth={1.5} />
                         ))}
-                        {/* 3er brazo: hacia afuera, solo si hay otro elemento ahí */}
                         {c.depthPosScreen && (
                           <>
                             <line
@@ -572,7 +579,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
                             <circle cx={c.depthPosScreen.x} cy={c.depthPosScreen.y} r={4} fill="#fff" stroke="#ef4444" strokeWidth={1.5} />
                           </>
                         )}
-                        {/* centro arrastrable */}
                         <circle cx={c.centerScreen!.x} cy={c.centerScreen!.y} r={7} fill="#0056b3" stroke="#fff" strokeWidth={2} />
                       </g>
                     );
@@ -623,7 +629,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
               </>
             )}
 
-            {/* --- Barra de estado: modo Pintar (paleta de color + borrar) --- */}
             {paintMode && (
               <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-black/85 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-3 shadow-xl">
                 <Paintbrush size={14} />
@@ -726,48 +731,45 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
             {selectedEntity && popupVisible && popupScreenPos && (
               <div
                 className="absolute z-40 -translate-x-1/2 -translate-y-full"
-                style={{ left: popupScreenPos.x, top: popupScreenPos.y - 14 }}
+                style={{ left: popupScreenPos.x, top: popupScreenPos.y - 10 }}
               >
-                <div className="bg-white rounded-2xl shadow-2xl px-3 py-3 relative">
+                <div className="bg-white rounded-xl shadow-2xl px-2 py-2 relative">
                   <button
                     onClick={clearSelection}
-                    className="absolute -top-2 -right-2 w-6 h-6 bg-white rounded-full shadow flex items-center justify-center text-gray-500 hover:text-gray-800"
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white rounded-full shadow flex items-center justify-center text-gray-500 hover:text-gray-800"
                   >
-                    <XIcon size={13} />
+                    <XIcon size={9} />
                   </button>
 
-                  <div className="flex items-center gap-5">
+                  <div className="flex items-center gap-3">
                     <button
                       onClick={() => { hideElementById(selectedEntity.expressId); clearSelection(); }}
-                      className="flex flex-col items-center gap-1 text-gray-600 hover:text-[#0056b3]"
+                      className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#0056b3]"
                     >
-                      <EyeOff size={20} />
-                      <span className="text-xs font-medium">Ocultar</span>
-                      <ChevronDown size={12} className="text-gray-400" />
+                      <EyeOff size={14} />
+                      <span className="text-[10px] font-medium">Ocultar</span>
                     </button>
 
                     <button
                       onClick={() => isolateElementById(selectedEntity.expressId)}
-                      className={`flex flex-col items-center gap-1 ${
+                      className={`flex flex-col items-center gap-0.5 ${
                         isolatedElementId === selectedEntity.expressId ? 'text-[#0056b3]' : 'text-gray-600 hover:text-[#0056b3]'
                       }`}
                     >
-                      <Focus size={20} />
-                      <span className="text-xs font-medium">Aislar</span>
-                      <ChevronDown size={12} className="text-gray-400" />
+                      <Focus size={14} />
+                      <span className="text-[10px] font-medium">Aislar</span>
                     </button>
 
                     <button
                       onClick={toggleSectionEnabled}
-                      className="flex flex-col items-center gap-1 text-gray-600 hover:text-[#0056b3]"
+                      className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#0056b3]"
                     >
-                      <Scissors size={20} />
-                      <span className="text-xs font-medium">Cortar</span>
-                      <ChevronDown size={12} className="text-gray-400" />
+                      <Scissors size={14} />
+                      <span className="text-[10px] font-medium">Cortar</span>
                     </button>
                   </div>
                 </div>
-                <div className="w-3 h-3 bg-white rotate-45 mx-auto -mt-1.5 shadow-sm" />
+                <div className="w-2 h-2 bg-white rotate-45 mx-auto -mt-1 shadow-sm" />
               </div>
             )}
           </>
@@ -794,6 +796,82 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer }, r
         )}
 
         <canvas ref={canvasRef} style={{ width: '100%', height: '100%', display: 'block' }} />
+
+        {pendingScreenshot && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-6"
+            onClick={handleCloseScreenshotModal}
+          >
+            <div
+              className="bg-white rounded-xl shadow-2xl max-w-sm w-full overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="relative bg-gray-100">
+                <img
+                  src={pendingScreenshot.previewUrl}
+                  alt="Captura del visor"
+                  className="w-full max-h-64 object-contain"
+                />
+                <button
+                  onClick={handleCloseScreenshotModal}
+                  disabled={savingScreenshot}
+                  className="absolute top-2 right-2 w-7 h-7 flex items-center justify-center rounded-full bg-white/90 text-gray-600 hover:bg-white disabled:opacity-50"
+                  title="Cancelar"
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
+
+              <div className="p-4">
+                <p className="text-sm font-semibold text-gray-800 mb-1">Captura lista</p>
+                <p className="text-xs text-gray-500 mb-4">¿Qué quieres hacer con esta imagen?</p>
+
+                {saveScreenshotError && (
+                  <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-md px-2.5 py-2 mb-3">
+                    <AlertCircle size={13} className="flex-shrink-0 mt-0.5" />
+                    <span>{saveScreenshotError}</span>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2">
+                  <button
+                    onClick={handleSaveScreenshotToProject}
+                    disabled={!projectId || savingScreenshot}
+                    className="flex items-center justify-center gap-2 w-full py-2.5 rounded-md bg-[#0056b3] text-white text-sm font-semibold hover:bg-[#004494] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    title={!projectId ? 'No se pudo identificar el proyecto para guardar el archivo' : undefined}
+                  >
+                    {savingScreenshot ? (
+                      <>
+                        <RefreshCw size={15} className="animate-spin" />
+                        Guardando...
+                      </>
+                    ) : (
+                      <>
+                        <FolderOpen size={15} />
+                        Guardar en el proyecto
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={downloadScreenshot}
+                    disabled={savingScreenshot}
+                    className="flex items-center justify-center gap-2 w-full py-2.5 rounded-md bg-gray-100 text-gray-700 text-sm font-semibold hover:bg-gray-200 disabled:opacity-50 transition-colors"
+                  >
+                    <Download size={15} />
+                    Descargar al PC
+                  </button>
+                </div>
+
+                {!projectId && (
+                  <p className="text-[11px] text-gray-400 mt-3 text-center">
+                    Guardar en el proyecto no está disponible en esta vista.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

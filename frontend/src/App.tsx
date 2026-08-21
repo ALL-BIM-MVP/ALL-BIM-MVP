@@ -39,14 +39,23 @@ function App() {
                 </ProtectedRoute>
               } />
 
+              {/* FIX: faltaba SUPERVISOR acá — según usePermissions.ts
+                  (canCreateProject, canJoinProject), un SUPERVISOR SÍ
+                  puede crear/unirse a proyectos, así que también tiene
+                  que poder VERLOS. Sin esto, un usuario SUPERVISOR
+                  quedaba en loop infinito de redirect (ProtectedRoute
+                  lo mandaba de vuelta a esta misma ruta, que a su vez
+                  se la volvía a negar) — pantalla en blanco para
+                  siempre, sin ningún error visible en consola. */}
               <Route path="/dashboard/projects" element={
-                <ProtectedRoute allowedRoles={[ROLE_IDS.MODERADOR, ROLE_IDS.ADMINISTRADOR]}>
+                <ProtectedRoute allowedRoles={[ROLE_IDS.MODERADOR, ROLE_IDS.ADMINISTRADOR, ROLE_IDS.SUPERVISOR]}>
                   <Projects />
                 </ProtectedRoute>
               } />
 
+              {/* FIX: mismo problema — faltaba SUPERVISOR acá también. */}
               <Route path="/mis-invitaciones" element={
-                <ProtectedRoute allowedRoles={[ROLE_IDS.MODERADOR, ROLE_IDS.ADMINISTRADOR, ROLE_IDS.USUARIO]}>
+                <ProtectedRoute allowedRoles={[ROLE_IDS.MODERADOR, ROLE_IDS.ADMINISTRADOR, ROLE_IDS.USUARIO, ROLE_IDS.SUPERVISOR]}>
                   <MisInvitaciones />
                 </ProtectedRoute>
               } />

@@ -1,7 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import * as WebIFC from 'web-ifc';
 import type { SelectedEntity } from '../types';
-import { getIfcTypeName } from '../utils/ifcTypeNames';
+import type { IfcWorkerClient } from '../workers/ifcWorkerClient';
 
 function getDisciplineFromType(typeName: string): string {
   const t = typeName.toUpperCase();
@@ -27,140 +26,106 @@ export function useEntitySelection(
   const popupVisibleRef = useRef(false);
   useEffect(() => { popupVisibleRef.current = popupVisible; }, [popupVisible]);
 
+  // Token de la última consulta pedida — si llegan dos clicks seguidos
+  // (el usuario cambia de elemento antes de que responda el worker por
+  // el anterior), la respuesta vieja no debe pisar la selección nueva.
+  const requestSeqRef = useRef(0);
+
   // Trae propiedades/materiales/historial de UN elemento y muestra el
   // popup — NO toca la selección visual en el renderer (eso lo decide
   // quien llama: selectEntityById marca solo este; selectGroupInViewer
   // marca varios y usa esto solo para la ficha del primero). Separado
-  // de selectEntityById para poder reusar la parte cara (web-ifc) sin
-  // pisar una selección múltiple ya aplicada.
+  // de selectEntityById para poder reusar la parte cara (consulta al
+  // worker) sin pisar una selección múltiple ya aplicada.
+  //
+  // IMPORTANTE: la cámara/marcador/popup se muestran DE INMEDIATO, ANTES
+  // de esperar al worker — solo con placeholder "Cargando..." en los
+  // datos. Antes esto se hacía todo DESPUÉS del await a getEntityDetails,
+  // así que durante el viaje de ida y vuelta al worker no pasaba nada en
+  // pantalla y el click se sentía "roto" (no confirma nada hasta que
+  // tarda en llegar la respuesta). Ahora el feedback visual es
+  // instantáneo, y los datos completos (propiedades/materiales/historial)
+  // se completan cuando llega la respuesta.
+  //
+  // Toda la lectura pesada de web-ifc (GetLine, getPropertySets,
+  // getMaterialsProperties, OwnerHistory) vive en el worker
+  // (workers/ifcWorker.ts, comando 'getEntityDetails') y se resuelve en
+  // UN SOLO viaje de mensaje — evita ida y vuelta por cada propiedad
+  // suelta.
   const showEntityDetails = useCallback(async (expressId: number, point?: { x: number; y: number; z: number }) => {
-    const store = storeRef.current;
+    const store = storeRef.current as { client?: IfcWorkerClient } | null;
     const renderer = rendererRef.current;
-    if (!store?.api || store.modelID === undefined || !renderer) return;
+    if (!store?.client || !renderer) return;
 
-    const { api, modelID } = store;
+    const mySeq = ++requestSeqRef.current;
 
+    // --- 1) Feedback inmediato, sin esperar nada del worker ---
+    let anchorPoint = point;
+    if (!anchorPoint) {
+      // Sin punto de click (búsqueda por ID, o click desde la tabla de
+      // metrados): volamos la cámara, mostramos el marcador láser (por si
+      // queda tapado por un vecino) y usamos el centro del elemento como
+      // ancla del popup. Todo esto es geometría local (renderer), no
+      // necesita al worker — por eso puede pasar YA.
+      renderer.flyToElement?.(expressId);
+      renderer.showElementMarker?.(expressId);
+      anchorPoint = renderer.getElementCenter?.(expressId) ?? undefined;
+    } else {
+      // Selección por click directo en el 3D: ya estás viendo el
+      // elemento, no hace falta marcador — y si quedó uno de una
+      // búsqueda anterior, lo limpiamos.
+      renderer.clearElementMarker?.();
+    }
+    renderer.requestRender?.();
+
+    selectedPointRef.current = anchorPoint ?? null;
+
+    const stats = renderer.getElementStats?.(expressId);
+    setSelectedEntity({
+      expressId,
+      name: `#${expressId}`,
+      globalId: '',
+      description: '',
+      objectType: '',
+      tag: '',
+      type: '',
+      propertySets: [],
+      discipline: 'General',
+      volume: stats ? stats.volume : null,
+      area: stats ? stats.area : null,
+      ownerHistory: null,
+      materials: [],
+      loadingDetails: true, // <- el popup debe mostrar un spinner/skeleton mientras esto sea true
+    } as SelectedEntity);
+    setPopupVisible(true);
+
+    // --- 2) Completar con los datos reales cuando responda el worker ---
     try {
-      const line = api.GetLine(modelID, expressId, true);
-
-      let typeName = '';
-      try {
-        const typeCode = api.GetLineType(modelID, expressId);
-        typeName = getIfcTypeName(api, typeCode);
-      } catch { /* deja typeName vacío si falla */ }
-
-      let propertySets: { name: string; properties: { name: string; value: any }[] }[] = [];
-      try {
-        const psetLines = await api.properties?.getPropertySets?.(modelID, expressId, true) ?? [];
-        propertySets = psetLines.map((pset: any) => {
-          const psetName = pset.Name?.value ?? 'PropertySet';
-          const props = (pset.HasProperties || []).map((propRef: any) => {
-            try {
-              let propLine: any = propRef;
-              if (propRef?.Name === undefined && propRef?.NominalValue === undefined) {
-                const propId = typeof propRef === 'number' ? propRef : propRef?.value;
-                if (typeof propId === 'number') propLine = api.GetLine(modelID, propId);
-              }
-              return {
-                name: propLine.Name?.value ?? 'Propiedad',
-                value: propLine.NominalValue?.value ?? propLine.NominalValue ?? '',
-              };
-            } catch {
-              return { name: 'Propiedad', value: '(no disponible)' };
-            }
-          });
-          return { name: psetName, properties: props };
-        });
-      } catch (psetErr) {
-        console.warn('No se pudieron leer property sets:', psetErr);
-      }
-
-      // Historial de creación — mejor esfuerzo, no rompe si falla
-      let ownerHistory: { creationDate: string; owningUser: string; owningApplication: string } | null = null;
-      try {
-        const ownerHistoryRef = line.OwnerHistory;
-        const ownerHistoryId = ownerHistoryRef?.value ?? ownerHistoryRef;
-        if (typeof ownerHistoryId === 'number') {
-          const ohLine = api.GetLine(modelID, ownerHistoryId, true);
-          const creationTimestamp = ohLine.CreationDate?.value;
-          const creationDate = creationTimestamp ? new Date(creationTimestamp * 1000).toLocaleDateString() : '';
-
-          let owningUser = '';
-          try {
-            const userRef = ohLine.OwningUser?.value ?? ohLine.OwningUser;
-            if (typeof userRef === 'number') {
-              const userLine = api.GetLine(modelID, userRef, true);
-              const personRef = userLine.ThePerson?.value ?? userLine.ThePerson;
-              if (typeof personRef === 'number') {
-                const personLine = api.GetLine(modelID, personRef, true);
-                owningUser = [personLine.GivenName?.value, personLine.FamilyName?.value].filter(Boolean).join(' ');
-              }
-            }
-          } catch { /* usuario no disponible */ }
-
-          let owningApplication = '';
-          try {
-            const appRef = ohLine.OwningApplication?.value ?? ohLine.OwningApplication;
-            if (typeof appRef === 'number') {
-              const appLine = api.GetLine(modelID, appRef, true);
-              owningApplication = appLine.ApplicationFullName?.value ?? '';
-            }
-          } catch { /* aplicación no disponible */ }
-
-          ownerHistory = { creationDate, owningUser, owningApplication };
-        }
-      } catch { /* historial no disponible para este elemento */ }
-
-      // Material — mejor esfuerzo, requiere método específico de web-ifc
-      let materials: string[] = [];
-      try {
-        const matResult = await api.properties?.getMaterialsProperties?.(modelID, expressId, true);
-        const matData = matResult ?? [];
-        materials = matData
-          .map((m: any) => m.Name?.value ?? m.Material?.Name?.value)
-          .filter(Boolean);
-      } catch { /* material no disponible para este elemento */ }
-
-      const stats = renderer.getElementStats?.(expressId);
+      const result = await store.client.getEntityDetails(expressId);
+      if (requestSeqRef.current !== mySeq) return; // llegó tarde, ya hay otra selección activa
 
       setSelectedEntity({
         expressId,
-        name: line.Name?.value || `#${expressId}`,
-        globalId: line.GlobalId?.value || '',
-        description: line.Description?.value || '',
-        objectType: line.ObjectType?.value || '',
-        tag: line.Tag?.value || '',
-        type: typeName,
-        propertySets,
-        discipline: getDisciplineFromType(typeName),
+        name: result.name,
+        globalId: result.globalId,
+        description: result.description,
+        objectType: result.objectType,
+        tag: result.tag,
+        type: result.type,
+        propertySets: result.propertySets,
+        discipline: getDisciplineFromType(result.type),
         volume: stats ? stats.volume : null,
         area: stats ? stats.area : null,
-        ownerHistory,
-        materials,
+        ownerHistory: result.ownerHistory,
+        materials: result.materials,
+        loadingDetails: false,
       } as SelectedEntity);
-
-      let anchorPoint = point;
-      if (!anchorPoint) {
-        // Sin punto de click (búsqueda por ID, o click desde la tabla
-        // de metrados): volamos la cámara, mostramos el marcador láser
-        // (por si queda tapado por un vecino) y usamos el centro del
-        // elemento como ancla del popup.
-        renderer.flyToElement?.(expressId);
-        renderer.showElementMarker?.(expressId);
-        anchorPoint = renderer.getElementCenter?.(expressId) ?? undefined;
-      } else {
-        // Selección por click directo en el 3D: ya estás viendo el
-        // elemento, no hace falta marcador — y si quedó uno de una
-        // búsqueda anterior, lo limpiamos.
-        renderer.clearElementMarker?.();
-      }
-
-      renderer.requestRender?.();
-
-      selectedPointRef.current = anchorPoint ?? null;
-      setPopupVisible(true);
     } catch (err) {
+      if (requestSeqRef.current !== mySeq) return;
       console.error('Error al leer propiedades del elemento:', err);
+      // Dejamos el popup abierto con lo mínimo (nombre/volumen) en vez de
+      // hacerlo desaparecer — mejor mostrar algo incompleto que nada.
+      setSelectedEntity((prev) => (prev && prev.expressId === expressId ? { ...prev, loadingDetails: false } : prev));
     }
   }, [rendererRef, storeRef]);
 
@@ -222,49 +187,36 @@ export function useEntitySelection(
     }
   }, [rendererRef]);
 
-  // Mapa GlobalId -> expressId, se construye una sola vez por modelo y se cachea
+  // Mapa GlobalId -> expressId, se construye una sola vez por modelo y se
+  // cachea. Antes se comparaba por modelID (número expuesto por web-ifc);
+  // ahora que api/modelID viven dentro del worker y no se exponen acá,
+  // se compara por IDENTIDAD del client (useModelLoader crea un
+  // IfcWorkerClient nuevo por cada carga de modelo, así que comparar la
+  // referencia es equivalente y no requiere tocar el worker).
   const guidMapRef = useRef<Map<string, number> | null>(null);
-  const guidMapModelIdRef = useRef<number | null>(null);
-
-  function buildGuidMap(api: any, modelID: number): Map<string, number> {
-    const map = new Map<string, number>();
-    const maxId = api.GetMaxExpressID(modelID);
-    for (let id = 1; id <= maxId; id++) {
-      try {
-        const line = api.GetLine(modelID, id);
-        const guid = line?.GlobalId?.value;
-        if (guid) map.set(guid, id);
-      } catch {
-        // id sin línea válida, se salta
-      }
-    }
-    return map;
-  }
+  const guidMapClientRef = useRef<IfcWorkerClient | null>(null);
 
   const selectByIdOrGuid = useCallback(async (rawInput: string): Promise<boolean> => {
     const input = rawInput.trim();
     if (!input) return false;
 
-    const store = storeRef.current;
-    if (!store?.api || store.modelID === undefined) return false;
-    const { api, modelID } = store;
+    const store = storeRef.current as { client?: IfcWorkerClient } | null;
+    if (!store?.client) return false;
+    const { client } = store;
 
     // Caso 1: expressId numérico
     if (/^\d+$/.test(input)) {
       const expressId = parseInt(input, 10);
-      try {
-        api.GetLine(modelID, expressId); // valida que exista
-      } catch {
-        return false;
-      }
+      const exists = await client.checkLineExists(expressId);
+      if (!exists) return false;
       await selectEntityById(expressId);
       return true;
     }
 
     // Caso 2: GlobalId (GUID IFC, string base64 de ~22 caracteres)
-    if (guidMapModelIdRef.current !== modelID || !guidMapRef.current) {
-      guidMapRef.current = buildGuidMap(api, modelID);
-      guidMapModelIdRef.current = modelID;
+    if (guidMapClientRef.current !== client || !guidMapRef.current) {
+      guidMapRef.current = await client.buildGuidMap();
+      guidMapClientRef.current = client;
     }
     const expressId = guidMapRef.current.get(input);
     if (expressId === undefined) return false;

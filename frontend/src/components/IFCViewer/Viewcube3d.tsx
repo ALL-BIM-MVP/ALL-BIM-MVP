@@ -7,6 +7,12 @@ interface ViewCube3DProps {
   // Posición en pantalla donde debe aparecer el cubo (ya que al usar portal,
   // ya no se posiciona relativo al visor con "absolute top-3 right-3").
   anchorRef?: React.RefObject<HTMLElement | null>;
+  // Cuánto restarle a la posición horizontal, en píxeles — usado para que
+  // el cubo se corra hacia la izquierda cuando hay un panel superpuesto
+  // (ej. el panel de Metrados) que si no lo taparía. Pasar el ancho actual
+  // del panel (0 si está cerrado) para que el cubo lo siga en vivo mientras
+  // se abre/cierra o se arrastra para cambiar su ancho.
+  rightOffset?: number;
 }
 
 const SIZE = 44;
@@ -41,14 +47,14 @@ const VIEW_TARGETS: Record<ViewPreset, { x: number; y: number }> = {
 // Margen desde el borde derecho del visor hasta el cubo. Subir este
 // número mueve el cubo hacia la IZQUIERDA (más lejos del borde);
 // bajarlo lo mueve hacia la DERECHA (más cerca del borde).
-const RIGHT_MARGIN = 40;
+const RIGHT_MARGIN = 8;
 
 // Margen desde el borde SUPERIOR del visor hasta el cubo. Bajar este
 // número mueve el cubo hacia ARRIBA (más cerca del borde); subirlo lo
 // mueve hacia ABAJO (más lejos del borde).
-const TOP_MARGIN = 4;
+const TOP_MARGIN = -4;
 
-const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef }) => {
+const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef, rightOffset = 0 }) => {
   const [rotation, setRotation] = useState(DEFAULT_ROTATION);
   const [hoveredFace, setHoveredFace] = useState<ViewPreset | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -60,13 +66,16 @@ const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef }) => {
 
   // Calcula la posición en pantalla del widget, siguiendo la esquina superior
   // derecha del contenedor ancla (o de la ventana, si no hay anchorRef).
+  // rightOffset corre el cubo hacia la izquierda para no quedar tapado por
+  // un panel superpuesto — se recalcula cada vez que cambia (panel se abre,
+  // cierra, o se arrastra su ancho), así el cubo lo sigue en vivo.
   useEffect(() => {
     const updatePosition = () => {
       if (anchorRef?.current) {
         const rect = anchorRef.current.getBoundingClientRect();
-        setScreenPos({ top: rect.top + TOP_MARGIN, left: rect.right - 110 - RIGHT_MARGIN });
+        setScreenPos({ top: rect.top + TOP_MARGIN, left: rect.right - 110 - RIGHT_MARGIN - rightOffset });
       } else {
-        setScreenPos({ top: TOP_MARGIN, left: window.innerWidth - 110 - RIGHT_MARGIN });
+        setScreenPos({ top: TOP_MARGIN, left: window.innerWidth - 110 - RIGHT_MARGIN - rightOffset });
       }
     };
     updatePosition();
@@ -76,7 +85,7 @@ const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef }) => {
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [anchorRef]);
+  }, [anchorRef, rightOffset]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();

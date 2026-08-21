@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, BASE_URL } from './api';
 import { Project, NewProjectData, ProjectScope, ProjectFile } from '../types/project.types';
 
 export const projectService = {
@@ -75,7 +75,10 @@ export const projectService = {
     return response;
   },
 
-  // Listar los archivos (IFC, Excel, etc.) subidos a un proyecto
+  // Listar los archivos (IFC, Excel, etc.) subidos a un proyecto.
+  // Desde el fix de backend, esta lista ya NO incluye la portada del
+  // proyecto, y cada imagen trae thumbnail_url (URL firmada, ver
+  // getThumbnailSrc más abajo).
   async getProjectFiles(projectId: number): Promise<ProjectFile[]> {
     const response = await api.get(`/api/projects/${projectId}/files`);
     return response;
@@ -84,6 +87,19 @@ export const projectService = {
   // Borrar un archivo del proyecto (solo quien lo subió o el dueño del proyecto)
   async deleteProjectFile(projectId: number, fileId: string | number): Promise<void> {
     await api.delete(`/api/projects/${projectId}/files/${fileId}`);
+  },
+
+  // Sube un archivo cualquiera al proyecto (imagen, excel, pdf, etc.) — mismo
+  // endpoint que uploadIFC pero genérico, con el campo "file" que espera el
+  // backend para el resto de tipos. Si el archivo sube como imagen, el
+  // backend genera su miniatura solo (ver doc de endpoints).
+  // Usado por ej. desde el visor 3D para guardar una captura de pantalla
+  // como archivo del proyecto.
+  async uploadFile(projectId: number, file: File): Promise<ProjectFile> {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await api.postFormData(`/api/projects/${projectId}/files`, formData);
+    return response;
   },
 
   // Descargar el contenido real de un archivo y disparar la descarga en el navegador
@@ -97,5 +113,34 @@ export const projectService = {
     a.click();
     a.remove();
     window.URL.revokeObjectURL(url);
+  },
+
+  // Arma la URL absoluta y lista-para-usar de la miniatura de una imagen.
+  // thumbnail_url ya viene firmada desde el backend (?token=...), acá solo
+  // le pegamos el baseUrl delante — SIN Authorization, SIN fetch a mano,
+  // el navegador la resuelve como cualquier <img src>.
+  // Devuelve null si el archivo no es imagen o no tiene miniatura generada
+  // (archivo corrupto, formato raro al subir).
+  //
+  // WORKAROUND: el backend documenta la ruta como /api/files/:id/thumbnail,
+  // pero el campo thumbnail_url que realmente devuelve en la lista viene
+  // SIN el prefijo /api (confirmado con 404 real al pegar la URL tal cual).
+  // Lo agregamos acá si no está, para no depender de que se corrija del
+  // lado del backend. Si el backend lo arregla más adelante y empieza a
+  // mandar el /api ya incluido, este chequeo evita duplicarlo.
+  getThumbnailSrc(file: ProjectFile & { thumbnail_url?: string | null }): string | null {
+    if (!file.thumbnail_url) return null;
+    const path = file.thumbnail_url.startsWith('/api')
+      ? file.thumbnail_url
+      : `/api${file.thumbnail_url}`;
+    return `${BASE_URL}${path}`;
+  },
+
+  // Pide el archivo completo (ej. una imagen a tamaño real) como Blob,
+  // autenticado con el access token normal. Pensado para uso on-demand
+  // (ej. al hacer click en una miniatura para verla en grande), no para
+  // listas — para eso está getThumbnailSrc.
+  async getFileContentBlob(fileId: string | number): Promise<Blob> {
+    return api.getBlob(`/api/files/${fileId}/content`);
   },
 };

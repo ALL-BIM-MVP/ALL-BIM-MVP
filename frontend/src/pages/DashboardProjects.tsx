@@ -4,7 +4,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Upload, FileText, AlertCircle, 
   Plus, Download, X,
-  ChevronRight, Search, Maximize2, Minimize2, FileSearch, Box
+  ChevronRight, Search, Maximize2, Minimize2, FileSearch, Box, ArrowLeft
 } from 'lucide-react';
 import {
   House, FolderOpen, UsersThree, Cube, SquaresFour,
@@ -42,6 +42,16 @@ const DashboardProjects: React.FC = () => {
   const [showTagsModal, setShowTagsModal] = useState(false);
 
   const [confirmedModuloId, setConfirmedModuloId] = useState<string | null>(null);
+
+  // Visor3DTab NO debe desmontarse al cambiar de tab (perdería el IFC
+  // cargado, la escena de Three.js, la cámara, etc. — ver el render más
+  // abajo). Se monta recién la primera vez que el usuario entra al tab
+  // 'visor3d', y a partir de ahí queda montado para siempre (solo se
+  // oculta con CSS cuando no está activo).
+  const [hasEnteredVisor3D, setHasEnteredVisor3D] = useState(false);
+  useEffect(() => {
+    if (activeTab === 'visor3d') setHasEnteredVisor3D(true);
+  }, [activeTab]);
 
   const [sidebarVisible, setSidebarVisible] = useState(false);
 
@@ -139,10 +149,16 @@ const DashboardProjects: React.FC = () => {
     }
   };
 
+  // El tab de Colaboradores es visible para TODOS los miembros del
+  // proyecto (owner e invitados) — quién puede invitar/gestionar vs. solo
+  // ver la lista de miembros ya lo resuelve ColaboradoresTab por dentro
+  // (según isOwner). Antes este array excluía el tab entero para
+  // no-owners con un ternario condicional, dejando a los invitados sin
+  // forma de ver ni siquiera la lista de miembros — por eso no aparecía.
   const tabs: { id: TabType; label: string; icon: any; shortcut?: string }[] = [
     { id: 'inicio', label: 'Inicio', icon: House },
     { id: 'archivos', label: 'Archivos', icon: FolderOpen, shortcut: 'Alt' },
-    ...(isOwner ? [{ id: 'colaboradores' as TabType, label: 'Colaboradores', icon: UsersThree }] : []),
+    { id: 'colaboradores', label: 'Colaboradores', icon: UsersThree },
     { id: 'visor3d', label: 'Visor 3D', icon: Cube },
   ];
 
@@ -186,12 +202,21 @@ const DashboardProjects: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
+
       {/* HEADER */}
       <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate('/dashboard/projects')}
+                  className="-ml-2 w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#0056b3] hover:bg-blue-50 transition-colors flex-shrink-0"
+                  title="Volver a Proyectos"
+                  aria-label="Volver a Proyectos"
+                >
+                  <ArrowLeft size={18} />
+                </button>
                 <img src={logo} alt="Logo ALL-BIM" className="h-11 w-auto" />
                 <span className="text-2xl font-black text-[#0056b3]"></span>
                 <span className="text-sm text-gray-400">|</span>
@@ -220,34 +245,45 @@ const DashboardProjects: React.FC = () => {
                 </button>
 
                 {isUserMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 py-4 px-5 z-50">
+                  <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 border border-gray-100 py-5 px-5 z-50 animate-fadeInUp">
                     <div className="flex items-center gap-4 mb-4">
-                      <div className="w-16 h-16 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-2xl font-bold">
+                      <div className="w-14 h-14 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-xl font-bold ring-2 ring-white shadow-sm flex-shrink-0">
                         {user?.name?.charAt(0).toUpperCase() || 'U'}
                       </div>
-                      <div>
-                        <p className="font-bold text-lg text-gray-800">{user?.name}</p>
-                        <p className="text-sm text-gray-500">ID: {user?.id}</p>
+                      <div className="min-w-0">
+                        <p className="font-bold text-base text-gray-800 truncate">{user?.name}</p>
+                        <p className="text-xs text-gray-400 truncate">{user?.email}</p>
                       </div>
                     </div>
 
-                    <div className="border-t border-gray-100 pt-4 space-y-2 text-sm mb-4">
-                      <p className="text-gray-600">
-                        <span className="font-semibold text-gray-800">Email:</span> {user?.email}
-                      </p>
-                      <p className="text-gray-600">
-                        <span className="font-semibold text-gray-800">Rol:</span> {user?.role}
-                      </p>
+                    <div className="flex flex-wrap items-center gap-1.5 mb-4">
+                      {user?.role && (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-gray-50 text-gray-600 ring-1 ring-gray-200">
+                          {user.role}
+                        </span>
+                      )}
+                      {!checkingOwner && userRole && (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-[#0056b3] ring-1 ring-blue-200">
+                          {userRole.role_name} en este proyecto
+                        </span>
+                      )}
                     </div>
 
-                    <div className="border-t border-gray-100 pt-3">
+                    <div className="border-t border-gray-100 pt-3 space-y-1 text-sm mb-1">
+                      <div className="flex items-center justify-between px-1 py-1.5">
+                        <span className="text-gray-400 text-xs uppercase tracking-wide font-semibold">ID de usuario</span>
+                        <span className="text-gray-700 font-medium">#{user?.id}</span>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-gray-100 pt-3 mt-2">
                       <button
                         onClick={() => {
                           setIsUserMenuOpen(false);
                           logout();
                           navigate('/login');
                         }}
-                        className="w-full text-left px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-2 font-medium"
+                        className="w-full text-left px-3 py-2.5 text-red-600 hover:bg-red-50 rounded-xl flex items-center gap-2.5 font-semibold text-sm transition-colors"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
@@ -266,12 +302,22 @@ const DashboardProjects: React.FC = () => {
       </header>
 
       {/* CONTENIDO */}
-      {activeTab === 'visor3d' ? (
-  <div className="fixed left-0 right-0 bottom-0 top-14 z-0">
-    <Visor3DTab projectId={project?.project_id || 0} />
-  </div>
-       ) 
-       : (
+      {/* Visor3DTab se monta la primera vez que se visita el tab, y a
+          partir de ahí NUNCA se desmonta al cambiar de tab — solo se
+          oculta con display:none. Antes esto vivía en un ternario
+          (activeTab === 'visor3d' ? <Visor3DTab/> : <otros tabs/>), que
+          desmontaba el componente por completo cada vez que se salía del
+          tab, perdiendo el IFC cargado, la escena 3D y la cámara. */}
+      {hasEnteredVisor3D && (
+        <div
+          className="fixed left-0 right-0 bottom-0 top-14 z-0"
+          style={{ display: activeTab === 'visor3d' ? 'block' : 'none' }}
+        >
+          <Visor3DTab projectId={project?.project_id || 0} />
+        </div>
+      )}
+
+      {activeTab !== 'visor3d' && (
       <div className="max-w-9xl mx-auto p-6 pb-32 pl-16 relative isolate">
             
         {/* TAB: INICIO */}
@@ -302,7 +348,11 @@ const DashboardProjects: React.FC = () => {
     currentUserId={user?.id}
   />
 )}
-        {activeTab === 'colaboradores' && isOwner && (
+        {/* Visible para cualquier miembro del proyecto (owner o invitado).
+            ColaboradoresTab decide internamente qué mostrar según isOwner
+            (el owner ve invitar/gestionar; el resto solo ve la lista de
+            miembros) — por eso ya NO se filtra acá con "&& isOwner". */}
+        {activeTab === 'colaboradores' && (
           <ColaboradoresTab onClose={() => setActiveTab('inicio')} 
           projectId={project?.project_id || 0} 
           />
@@ -497,6 +547,11 @@ const DashboardProjects: React.FC = () => {
           to { opacity: 1; transform: scale(1) translateY(0); }
         }
         .animate-floatIn { animation: floatIn 0.2s ease-out; }
+        @keyframes fadeInUp {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fadeInUp { animation: fadeInUp 0.18s ease-out; }
       `}</style>
     </div>
   );
