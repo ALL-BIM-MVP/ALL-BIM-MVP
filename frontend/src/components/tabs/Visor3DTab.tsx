@@ -3,6 +3,7 @@ import {
   Upload, FileText, X, Maximize2, Minimize2, FileSearch, Box,
   ChevronLeft, ChevronRight, Search, RefreshCw, FileDown,
   HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2, Info,
+  FileStack, Layers,
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
@@ -11,11 +12,16 @@ import PartidasTree from './PartidasTree';
 import {
   IfcFile,
   IfcStatus,
+  IfcSpecialty,
+  IfcDocument,
+  IfcDocumentContext,
   listProjectIfcFiles,
   getFileContentArrayBuffer,
   uploadAndProcessIfcFile,
   processExistingIfcFile,
   pollIfcProcessStatus,
+  listIfcSpecialties,
+  listIfcDocuments,
 } from '../../services/ifcfiles.service';
 import { getMyModuleAccess } from '../../services/module.service';
 import type { ModuleAccess } from '../../services/module.service';
@@ -76,14 +82,23 @@ const IfcStatusBadge: React.FC<{ status: IfcFile['ifc_status'] }> = ({ status })
   );
 };
 
+const VersionBadge: React.FC<{ versionNumber: number | null; isCurrent: boolean | null }> = ({ versionNumber, isCurrent }) => {
+  if (versionNumber === null) return null;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="text-[10px] font-semibold text-slate-500">v{versionNumber}</span>
+      {isCurrent === false && (
+        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+          versión anterior
+        </span>
+      )}
+    </span>
+  );
+};
+
 const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const { user } = useAuth();
 
-  // Permisos del usuario actual en el módulo Metrados de ESTE proyecto —
-  // se pide UNA sola vez al entrar. null mientras carga (los botones
-  // gateados quedan ocultos hasta tener la respuesta, para no parpadear
-  // "aparece y después desaparece"). Nunca se compara contra el rol por
-  // nombre — solo contra estos booleans (ver guía Parte B).
   const [metradosAccess, setMetradosAccess] = useState<ModuleAccess | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -120,6 +135,51 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const [pendingLocalFile, setPendingLocalFile] = useState<File | null>(null);
   const [pendingLocalBuffer, setPendingLocalBuffer] = useState<ArrayBuffer | null>(null);
 
+  const [showDocumentModal, setShowDocumentModal] = useState(false);
+  const [fileAwaitingContext, setFileAwaitingContext] = useState<File | null>(null);
+  const [documentMode, setDocumentMode] = useState<'new' | 'version'>('new');
+  const [specialties, setSpecialties] = useState<IfcSpecialty[]>([]);
+  const [specialtiesLoading, setSpecialtiesLoading] = useState(false);
+  const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<number | null>(null);
+  const [newDocumentName, setNewDocumentName] = useState('');
+  const [documents, setDocuments] = useState<IfcDocument[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentSearch, setDocumentSearch] = useState('');
+  const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!showDocumentModal) return;
+    let cancelled = false;
+    setSpecialtiesLoading(true);
+    setDocumentsLoading(true);
+    listIfcSpecialties()
+      .then((list) => { if (!cancelled) setSpecialties(list); })
+      .catch((err) => console.error('Error al cargar especialidades:', err))
+      .finally(() => { if (!cancelled) setSpecialtiesLoading(false); });
+    listIfcDocuments(projectId)
+      .then((list) => { if (!cancelled) setDocuments(list); })
+      .catch((err) => console.error('Error al cargar documentos IFC:', err))
+      .finally(() => { if (!cancelled) setDocumentsLoading(false); });
+    return () => { cancelled = true; };
+  }, [showDocumentModal, projectId]);
+
+  const filteredDocuments = documents.filter((d) =>
+    d.name.toLowerCase().includes(documentSearch.trim().toLowerCase())
+  );
+
+  const closeDocumentModal = () => {
+    setShowDocumentModal(false);
+    setFileAwaitingContext(null);
+    setDocumentMode('new');
+    setSelectedSpecialtyId(null);
+    setNewDocumentName('');
+    setDocumentSearch('');
+    setSelectedDocumentId(null);
+  };
+
+  const isDocumentContextReady =
+    documentMode === 'new' ? selectedSpecialtyId !== null : selectedDocumentId !== null;
+
   const [showLoadedModal, setShowLoadedModal] = useState(false);
   const [loadedTab, setLoadedTab] = useState<'procesados' | 'no_procesados'>('procesados');
   const [loadedFiles, setLoadedFiles] = useState<IfcFile[]>([]);
@@ -128,6 +188,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const [loadedSearch, setLoadedSearch] = useState('');
   const [selectedLoadedFileId, setSelectedLoadedFileId] = useState<string | null>(null);
   const [applyingSelection, setApplyingSelection] = useState(false);
+  const [onlyCurrentVersions, setOnlyCurrentVersions] = useState(true);
 
   const closeSearchOnInteract = () => {
     if (searchOpen) setSearchOpen(false);
@@ -194,7 +255,15 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   };
 
   const runProcessing = useCallback(
-    async ({ file, existingFileId }: { file: File | null; existingFileId: string | null }) => {
+    async ({
+      file,
+      existingFileId,
+      documentContext,
+    }: {
+      file: File | null;
+      existingFileId: string | null;
+      documentContext?: IfcDocumentContext;
+    }) => {
       setPanelStatus('processing');
       setPanelErrorMessage(null);
       try {
@@ -202,8 +271,8 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         if (existingFileId) {
           const initial = await processExistingIfcFile(projectId, existingFileId);
           ifcFileId = String(initial.ifc_file_id ?? existingFileId);
-        } else if (file) {
-          const initial = await uploadAndProcessIfcFile(projectId, file);
+        } else if (file && documentContext) {
+          const initial = await uploadAndProcessIfcFile(projectId, file, documentContext);
           ifcFileId = String(initial.ifc_file_id);
         } else {
           throw new Error('No hay archivo para procesar.');
@@ -257,17 +326,31 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     setPendingLocalBuffer(null);
   };
 
-  const handleChooseProcesar = async () => {
+  const handleChooseProcesar = () => {
     if (!pendingLocalFile || !pendingLocalBuffer) return;
 
     loadBufferIntoViewer(pendingLocalBuffer, pendingLocalFile);
     setActivePanelTab('metrados');
 
-    const fileToProcess = pendingLocalFile;
+    setFileAwaitingContext(pendingLocalFile);
     setPendingLocalFile(null);
     setPendingLocalBuffer(null);
 
-    await runProcessing({ file: fileToProcess, existingFileId: null });
+    setShowDocumentModal(true);
+  };
+
+  const handleConfirmDocumentContext = async () => {
+    if (!fileAwaitingContext || !isDocumentContextReady) return;
+
+    const documentContext: IfcDocumentContext =
+      documentMode === 'new'
+        ? { specialtyId: selectedSpecialtyId!, documentName: newDocumentName.trim() || undefined }
+        : { replacesIfcDocumentId: selectedDocumentId! };
+
+    const fileToProcess = fileAwaitingContext;
+    closeDocumentModal();
+
+    await runProcessing({ file: fileToProcess, existingFileId: null, documentContext });
   };
 
   const cancelPendingLocal = () => {
@@ -279,7 +362,8 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     if (currentFileId) {
       runProcessing({ file: null, existingFileId: currentFileId });
     } else if (ifcFile) {
-      runProcessing({ file: ifcFile, existingFileId: null });
+      setFileAwaitingContext(ifcFile);
+      setShowDocumentModal(true);
     }
   };
 
@@ -288,14 +372,14 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     setLoadedError(null);
     try {
       const processed = loadedTab === 'procesados';
-      const files = await listProjectIfcFiles(projectId, processed);
+      const files = await listProjectIfcFiles(projectId, processed, onlyCurrentVersions);
       setLoadedFiles(files);
     } catch (err: any) {
       setLoadedError(err.message || 'Error al cargar los archivos del proyecto');
     } finally {
       setLoadedLoading(false);
     }
-  }, [projectId, loadedTab]);
+  }, [projectId, loadedTab, onlyCurrentVersions]);
 
   useEffect(() => {
     if (showLoadedModal) {
@@ -664,7 +748,6 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                     ? 'bg-[#0056b3] text-white'
                     : 'text-gray-700 hover:bg-gray-100 hover:text-[#0056b3]'
                 } ${!ifcArrayBuffer ? 'opacity-40 cursor-not-allowed' : ''}`}
-                title="Buscar elemento por ID o GUID IFC"
               >
                 <Search size={14} />
                 <span className="text-[9px] font-medium whitespace-nowrap">Buscar ID</span>
@@ -778,6 +861,159 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         </div>
       )}
 
+      {showDocumentModal && fileAwaitingContext && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10300] p-6">
+          <div className="bg-white rounded-lg w-[480px] max-h-[85vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
+            <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3 flex-shrink-0">
+              <div className="w-10 h-10 rounded bg-blue-50 flex items-center justify-center flex-shrink-0">
+                <FileStack size={18} className="text-[#0056b3]" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-800">¿Qué es este archivo?</p>
+                <p className="text-xs text-slate-500 truncate">{fileAwaitingContext.name}</p>
+              </div>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <label
+                className={`block rounded border p-3.5 cursor-pointer transition-colors ${
+                  documentMode === 'new' ? 'border-[#0056b3] bg-blue-50/40' : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 mb-1">
+                  <input
+                    type="radio"
+                    checked={documentMode === 'new'}
+                    onChange={() => setDocumentMode('new')}
+                    className="text-[#0056b3] focus:ring-[#0056b3]"
+                  />
+                  <span className="text-sm font-semibold text-slate-800">Documento nuevo</span>
+                </div>
+
+                {documentMode === 'new' && (
+                  <div className="mt-3 space-y-3 pl-6">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                        Especialidad <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={selectedSpecialtyId ?? ''}
+                        onChange={(e) => setSelectedSpecialtyId(e.target.value ? Number(e.target.value) : null)}
+                        disabled={specialtiesLoading}
+                        className="w-full px-3 py-2 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3] bg-white"
+                      >
+                        <option value="">{specialtiesLoading ? 'Cargando...' : 'Seleccionar especialidad'}</option>
+                        {specialties.map((s) => (
+                          <option key={s.ifc_specialty_id} value={s.ifc_specialty_id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                        Nombre del documento (opcional)
+                      </label>
+                      <input
+                        type="text"
+                        value={newDocumentName}
+                        onChange={(e) => setNewDocumentName(e.target.value)}
+                        placeholder={fileAwaitingContext.name}
+                        className="w-full px-3 py-2 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                      />
+                    </div>
+                  </div>
+                )}
+              </label>
+
+              <label
+                className={`block rounded border p-3.5 cursor-pointer transition-colors ${
+                  documentMode === 'version' ? 'border-[#0056b3] bg-blue-50/40' : 'border-gray-200 hover:border-gray-300'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 mb-1">
+                  <input
+                    type="radio"
+                    checked={documentMode === 'version'}
+                    onChange={() => setDocumentMode('version')}
+                    className="text-[#0056b3] focus:ring-[#0056b3]"
+                  />
+                  <span className="text-sm font-semibold text-slate-800">Nueva versión de un documento existente</span>
+                </div>
+
+                {documentMode === 'version' && (
+                  <div className="mt-3 pl-6 space-y-2">
+                    <div className="flex items-center border border-gray-200 rounded px-2.5 py-1.5 gap-2 focus-within:ring-2 focus-within:ring-[#0056b3]">
+                      <Search size={13} className="text-slate-400 flex-shrink-0" />
+                      <input
+                        type="text"
+                        value={documentSearch}
+                        onChange={(e) => setDocumentSearch(e.target.value)}
+                        placeholder="Buscar documento..."
+                        className="flex-1 text-sm outline-none bg-transparent min-w-0"
+                      />
+                    </div>
+
+                    <div className="max-h-48 overflow-y-auto border border-gray-100 rounded divide-y divide-gray-100">
+                      {documentsLoading ? (
+                        <p className="text-xs text-slate-400 text-center py-4">Cargando documentos...</p>
+                      ) : filteredDocuments.length === 0 ? (
+                        <p className="text-xs text-slate-400 text-center py-4">
+                          {documentSearch.trim() ? 'Sin resultados' : 'No hay documentos IFC en este proyecto todavía'}
+                        </p>
+                      ) : (
+                        filteredDocuments.map((doc) => {
+                          const current = doc.versions.find((v) => v.is_current);
+                          return (
+                            <button
+                              key={doc.ifc_document_id}
+                              onClick={() => setSelectedDocumentId(doc.ifc_document_id)}
+                              className={`w-full text-left px-3 py-2 hover:bg-gray-50 transition-colors flex items-center gap-2.5 ${
+                                selectedDocumentId === doc.ifc_document_id ? 'bg-blue-50/70' : ''
+                              }`}
+                            >
+                              <Layers size={14} className="text-slate-400 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-slate-700 truncate">{doc.name}</p>
+                                <p className="text-[10px] text-slate-400">
+                                  {doc.specialty_name ?? 'Sin especialidad'}
+                                  {current && ` · v${current.version_number} vigente`}
+                                </p>
+                              </div>
+                              {selectedDocumentId === doc.ifc_document_id && (
+                                <CheckCircle2 size={15} className="text-[#0056b3] flex-shrink-0" />
+                              )}
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                )}
+              </label>
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-gray-100 bg-gray-50/70 flex justify-end gap-2 flex-shrink-0">
+              <button
+                onClick={closeDocumentModal}
+                className="px-4 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmDocumentContext}
+                disabled={!isDocumentContextReady}
+                className={`px-5 py-1.5 rounded text-sm font-semibold transition-colors ${
+                  isDocumentContextReady
+                    ? 'bg-[#0056b3] text-white hover:bg-[#004494]'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                }`}
+              >
+                Continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showLoadedModal && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10200]">
           <div className="bg-white rounded w-[520px] max-h-[80vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
@@ -792,27 +1028,39 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
             </div>
 
             <div className="px-5 pt-4 flex-shrink-0">
-              <div className="flex gap-2">
-                <button
-                  onClick={() => { setLoadedTab('procesados'); setSelectedLoadedFileId(null); }}
-                  className={`px-3.5 py-1.5 rounded text-xs font-semibold border transition-colors ${
-                    loadedTab === 'procesados'
-                      ? 'bg-[#0056b3] text-white border-[#0056b3]'
-                      : 'bg-white text-slate-600 border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  Procesados
-                </button>
-                <button
-                  onClick={() => { setLoadedTab('no_procesados'); setSelectedLoadedFileId(null); }}
-                  className={`px-3.5 py-1.5 rounded text-xs font-semibold border transition-colors ${
-                    loadedTab === 'no_procesados'
-                      ? 'bg-[#0056b3] text-white border-[#0056b3]'
-                      : 'bg-white text-slate-600 border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  No procesados
-                </button>
+              <div className="flex items-center justify-between">
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setLoadedTab('procesados'); setSelectedLoadedFileId(null); }}
+                    className={`px-3.5 py-1.5 rounded text-xs font-semibold border transition-colors ${
+                      loadedTab === 'procesados'
+                        ? 'bg-[#0056b3] text-white border-[#0056b3]'
+                        : 'bg-white text-slate-600 border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    Procesados
+                  </button>
+                  <button
+                    onClick={() => { setLoadedTab('no_procesados'); setSelectedLoadedFileId(null); }}
+                    className={`px-3.5 py-1.5 rounded text-xs font-semibold border transition-colors ${
+                      loadedTab === 'no_procesados'
+                        ? 'bg-[#0056b3] text-white border-[#0056b3]'
+                        : 'bg-white text-slate-600 border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    No procesados
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={!onlyCurrentVersions}
+                    onChange={(e) => setOnlyCurrentVersions(!e.target.checked)}
+                    className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3]"
+                  />
+                  Ver todas las versiones
+                </label>
               </div>
             </div>
 
@@ -869,9 +1117,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                       <FileText size={16} className="text-slate-500" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium text-slate-700 truncate">{file.name}</p>
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium text-slate-700 truncate">{file.name}</p>
+                        <VersionBadge versionNumber={file.version_number} isCurrent={file.is_current} />
+                      </div>
                       <p className="text-xs text-slate-400 mt-0.5">
                         {formatBytes(file.file_size)} · {new Date(file.uploaded_at).toLocaleDateString()}
+                        {file.specialty_name && ` · ${file.specialty_name}`}
                       </p>
                     </div>
                     <IfcStatusBadge status={file.ifc_status} />
