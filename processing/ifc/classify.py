@@ -113,14 +113,24 @@ def _elemento_base(el, dims, metrados, storey, space, propiedades, **kwargs):
     return elem
 
 
-def clasificar_elementos(model, norma_index, hijos):
+def clasificar_elementos(model, norma_index, hijos, property_prefix=None):
     """Recorre todos los IfcProduct del modelo y los clasifica contra la
     norma. Devuelve (elementos, elementos_sin_clasificacion) — las
     propiedades por elemento (para ifc_properties/ifc_property_values/
     ifc_element_property_values) las arma normalize.py directo desde
     elem["propiedades"], no hace falta llevar un mapa global aparte acá
     (y así los elementos reasignados por reasignar_sin_clasificacion,
-    que se agregan después, quedan cubiertos igual sin duplicar lógica)."""
+    que se agregan después, quedan cubiertos igual sin duplicar lógica).
+
+    property_prefix (Fase 4 — independiente del modo de clasificación,
+    ver docs/roadmap-modulos-y-permisos.md): un proyecto puede clasificar
+    contra la norma Y filtrar sus propiedades capturadas por prefijo al
+    mismo tiempo. Cuando viene un prefijo, se lo pasa a
+    extraer_metrados_revit_completo (filtra la captura general de
+    propiedades) y decide la prioridad de metrado — texto-prefijado
+    primero si hay prefijo (hay algo "de confianza" escrito a mano),
+    tipado primero si no (comportamiento de siempre)."""
+    prioridad = "manual" if property_prefix else "norma"
     elementos = []
     elementos_sin_clasificacion = []
     codigos_malformados = 0
@@ -147,12 +157,12 @@ def clasificar_elementos(model, norma_index, hijos):
         psets = ifcopenshell.util.element.get_psets(el)
         dims = obtener_dimensiones(el, psets)
 
-        revit_data = extraer_metrados_revit_completo(el)
+        revit_data = extraer_metrados_revit_completo(el, property_prefix=property_prefix)
         metrados_tipados = revit_data["metrados_tipados"]
         metrados_texto = revit_data["metrados_texto"]
         propiedades = revit_data["propiedades"]
 
-        metrados = calcular_metrados_final(el, dims, metrados_tipados, metrados_texto)
+        metrados = calcular_metrados_final(el, dims, metrados_tipados, metrados_texto, prioridad=prioridad)
         storey, space = get_storey_and_space(el, model)
 
         # --- Sin especialidad activa (n1 fuera de ESPECIALIDADES_ACTIVAS) ---
@@ -311,8 +321,13 @@ def clasificar_elementos_manual(model, config):
     config: dict con code_property_set/code_property_name (obligatorio),
     description_property_set/description_property_name (opcional),
     unit_property_set/unit_property_name (opcional), property_prefix
-    (obligatorio — filtra tanto la captura general de propiedades como
-    el fallback de texto del metrado, ver extraction.extraer_metrados_revit_completo).
+    (Fase 4 — OPCIONAL, independiente del modo de clasificación: filtra
+    tanto la captura general de propiedades como el fallback de texto
+    del metrado cuando está presente, ver
+    extraction.extraer_metrados_revit_completo — sin prefijo, la
+    clasificación manual igual funciona con los nombres exactos de
+    código/descripción/unidad, solo que la prioridad de metrado no se
+    invierte, ver calcular_metrados_final).
 
     v1 — un solo "slot" (un elemento, una partida). El día que haga
     falta soportar que un elemento pertenezca a varias partidas a la vez
@@ -327,6 +342,7 @@ def clasificar_elementos_manual(model, config):
     elementos = []
     elementos_sin_clasificacion = []
     property_prefix = config.get("property_prefix")
+    prioridad = "manual" if property_prefix else "norma"
 
     for el in model.by_type("IfcProduct"):
         if el.is_a('IfcOpeningElement') or el.is_a('IfcSpace'):
@@ -351,7 +367,7 @@ def clasificar_elementos_manual(model, config):
         dims = obtener_dimensiones(el, psets)
         revit_data = extraer_metrados_revit_completo(el, property_prefix=property_prefix)
         metrados = calcular_metrados_final(
-            el, dims, revit_data["metrados_tipados"], revit_data["metrados_texto"], prioridad="manual"
+            el, dims, revit_data["metrados_tipados"], revit_data["metrados_texto"], prioridad=prioridad
         )
         storey, space = get_storey_and_space(el, model)
 

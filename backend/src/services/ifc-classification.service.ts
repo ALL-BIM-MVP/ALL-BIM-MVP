@@ -6,7 +6,7 @@ import type { ProjectIdParam } from "../schemas/projects.schema.js";
 import type { ClassificationOverride, IfcClassificationConfigBody } from "../schemas/ifc-classification.schema.js";
 import type {
     IfcClassificationConfigFull, IfcClassificationConfigRow, IfcClassificationFieldRow,
-    IfcClassificationSnapshot,
+    IfcClassificationMode, IfcClassificationSnapshot,
 } from "../models/ifc-classification.models.js";
 import { assertModulePermission } from "./project-access.service.js";
 
@@ -15,12 +15,15 @@ import { assertModulePermission } from "./project-access.service.js";
 const METRADOS_MODULE_CODE = "metrados";
 
 // Sin fila propia = todavía nadie configuró nada para este proyecto —
-// el default implícito es mode='norma', sin bloquear, sin campos.
+// el default implícito es mode='norma', sin prefijo, sin bloquear.
+// En la práctica esto ya no debería pasar (POST /projects crea la fila
+// siempre, ver projects.service.ts) — queda como red de seguridad.
 const DEFAULT_CONFIG = (projectId: number): IfcClassificationConfigFull => ({
     project_id: projectId,
     mode: "norma",
+    mode_locked: false,
     property_prefix: null,
-    locked: false,
+    property_prefix_locked: false,
     updated_at: new Date(0),
     updated_by: null,
     fields: [],
@@ -33,7 +36,7 @@ export const getIfcClassificationConfigService = async (
     await assertModulePermission(projectId, user.user_id, METRADOS_MODULE_CODE, "view");
 
     const { rows } = await pool.query<IfcClassificationConfigRow>(
-        `SELECT project_id, mode, property_prefix, locked, updated_at, updated_by
+        `SELECT project_id, mode, mode_locked, property_prefix, property_prefix_locked, updated_at, updated_by
         FROM ifc_classification_configs WHERE project_id = $1`,
         [projectId]
     );
@@ -54,17 +57,17 @@ export const getIfcClassificationConfigService = async (
 };
 
 // Solo owner/admin (permiso 'configure', sembrado en Fase 2 justo para
-// esto) — reemplaza TODA la config de una (mode + property_prefix +
-// locked + el único slot=1 soportado hoy), no es un PATCH parcial.
+// esto) — reemplaza TODA la config de una (no es un PATCH parcial):
+// mode/mode_locked/property_prefix/property_prefix_locked + el único
+// slot=1 soportado hoy.
 export const upsertIfcClassificationConfigService = async (
     user: DecodedToken, { projectId }: ProjectIdParam, body: IfcClassificationConfigBody
 ): Promise<IfcClassificationConfigFull> => {
 
     await assertModulePermission(projectId, user.user_id, METRADOS_MODULE_CODE, "configure");
 
-    if (body.mode === "manual") {
-        if (!body.property_prefix) throw new AppError(IFC_CLASSIFICATION_ERRORS.PREFIX_REQUIRED);
-        if (!body.code_property_name) throw new AppError(IFC_CLASSIFICATION_ERRORS.FIELDS_REQUIRED);
+    if (body.mode === "manual" && !body.code_property_name) {
+        throw new AppError(IFC_CLASSIFICATION_ERRORS.FIELDS_REQUIRED);
     }
 
     const client = await pool.connect();
@@ -72,11 +75,17 @@ export const upsertIfcClassificationConfigService = async (
         await client.query("BEGIN");
 
         await client.query(
-            `INSERT INTO ifc_classification_configs (project_id, mode, property_prefix, locked, updated_by)
-            VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO ifc_classification_configs
+                (project_id, mode, mode_locked, property_prefix, property_prefix_locked, updated_by)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (project_id) DO UPDATE
-                SET mode = $2, property_prefix = $3, locked = $4, updated_by = $5, updated_at = NOW()`,
-            [projectId, body.mode, body.mode === "manual" ? body.property_prefix : null, body.locked ?? false, user.user_id]
+                SET mode = $2, mode_locked = $3, property_prefix = $4, property_prefix_locked = $5,
+                    updated_by = $6, updated_at = NOW()`,
+            [
+                projectId, body.mode, body.mode_locked ?? false,
+                body.property_prefix ?? null, body.property_prefix_locked ?? false,
+                user.user_id,
+            ]
         );
 
         // v1: un solo slot — se reemplaza entero (DELETE + INSERT, mismo
@@ -111,71 +120,88 @@ export const upsertIfcClassificationConfigService = async (
 };
 
 export interface ResolvedClassification {
-    // Lo que efectivamente hay que usar para ESTE procesamiento puntual
-    // — o bien la config del proyecto tal cual (mode='norma' => null,
-    // no hay nada que pasarle al pipeline), o un snapshot 'manual'
-    // (default del proyecto, o el override, según corresponda).
-    snapshot: IfcClassificationSnapshot | null;
+    // SIEMPRE un objeto — mode y property_prefix se resuelven de forma
+    // independiente, "todo por defecto" (norma, sin prefijo) es un
+    // resultado válido, no un "no hay nada que resolver".
+    snapshot: IfcClassificationSnapshot;
 }
 
 // Resuelve qué clasificación usar al procesar UN archivo — llamado
-// desde ifc-metrados.service.ts. Nunca lanza por "no hay config" (esa
-// es una situación válida, implica modo 'norma'); SÍ lanza
-// CONFIG_LOCKED si vino un override y la config del proyecto está
-// bloqueada.
+// desde ifc-metrados.service.ts. mode y property_prefix se resuelven
+// cada uno por su cuenta: el override puede traer uno, el otro, los
+// dos, o ninguno — cada parte respeta SU PROPIO lock, no hay un lock
+// grupal que bloquee todo junto.
 export const resolveClassificationForProcessing = async (
     projectId: number, override: ClassificationOverride | undefined
 ): Promise<ResolvedClassification> => {
 
     const { rows } = await pool.query<IfcClassificationConfigRow>(
-        `SELECT project_id, mode, property_prefix, locked, updated_at, updated_by
+        `SELECT project_id, mode, mode_locked, property_prefix, property_prefix_locked, updated_at, updated_by
         FROM ifc_classification_configs WHERE project_id = $1`,
         [projectId]
     );
     const config = rows[0];
 
-    if (override) {
-        if (config?.locked) throw new AppError(IFC_CLASSIFICATION_ERRORS.CONFIG_LOCKED);
-        return {
-            snapshot: {
-                mode: "manual",
-                property_prefix: override.property_prefix,
-                code_property_set: override.code_property_set ?? null,
-                code_property_name: override.code_property_name,
-                description_property_set: override.description_property_set ?? null,
-                description_property_name: override.description_property_name ?? null,
-                unit_property_set: override.unit_property_set ?? null,
-                unit_property_name: override.unit_property_name ?? null,
-            },
-        };
+    // --- resolver MODE (+ los campos de clasificación que dependen de él) ---
+    let mode: IfcClassificationMode = config?.mode ?? "norma";
+    let codeSet: string | null = null;
+    let codeName: string | null = null;
+    let descSet: string | null = null;
+    let descName: string | null = null;
+    let unitSet: string | null = null;
+    let unitName: string | null = null;
+
+    if (override?.mode === "manual") {
+        if (config?.mode_locked) throw new AppError(IFC_CLASSIFICATION_ERRORS.MODE_LOCKED);
+        mode = "manual";
+        codeSet = override.code_property_set ?? null;
+        codeName = override.code_property_name ?? null;
+        descSet = override.description_property_set ?? null;
+        descName = override.description_property_name ?? null;
+        unitSet = override.unit_property_set ?? null;
+        unitName = override.unit_property_name ?? null;
+    } else if (mode === "manual") {
+        const { rows: fields } = await pool.query<IfcClassificationFieldRow>(
+            `SELECT code_property_set, code_property_name,
+                description_property_set, description_property_name,
+                unit_property_set, unit_property_name
+            FROM ifc_classification_config_fields WHERE project_id = $1 AND slot = 1`,
+            [projectId]
+        );
+        const field = fields[0];
+        if (field) {
+            codeSet = field.code_property_set;
+            codeName = field.code_property_name;
+            descSet = field.description_property_set;
+            descName = field.description_property_name;
+            unitSet = field.unit_property_set;
+            unitName = field.unit_property_name;
+        } else {
+            // No debería pasar (el upsert exige code_property_name en
+            // modo manual), pero si el proyecto quedó en 'manual' sin
+            // slot=1 cargado, no hay con qué clasificar — se cae a
+            // 'norma' en silencio antes que reventar el procesamiento.
+            mode = "norma";
+        }
     }
 
-    if (!config || config.mode === "norma") return { snapshot: null };
-
-    const { rows: fields } = await pool.query<IfcClassificationFieldRow>(
-        `SELECT code_property_set, code_property_name,
-            description_property_set, description_property_name,
-            unit_property_set, unit_property_name
-        FROM ifc_classification_config_fields WHERE project_id = $1 AND slot = 1`,
-        [projectId]
-    );
-    const field = fields[0];
-    // No debería pasar (upsert exige code_property_name en modo manual),
-    // pero si por lo que sea el proyecto quedó en 'manual' sin slot=1
-    // cargado, no hay con qué clasificar — se cae a 'norma' en silencio
-    // antes que reventar el procesamiento entero.
-    if (!field || !config.property_prefix) return { snapshot: null };
+    // --- resolver PROPERTY_PREFIX, independiente de mode ---
+    let propertyPrefix: string | null = config?.property_prefix ?? null;
+    if (override?.property_prefix !== undefined) {
+        if (config?.property_prefix_locked) throw new AppError(IFC_CLASSIFICATION_ERRORS.PREFIX_LOCKED);
+        propertyPrefix = override.property_prefix || null; // "" también cuenta como "sin prefijo"
+    }
 
     return {
         snapshot: {
-            mode: "manual",
-            property_prefix: config.property_prefix,
-            code_property_set: field.code_property_set,
-            code_property_name: field.code_property_name,
-            description_property_set: field.description_property_set,
-            description_property_name: field.description_property_name,
-            unit_property_set: field.unit_property_set,
-            unit_property_name: field.unit_property_name,
+            mode,
+            property_prefix: propertyPrefix,
+            code_property_set: codeSet,
+            code_property_name: codeName,
+            description_property_set: descSet,
+            description_property_name: descName,
+            unit_property_set: unitSet,
+            unit_property_name: unitName,
         },
     };
 };

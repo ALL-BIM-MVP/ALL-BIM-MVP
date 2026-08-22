@@ -303,23 +303,29 @@ CREATE UNIQUE INDEX idx_un_ifc_document_current ON ifc_files (ifc_document_id) W
 -- ningún otro Pset "técnico" que exporte Revit solo.
 CREATE TABLE ifc_classification_configs (
     project_id INT PRIMARY KEY REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Cómo se AGRUPAN los elementos en partidas — 'norma' (default,
+    -- contra norma_completa.json) o 'manual' (propiedades exactas, ver
+    -- ifc_classification_config_fields). Independiente de
+    -- property_prefix de abajo — un proyecto puede clasificar contra
+    -- la norma Y filtrar sus propiedades capturadas por prefijo al
+    -- mismo tiempo, son dos preguntas distintas.
     mode VARCHAR(20) NOT NULL DEFAULT 'norma' CHECK (mode IN ('norma','manual')),
+    mode_locked BOOLEAN NOT NULL DEFAULT FALSE,
     -- Prefijo de nombre de propiedad (ej. "CSRT-") que distingue lo que
     -- el usuario escribió a mano de lo que Revit exporta solo — filtra
-    -- TANTO la clasificación como la captura general de propiedades de
-    -- ese archivo (ifc_properties/columnas de plantilla) cuando
-    -- mode='manual'. Obligatorio en ese modo (validado en el service,
-    -- no acá — ver ifc-classification.errors.ts) — no existe todavía
-    -- un modo "sin prefijo, traer todo menos lo técnico", queda
-    -- pendiente de confirmar con el cliente antes de construirlo.
+    -- la captura general de propiedades de ese archivo
+    -- (ifc_properties/columnas de plantilla) Y decide la prioridad de
+    -- metrado (texto-prefijado > geométrico > tipado si hay prefijo;
+    -- tipado > geométrico > texto si no) — en CUALQUIER mode, no solo
+    -- 'manual'. NULL/"" = sin filtro, comportamiento de siempre.
     property_prefix VARCHAR(60),
-    -- Si está en TRUE, nadie puede elegir "manual" puntual al procesar
-    -- (ver ProcessIfcMetradosBodySchema) — se usa siempre esta config
-    -- tal cual, sin poder pisarla por archivo. Sigue siendo visible
-    -- igual (el usuario ve cómo está configurado, no puede cambiarlo).
-    -- Solo owner/admin del proyecto lo tocan (permiso 'configure' del
-    -- módulo metrados).
-    locked BOOLEAN NOT NULL DEFAULT FALSE,
+    property_prefix_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    -- mode_locked/property_prefix_locked son locks INDEPENDIENTES a
+    -- propósito (no un solo "locked" grupal) — se puede bloquear cómo
+    -- se clasifica sin bloquear el prefijo, o viceversa. Un "bloquear
+    -- todo" en la UI es responsabilidad del frontend (mandar los dos
+    -- PUT), no un concepto del backend. Solo owner/admin los tocan
+    -- (permiso 'configure' del módulo metrados).
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by INT REFERENCES users(user_id)
 );

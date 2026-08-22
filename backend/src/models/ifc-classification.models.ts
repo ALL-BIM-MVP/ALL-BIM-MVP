@@ -10,11 +10,18 @@ export interface IfcClassificationFieldRow {
     unit_property_name: string | null;
 }
 
+// mode y property_prefix son DOS preguntas independientes (ver
+// docs/roadmap-modulos-y-permisos.md, Fase 4) — un proyecto puede
+// clasificar contra la norma Y filtrar sus propiedades por prefijo al
+// mismo tiempo. Por eso cada uno tiene su propio *_locked — no hay un
+// "locked" grupal, "bloquear todo" es responsabilidad del frontend
+// (mandar los dos PUT), no un concepto del backend.
 export interface IfcClassificationConfigRow {
     project_id: number;
     mode: IfcClassificationMode;
+    mode_locked: boolean;
     property_prefix: string | null;
-    locked: boolean;
+    property_prefix_locked: boolean;
     updated_at: Date;
     updated_by: number | null;
 }
@@ -28,16 +35,16 @@ export interface IfcClassificationConfigFull extends IfcClassificationConfigRow 
 
 // Lo que efectivamente se usó para clasificar UNA versión puntual — se
 // guarda tal cual (snapshot, no referencia viva) en
-// ifc_files.classification_config_used al terminar de procesar. Mismo
-// shape que le llega al pipeline de Python (ver
-// ifc-processing-runner.ts) menos el campo mode, que ahí siempre es
-// "manual" (si fuera "norma" no se snapshotea nada, la columna queda
-// NULL — ver ifc-classification.service.ts).
+// ifc_files.classification_config_used al terminar de procesar.
+// SIEMPRE se guarda un objeto (nunca null) — mode y property_prefix se
+// resuelven de forma independiente, así que incluso "todo por
+// defecto" (norma, sin prefijo) es un estado válido y snapshoteable.
+// Los 6 campos de propiedad solo tienen valor real cuando mode='manual'.
 export interface IfcClassificationSnapshot {
-    mode: "manual";
-    property_prefix: string;
+    mode: IfcClassificationMode;
+    property_prefix: string | null;
     code_property_set: string | null;
-    code_property_name: string;
+    code_property_name: string | null;
     description_property_set: string | null;
     description_property_name: string | null;
     unit_property_set: string | null;

@@ -31,11 +31,13 @@ export type IfcFileIdParam = z.infer<typeof IfcFileIdParamSchema>;
 // - document_name: nombre del ifc_documents nuevo; si no viene, el
 //   service usa el nombre del archivo subido.
 // classification_override (Fase 4, ver docs/roadmap-modulos-y-permisos.md)
-// — la opción "Manual" que el usuario elige en vez de "Default" (usar
-// la config de clasificación del proyecto tal cual). Sin esto, se usa
-// siempre el default del proyecto (norma, o manual si así está
-// configurado) — rechazado con 409 si el proyecto tiene la config
-// bloqueada (locked=true).
+// — DOS partes independientes: "mode" (pisa cómo se clasifica esta
+// subida puntual, requiere code_property_name) y "property_prefix"
+// (pisa qué propiedades se capturan, independiente de mode) — se puede
+// mandar una, la otra, las dos, o ninguna. Sin esto, se usa siempre el
+// default del proyecto para cada parte. Rechazado con 409
+// MODE_LOCKED/PREFIX_LOCKED si esa parte puntual está bloqueada en la
+// config del proyecto (cada una tiene su propio candado, no uno grupal).
 export const ProcessIfcMetradosBodySchema = z.object({
     file_id: z.coerce.number().optional(),
     replaces_ifc_document_id: z.coerce.number().optional(),

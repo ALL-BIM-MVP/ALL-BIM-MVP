@@ -224,7 +224,7 @@ const calcularTotalesPorPartida = (
 // lo nuevo".
 // ------------------------------------------------------------------
 const insertarResultado = async (
-    ifcFileId: number, resultado: PipelineResult, classificationSnapshot: IfcClassificationSnapshot | null
+    ifcFileId: number, resultado: PipelineResult, classificationSnapshot: IfcClassificationSnapshot
 ): Promise<void> => {
     const client = await pool.connect();
     try {
@@ -365,7 +365,7 @@ const insertarResultado = async (
                 SET status = 'done', schema_version = $2, processed_at = NOW(), error_message = NULL, is_current = true,
                     classification_config_used = $3
             WHERE ifc_file_id = $1`,
-            [ifcFileId, resultado.schema_version, classificationSnapshot ? JSON.stringify(classificationSnapshot) : null]
+            [ifcFileId, resultado.schema_version, JSON.stringify(classificationSnapshot)]
         );
 
         await client.query("COMMIT");
@@ -384,7 +384,7 @@ const insertarResultado = async (
  * status='error' en ifc_files, no hay a quién devolvérselo por HTTP.
  */
 export const runIfcProcessing = async (
-    ifcFileId: number, filePath: string, classificationSnapshot: IfcClassificationSnapshot | null = null
+    ifcFileId: number, filePath: string, classificationSnapshot: IfcClassificationSnapshot
 ): Promise<void> => {
     if (jobsInFlight.has(ifcFileId)) return; // ya está corriendo — no duplicar
     jobsInFlight.add(ifcFileId);
@@ -401,26 +401,24 @@ export const runIfcProcessing = async (
     await acquireSlot();
     try {
         const tmpOutPath = path.join(os.tmpdir(), `ifc-metrados-${ifcFileId}-${crypto.randomUUID()}.json`);
-        // Fase 4 — solo existe cuando el proyecto (o un override puntual
-        // al procesar) está en modo 'manual'; en 'norma' se pasa sin
-        // --classification-config y cli.py usa el comportamiento de
-        // siempre. Se limpia en el finally de abajo igual que tmpOutPath.
-        const tmpConfigPath = classificationSnapshot
-            ? path.join(os.tmpdir(), `ifc-classification-${ifcFileId}-${crypto.randomUUID()}.json`)
-            : null;
+        // Fase 4 — mode y property_prefix se resuelven siempre (incluso
+        // "todo por defecto" es un snapshot válido, ver
+        // ifc-classification.service.ts), así que este archivo temporal
+        // se escribe siempre — cli.py decide con esos dos campos si hay
+        // algo distinto de 'norma'/sin-prefijo que aplicar. Se limpia en
+        // el finally de abajo igual que tmpOutPath.
+        const tmpConfigPath = path.join(os.tmpdir(), `ifc-classification-${ifcFileId}-${crypto.randomUUID()}.json`);
 
         try {
-            if (tmpConfigPath) {
-                await fs.writeFile(tmpConfigPath, JSON.stringify(classificationSnapshot), "utf-8");
-            }
+            await fs.writeFile(tmpConfigPath, JSON.stringify(classificationSnapshot), "utf-8");
 
             const args = [
                 "-m", "processing.ifc.cli",
                 resolvedPath,
                 "--norma", NORMA_JSON_PATH,
                 "--out", tmpOutPath,
+                "--classification-config", tmpConfigPath,
             ];
-            if (tmpConfigPath) args.push("--classification-config", tmpConfigPath);
 
             await execFileAsync(PYTHON_BIN, args, {
                 cwd: REPO_ROOT,
@@ -436,7 +434,7 @@ export const runIfcProcessing = async (
             await markError(ifcFileId, detalle);
             return;
         } finally {
-            if (tmpConfigPath) await fs.rm(tmpConfigPath, { force: true });
+            await fs.rm(tmpConfigPath, { force: true });
         }
 
         let resultado: PipelineResult;

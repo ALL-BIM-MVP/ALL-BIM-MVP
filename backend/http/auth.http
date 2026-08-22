@@ -764,40 +764,58 @@ Authorization: Bearer {{accessToken}}
 
 ### =========================================================================
 ### CLASIFICACIÓN MANUAL POR PROPIEDADES (Fase 4, ver
-### docs/roadmap-modulos-y-permisos.md) — modo 'manual' en vez de
-### norma_completa.json, config por proyecto + override puntual al
-### procesar. "CSRT-" acá es solo el prefijo real que usa ESTE cliente de
-### prueba — el código nunca lo hardcodea, es 100% configurable.
+### docs/roadmap-modulos-y-permisos.md) — DOS configuraciones
+### independientes: "mode" (norma/manual, cómo se agrupan los
+### elementos) y "property_prefix" (qué propiedades se capturan,
+### aplica en CUALQUIER mode) — cada una con su propio *_locked, sin
+### lock grupal. "CSRT-" acá es solo el prefijo real que usa ESTE
+### cliente de prueba — el código nunca lo hardcodea, es 100%
+### configurable.
 ### =========================================================================
 
-### 1. Config por defecto de un proyecto que nunca configuró nada — sin
-### fila propia, implica mode='norma' (comportamiento de siempre).
+### 1. Config por defecto de un proyecto — mode='norma', sin prefijo,
+### nada bloqueado (creada automáticamente al crear el proyecto, ver
+### Fase 4 en el roadmap — ya no depende de un default implícito).
 GET {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
 Authorization: Bearer {{accessToken}}
 
 
 ### 2. Configurar modo 'manual' — solo owner/admin (permiso 'configure').
-### locked=false: los usuarios van a poder elegir "Manual" puntual al
-### procesar (override, request 5 más abajo); locked=true lo bloquea.
+### property_prefix es OPCIONAL acá (independiente de mode, ver
+### comentario de cabecera) — se manda igual en este ejemplo porque
+### este cliente de prueba SÍ tiene propiedades con ese prefijo.
 PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
   "mode": "manual",
+  "mode_locked": false,
   "property_prefix": "CSRT-",
+  "property_prefix_locked": false,
   "code_property_set": "Otros",
   "code_property_name": "CSRT-Partida1",
   "description_property_set": "Otros",
   "description_property_name": "CSRT-DescripcionPartida1",
   "unit_property_set": "Otros",
-  "unit_property_name": "CSRT-Unidad1",
-  "locked": false
+  "unit_property_name": "CSRT-Unidad1"
 }
 
 
-### 3. Caso de error: mode='manual' sin property_prefix ni
-### code_property_name -> 400 (Zod)
+### 2b. mode='norma' CON property_prefix igual — demuestra que son
+### independientes: clasifica contra la norma técnica de siempre, pero
+### solo captura propiedades que arrancan con el prefijo.
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "norma",
+  "property_prefix": "CSRT-"
+}
+
+
+### 3. Caso de error: mode='manual' sin code_property_name -> 400 (Zod)
 PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -807,8 +825,7 @@ Content-Type: application/json
 }
 
 
-### 4. Volver a modo 'norma' — no hace falta mandar los campos de
-### propiedad, se ignoran/limpian igual (DELETE del slot=1 existente).
+### 4. Volver a modo 'norma' sin prefijo — limpio de una.
 PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -818,10 +835,10 @@ Content-Type: application/json
 }
 
 
-### 5. Procesar un IFC con classification_override (modo "Manual" puntual
-### al subir, en vez de usar el default del proyecto) — multipart, mismo
-### patrón que specialty_id/replaces_ifc_document_id: el campo va como
-### JSON.stringify(...) en un form-data de texto.
+### 5. Procesar un IFC con classification_override (mode manual +
+### property_prefix puntuales al subir, en vez de usar el default del
+### proyecto) — multipart, mismo patrón que specialty_id: el campo va
+### como JSON.stringify(...) en un form-data de texto.
 POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
 Authorization: Bearer {{accessToken}}
 Content-Type: multipart/form-data; boundary=WebAppBoundary
@@ -833,7 +850,7 @@ Content-Disposition: form-data; name="specialty_id"
 --WebAppBoundary
 Content-Disposition: form-data; name="classification_override"
 
-{"property_prefix":"CSRT-","code_property_set":"Otros","code_property_name":"CSRT-Partida1","description_property_set":"Otros","description_property_name":"CSRT-DescripcionPartida1","unit_property_set":"Otros","unit_property_name":"CSRT-Unidad1"}
+{"mode":"manual","code_property_set":"Otros","code_property_name":"CSRT-Partida1","description_property_set":"Otros","description_property_name":"CSRT-DescripcionPartida1","unit_property_set":"Otros","unit_property_name":"CSRT-Unidad1","property_prefix":"CSRT-"}
 --WebAppBoundary
 Content-Disposition: form-data; name="file"; filename="CUS_ET2.ifc"
 Content-Type: application/octet-stream
@@ -842,9 +859,9 @@ Content-Type: application/octet-stream
 --WebAppBoundary--
 
 
-### 6. Caso de error: classification_override con la config del proyecto
-### locked=true -> 409 IFC_CLASSIFICATION_CONFIG_LOCKED (correr la
-### request 2 con "locked": true antes de probar esto).
+### 6. Override de SOLO property_prefix, sin tocar mode — sigue
+### clasificando con lo que tenga el proyecto, pero cambia qué
+### propiedades se capturan para esta subida puntual.
 POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
@@ -852,7 +869,25 @@ Content-Type: application/json
 {
   "file_id": {{uploadedFileId}},
   "classification_override": {
-    "property_prefix": "CSRT-",
+    "property_prefix": "CSRT-"
+  }
+}
+
+
+### 7. Caso de error: classification_override con mode='manual' y la
+### config del proyecto con mode_locked=true -> 409
+### IFC_CLASSIFICATION_MODE_LOCKED (correr la request 2 con
+### "mode_locked": true antes de probar esto). Un override que solo
+### trae property_prefix (request 6) seguiría funcionando igual, porque
+### es un lock independiente.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "file_id": {{uploadedFileId}},
+  "classification_override": {
+    "mode": "manual",
     "code_property_name": "CSRT-Partida1"
   }
 }

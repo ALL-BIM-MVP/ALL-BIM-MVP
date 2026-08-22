@@ -240,21 +240,22 @@ export const processIfcMetradosService = async (
     };
 
     let decision: DecisionResult;
-    let classificationSnapshot: IfcClassificationSnapshot | null;
+    let classificationSnapshot: IfcClassificationSnapshot;
     try {
         // Se resuelve ANTES de decideProcessingState a propósito — si
-        // vino un classification_override y la config del proyecto está
-        // bloqueada (CONFIG_LOCKED), no queremos haber creado ya un
-        // ifc_documents/ifc_files nuevo para un procesamiento que ni
-        // siquiera va a arrancar.
+        // vino un classification_override y la config del proyecto tiene
+        // ese lado bloqueado (MODE_LOCKED/PREFIX_LOCKED), no queremos
+        // haber creado ya un ifc_documents/ifc_files nuevo para un
+        // procesamiento que ni siquiera va a arrancar.
         const resolved = await resolveClassificationForProcessing(projectId, body.classification_override);
         classificationSnapshot = resolved.snapshot;
         decision = await decideProcessingState(fileId, force ?? false, newFileContext);
     } catch (error) {
         // Si el archivo se acaba de subir por multipart y algo de lo de
-        // arriba falló (ej. IFC_SPECIALTY_REQUIRED, CONFIG_LOCKED), no
-        // dejamos una fila "files" huérfana sin ifc_files ni bytes
-        // recuperables por ningún endpoint — se borra igual que si la
+        // arriba falló (ej. IFC_SPECIALTY_REQUIRED, MODE_LOCKED,
+        // PREFIX_LOCKED), no dejamos una fila "files" huérfana sin
+        // ifc_files ni bytes recuperables por ningún endpoint — se
+        // borra igual que si la
         // subida nunca hubiera pasado. Si vino por file_id (archivo ya
         // existente), no se toca nada, es el archivo del usuario.
         if (multerFile) await deleteOrphanUpload(fileId, filePath);
