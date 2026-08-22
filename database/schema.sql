@@ -287,6 +287,20 @@ CREATE TABLE ifc_files (
 -- idx_un_project_cover/idx_un_template_default más abajo.
 CREATE UNIQUE INDEX idx_un_ifc_document_current ON ifc_files (ifc_document_id) WHERE is_current = true;
 
+-- Excel generado a partir de un IFC procesado (Fase 5, ver
+-- docs/roadmap-modulos-y-permisos.md) — ALTER acá (no en el CREATE
+-- TABLE de "files" más arriba) porque "ifc_files" recién se define en
+-- este punto del archivo, no antes. NULL para todo archivo que no sea
+-- un Excel generado (subidas normales, incluidos Excel sueltos sin
+-- relación a ningún IFC). ON DELETE CASCADE: si la versión de origen
+-- se borra DE VERDAD (no un reemplazo de versión tipo tombstone, que
+-- nunca borra la fila — ver Fase 3), los Excel generados desde ella se
+-- borran con ella. Apunta a la VERSIÓN puntual (no al documento) — un
+-- Excel siempre refleja el metrado de un momento específico; con un
+-- JOIN a ifc_files se resuelve también a qué documento pertenece esa
+-- versión, sin duplicar la columna.
+ALTER TABLE files ADD COLUMN generated_from_ifc_file_id BIGINT REFERENCES ifc_files(ifc_file_id) ON DELETE CASCADE;
+
 
 -- ------------------------------------------------------------
 -- CLASIFICACIÓN ALTERNATIVA POR PROPIEDADES (Fase 4, ver

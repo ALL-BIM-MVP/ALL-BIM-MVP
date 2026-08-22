@@ -170,6 +170,13 @@ INSERT INTO ifc_specialties (code, name, is_active) VALUES
 --     que sub_total, no es un campo propio de ninguna fila de
 --     metrado_elements — se calcula contando cuántas filas cayeron en
 --     el mismo grupo.
+-- 'name' (Fase 5, ver docs/roadmap-modulos-y-permisos.md): el Name
+-- crudo del IFC — se agrega al catálogo (disponible para quien arme
+-- una plantilla propia) pero NUNCA va en la plantilla del sistema —
+-- se repite entre elementos de un mismo tipo/familia, no identifica
+-- nada (confirmado con el cliente). "DESCRIPCIÓN" en la plantilla
+-- default usa 'tag' en su lugar, ver más abajo — mismo criterio que ya
+-- usa la agrupación (groupPartidaElements agrupa por tag, no por name).
 INSERT INTO builtin_field_catalog
     (builtin_field, label_default, data_type, is_aggregate, applies_to_group, sort_order) VALUES
     ('code',           'ITEM',        'text',    FALSE, 'identificacion', 1),
@@ -178,6 +185,7 @@ INSERT INTO builtin_field_catalog
     ('level_name',     'NIVEL',       'text',    FALSE, 'identificacion', 4),
     ('space_name',     'ESPACIO',     'text',    FALSE, 'identificacion', 5),
     ('tag',            'TAG',         'text',    FALSE, 'identificacion', 6),
+    ('name',           'Nombre',      'text',    FALSE, 'identificacion', 7),
     ('length',         'Largo',       'numeric', FALSE, 'dimensiones',    1),
     ('width',          'Ancho',       'numeric', FALSE, 'dimensiones',    2),
     ('height',         'Altura',      'numeric', FALSE, 'dimensiones',    3),
@@ -221,25 +229,35 @@ BEGIN
     INSERT INTO metrado_template_sets (template_id, name, sort_order)
     VALUES (v_template_id, 'IDENTIFICACION', 1) RETURNING template_set_id INTO v_set_identificacion;
 
-    INSERT INTO metrado_template_sets (template_id, name, sort_order)
-    VALUES (v_template_id, 'DIMENSIONES', 2) RETURNING template_set_id INTO v_set_dimensiones;
-
     -- "Cant." (element_count) es su propio set de una sola columna,
-    -- sin sub-encabezado — en el Excel de referencia sale entre
-    -- DIMENSIONES y METRADO, no es una de las 5 sub-columnas de
-    -- METRADO (esas son Lon./Área/Vol./Kg./Und. — ver comentario en el
-    -- INSERT de builtin_field_catalog más arriba, quantity/"Und." SÍ
-    -- va adentro de METRADO).
+    -- sin sub-encabezado — en el Excel de referencia ("3.0 METRADOS DE
+    -- ARQUITECTURA.xlsx", Fase 5) sale ANTES de DIMENSIONES, no es una
+    -- de las 5 sub-columnas de METRADO (esas son Lon./Área/Vol./Kg./Und.
+    -- — ver comentario en el INSERT de builtin_field_catalog más
+    -- arriba, quantity/"Und." SÍ va adentro de METRADO).
     INSERT INTO metrado_template_sets (template_id, name, sort_order)
-    VALUES (v_template_id, 'CANT.', 3) RETURNING template_set_id INTO v_set_cantidad;
+    VALUES (v_template_id, 'CANT.', 2) RETURNING template_set_id INTO v_set_cantidad;
+
+    INSERT INTO metrado_template_sets (template_id, name, sort_order)
+    VALUES (v_template_id, 'DIMENSIONES', 3) RETURNING template_set_id INTO v_set_dimensiones;
 
     INSERT INTO metrado_template_sets (template_id, name, sort_order)
     VALUES (v_template_id, 'METRADO', 4) RETURNING template_set_id INTO v_set_metrado;
 
+    -- DESCRIPCIÓN acá usa 'tag', NO 'description' — esta plantilla
+    -- describe columnas de fila de ELEMENTO/GRUPO (una por tag, ver
+    -- groupPartidaElements), no de partida — mostrar el texto de la
+    -- partida repetido en cada fila de elemento es tan inútil como
+    -- mostrar el "name" del IFC (se repite entre elementos del mismo
+    -- tipo, no identifica nada) — el tag SÍ es lo que distingue una
+    -- fila de otra, es literalmente la clave por la que se agrupa. La
+    -- ETIQUETA de la columna sigue siendo "DESCRIPCIÓN" en todos lados
+    -- (nunca "TAG" — un ingeniero no tiene por qué conocer esa
+    -- palabra), solo cambia de dónde sale el dato.
     INSERT INTO metrado_template_columns (template_set_id, name, source_type, builtin_field, column_order) VALUES
-        (v_set_identificacion, 'ITEM',        'builtin', 'code',        1),
-        (v_set_identificacion, 'DESCRIPCIÓN', 'builtin', 'description', 2),
-        (v_set_identificacion, 'UND',         'builtin', 'unit',        3);
+        (v_set_identificacion, 'ITEM',        'builtin', 'code', 1),
+        (v_set_identificacion, 'DESCRIPCIÓN', 'builtin', 'tag',  2),
+        (v_set_identificacion, 'UND',         'builtin', 'unit', 3);
 
     INSERT INTO metrado_template_columns (template_set_id, name, source_type, builtin_field, column_order) VALUES
         (v_set_dimensiones, 'Largo',  'builtin', 'length', 1),

@@ -995,6 +995,51 @@ Content-Type: application/json
 
 
 ### =========================================================================
+### EXPORTACIÓN A EXCEL (Fase 5, ver docs/roadmap-modulos-y-permisos.md)
+### — formato fijo, reusa el metrado ya procesado (mismo
+### {{processedIfcFileId}} de arriba, tiene que estar en status "done").
+### Se puede llamar más de una vez: cada llamada crea un archivo Excel
+### NUEVO, nunca pisa el anterior.
+### =========================================================================
+
+### 1. Generar el Excel — guarda un archivo real (file_type='excel',
+### generated_from_ifc_file_id = este ifc_file_id) y devuelve su metadata,
+### mismo shape que cualquier archivo de la lista de GET .../files.
+# @name exportExcel
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/export-excel
+Authorization: Bearer {{accessToken}}
+
+
+### Capturar el file_id del Excel recién generado
+@exportedExcelFileId = {{exportExcel.response.body.file_id}}
+
+
+### 2. Descargar el Excel generado — mismo endpoint de contenido que
+### cualquier archivo, no hay un mecanismo de descarga aparte.
+GET {{baseUrl}}/files/{{exportedExcelFileId}}/content?download=true
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Caso de error: ifc_file_id inexistente -> 404 (assertIfcFileAccess
+### corta acá, ni llega a resolver el contexto de exportación)
+POST {{baseUrl}}/ifc-files/999999/export-excel
+Authorization: Bearer {{accessToken}}
+
+
+### 4. Caso de error: el IFC existe pero todavía no terminó de procesar
+### (o falló) -> 409 IFC_NOT_PROCESSED. Para probarlo de verdad hace
+### falta un ifc_file_id recién creado, todavía en "processing" —
+### normalmente esto se ve solo si se llama export-excel muy rápido
+### después del POST de "process", antes de que termine. Dejado como
+### referencia del código de error, no hay un ifc_file_id "processing"
+### fijo para pegarle acá — reemplazá el ifc_file_id de abajo por uno que
+### sepas que está a medio procesar si querés probarlo de verdad (tal
+### cual, contra {{processedIfcFileId}} ya "done", esto da 201, no 409).
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/export-excel
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
 ### MÓDULO DE PLANTILLAS (metrado_templates)
 ### No son por proyecto: del sistema (is_system=true, cualquiera lee) o
 ### personales (created_by=dueño, solo el dueño lee/edita). ⚠️ el

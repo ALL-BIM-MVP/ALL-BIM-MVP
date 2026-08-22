@@ -4,6 +4,7 @@ import { getIfcFileStatusController, processIfcMetradosController } from '../con
 import { getPartidaElementsController, getPartidasTreeController } from '../controllers/metrado-partidas.controller.js';
 import { getAvailableColumnsController } from '../controllers/templates.controller.js';
 import { getEstadoElementosController } from '../controllers/metrados-estado.controller.js';
+import { generateExcelExportController } from '../controllers/ifc-excel-export.controller.js';
 import { requireAuth } from '../middlewares/auth.middleware.js';
 
 const router = Router();
@@ -35,3 +36,9 @@ ifcFilesRouter.post('/:ifcFileId/partidas/:partidaId/elements', requireAuth, get
 // Catálogo (builtin + propiedades IFC de ESTE archivo) para armar o
 // editar columnas de plantilla en el frontend.
 ifcFilesRouter.get('/:ifcFileId/available-columns', requireAuth, getAvailableColumnsController);
+
+// Genera un Excel (formato fijo, Fase 5) a partir del metrado YA
+// procesado de esta versión — permiso 'export' del módulo, resuelto
+// en generateExcelExportService. Se puede llamar más de una vez, cada
+// llamada crea un archivo nuevo (nunca pisa el anterior).
+ifcFilesRouter.post('/:ifcFileId/export-excel', requireAuth, generateExcelExportController);

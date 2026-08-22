@@ -97,6 +97,14 @@ export interface PartidaElementRow {
 interface PartidaElementItem {
     element_id : number;
     express_id : number;
+    // "ID del elemento" para el cliente — es lo que de verdad lo
+    // identifica (agrupar por tag es justo el criterio de
+    // groupPartidaElements más abajo). "name" queda igual, capturado,
+    // pero NUNCA es lo que se usa para identificar un elemento en
+    // ningún lado — se repite entre elementos del mismo tipo/familia,
+    // ver comentario de "DESCRIPCIÓN" en la plantilla del sistema
+    // (system-data.sql).
+    tag : string | null;
     name : string | null;
     length : number | null;
     run_length : number | null;
@@ -193,6 +201,7 @@ const toElementItem = (
     return {
         element_id: row.element_id,
         express_id: row.express_id,
+        tag: row.tag,
         name: row.name,
         length: toNumberOrNull(row.length),
         run_length: toNumberOrNull(row.run_length),

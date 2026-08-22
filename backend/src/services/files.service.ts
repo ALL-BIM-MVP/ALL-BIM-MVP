@@ -222,6 +222,16 @@ export const deleteFileService = async (
 
     await assertProjectAccess(projectId, userId);
 
+    // Fase 5 (Excel ligado al IFC) — si este archivo es un IFC del que
+    // se generaron Excel (files.generated_from_ifc_file_id), el DELETE
+    // de abajo se los va a llevar puestos en la BD (ON DELETE CASCADE),
+    // pero eso no borra sus BYTES del disco — hay que juntar sus paths
+    // ANTES de borrar la fila, después ya no hay de dónde sacarlos.
+    const generatedResult = await pool.query<{ file_path : string; thumbnail_path : string | null }>(
+        `SELECT file_path, thumbnail_path FROM files WHERE generated_from_ifc_file_id = $1`,
+        [fileId]
+    );
+
     const result = await pool.query<{ file_path : string; thumbnail_path : string | null }>(
         `DELETE FROM files f
         USING projects p
@@ -235,6 +245,11 @@ export const deleteFileService = async (
     const deleted = result.rows[0];
 
     if (!deleted) throw new AppError(FILE_ERRORS.FILE_NOT_FOUND);
+
+    for (const generated of generatedResult.rows) {
+        await fs.promises.rm(generated.file_path, { force: true });
+        if (generated.thumbnail_path) await fs.promises.rm(generated.thumbnail_path, { force: true });
+    }
 
     // Si el archivo borrado era una versión de un ifc_documents (Fase
     // 3), el DELETE de arriba ya se llevó su fila ifc_files (ON DELETE
