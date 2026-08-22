@@ -130,16 +130,24 @@ const Sidebar: React.FC = () => {
           {/* Usuario + cerrar sesión: siempre pegado al fondo */}
           <div className="border-t border-[#E2E5EA] pt-3 mt-3 shrink-0">
             {user && (
-              <div className="flex items-center gap-2.5 px-2 py-2 mb-1">
-                <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-[13px] font-semibold shrink-0">
-                  {user?.name?.charAt(0).toUpperCase() || 'U'}
-                </div>
-                <div className="min-w-0">
-                  <p className="text-[13px] font-medium text-[#1C2430] truncate">{user?.name || 'Usuario'}</p>
-                  <p className="text-[12px] text-[#8B93A1] truncate">{user?.email || ''}</p>
-                </div>
-              </div>
-            )}
+  <div className="flex items-center gap-2.5 px-2 py-2 mb-1">
+    {user.profile_picture_url ? (
+      <img
+        src={user.profile_picture_url}
+        alt={user.name}
+        className="w-8 h-8 rounded-full object-cover shrink-0"
+      />
+    ) : (
+      <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-[13px] font-semibold shrink-0">
+        {user?.name?.charAt(0).toUpperCase() || 'U'}
+      </div>
+    )}
+    <div className="min-w-0">
+      <p className="text-[13px] font-medium text-[#1C2430] truncate">{user?.name || 'Usuario'}</p>
+      <p className="text-[12px] text-[#8B93A1] truncate">{user?.email || ''}</p>
+    </div>
+  </div>
+)}
             <button
               onClick={handleLogout}
               className="w-full text-left text-[#5B6472] hover:text-red-600 text-[14px] px-3 py-2.5 rounded-lg hover:bg-red-50 transition-colors flex items-center gap-3"

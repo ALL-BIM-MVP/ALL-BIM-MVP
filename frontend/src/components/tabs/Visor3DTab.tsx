@@ -17,6 +17,8 @@ import {
   processExistingIfcFile,
   pollIfcProcessStatus,
 } from '../../services/ifcfiles.service';
+import { getMyModuleAccess } from '../../services/module.service';
+import type { ModuleAccess } from '../../services/module.service';
 import { useAuth } from '../../context/AuthContext';
 
 interface Visor3DTabProps {
@@ -76,6 +78,23 @@ const IfcStatusBadge: React.FC<{ status: IfcFile['ifc_status'] }> = ({ status })
 
 const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const { user } = useAuth();
+
+  // Permisos del usuario actual en el módulo Metrados de ESTE proyecto —
+  // se pide UNA sola vez al entrar. null mientras carga (los botones
+  // gateados quedan ocultos hasta tener la respuesta, para no parpadear
+  // "aparece y después desaparece"). Nunca se compara contra el rol por
+  // nombre — solo contra estos booleans (ver guía Parte B).
+  const [metradosAccess, setMetradosAccess] = useState<ModuleAccess | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getMyModuleAccess(projectId, 'metrados')
+      .then((access) => { if (!cancelled) setMetradosAccess(access); })
+      .catch((err) => console.error('Error al obtener permisos de Metrados:', err));
+    return () => { cancelled = true; };
+  }, [projectId]);
+  const canUpload = metradosAccess?.permissions.upload ?? false;
+  const canProcess = metradosAccess?.permissions.process ?? false;
+
   const [ifcFile, setIfcFile] = useState<File | null>(null);
   const [ifcArrayBuffer, setIfcArrayBuffer] = useState<ArrayBuffer | null>(null);
   const [ifcLoading, setIfcLoading] = useState(false);
@@ -555,12 +574,18 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               ) : panelStatus === 'unprocessed' ? (
                 <div className="rounded bg-slate-200 text-slate-800 p-6 flex flex-col items-center text-center gap-3">
                   <p className="text-sm font-bold tracking-wide">ARCHIVO no procesado</p>
-                  <button
-                    onClick={handleProcesarDesdeMetrados}
-                    className="px-4 py-2 bg-[#0056b3] text-white rounded text-xs font-bold hover:bg-[#004494] transition-colors"
-                  >
-                    Procesar archivo
-                  </button>
+                  {canProcess ? (
+                    <button
+                      onClick={handleProcesarDesdeMetrados}
+                      className="px-4 py-2 bg-[#0056b3] text-white rounded text-xs font-bold hover:bg-[#004494] transition-colors"
+                    >
+                      Procesar archivo
+                    </button>
+                  ) : (
+                    <p className="text-xs text-slate-500 italic">
+                      No tenés permiso para procesar archivos en este proyecto
+                    </p>
+                  )}
                   <p className="text-xs text-slate-600 mt-2">
                     Se requiere procesar para ver metrados
                   </p>
@@ -578,12 +603,14 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                   <AlertTriangle size={22} />
                   <p className="text-sm font-bold tracking-wide">Error al procesar</p>
                   <p className="text-xs text-slate-600">{panelErrorMessage || 'Ocurrió un error inesperado.'}</p>
-                  <button
-                    onClick={handleProcesarDesdeMetrados}
-                    className="px-4 py-2 bg-[#0056b3] text-white rounded text-xs font-bold hover:bg-[#004494] transition-colors"
-                  >
-                    Reintentar
-                  </button>
+                  {canProcess && (
+                    <button
+                      onClick={handleProcesarDesdeMetrados}
+                      className="px-4 py-2 bg-[#0056b3] text-white rounded text-xs font-bold hover:bg-[#004494] transition-colors"
+                    >
+                      Reintentar
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="h-full min-h-0">
@@ -722,18 +749,20 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                   </div>
                 </button>
 
-                <button
-                  onClick={handleChooseProcesar}
-                  className="w-full flex items-center gap-3 p-3.5 rounded border border-gray-200 hover:border-[#0056b3] hover:bg-blue-50/40 transition-colors text-left"
-                >
-                  <div className="w-9 h-9 rounded bg-blue-50 flex items-center justify-center flex-shrink-0">
-                    <Cpu size={17} className="text-[#0056b3]" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-slate-800">Procesar</p>
-                    <p className="text-xs text-slate-500">Graficar y enviarlo al servidor para calcular metrados.</p>
-                  </div>
-                </button>
+                {canUpload && canProcess && (
+                  <button
+                    onClick={handleChooseProcesar}
+                    className="w-full flex items-center gap-3 p-3.5 rounded border border-gray-200 hover:border-[#0056b3] hover:bg-blue-50/40 transition-colors text-left"
+                  >
+                    <div className="w-9 h-9 rounded bg-blue-50 flex items-center justify-center flex-shrink-0">
+                      <Cpu size={17} className="text-[#0056b3]" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">Procesar</p>
+                      <p className="text-xs text-slate-500">Graficar y enviarlo al servidor para calcular metrados.</p>
+                    </div>
+                  </button>
+                )}
               </div>
             </div>
 

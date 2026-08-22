@@ -892,17 +892,31 @@ export class ThreeSceneController {
       this.scene.background = luminance < 0.3 ? this.darkBgTexture : this.lightBgColor;
     }
 
-    if (opts.sectionPlane?.enabled && this.modelBounds) {
-      const newPlane = this.buildClipPlane(opts.sectionPlane);
-      if (!this.clipPlane || !this.clipPlane.equals(newPlane)) {
-        this.clipPlane = newPlane;
-        this.modelGroup.traverse((obj) => {
-          if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
-            (obj.material as THREE.Material).clippingPlanes = [this.clipPlane!];
-          }
-        });
-      }
+    const sp = opts.sectionPlane;
+    const kind = sp?.kind ?? 'axis'; // compat: llamadas viejas sin 'kind' siguen siendo por ejes
+
+    if (sp?.enabled && kind === 'axis' && this.modelBounds) {
+      const newPlane = this.buildAxisClipPlane(sp);
+      this.applyClipPlane(newPlane);
+    } else if (sp?.enabled && kind === 'element') {
+      const newPlane = this.buildElementClipPlane(sp);
+      this.applyClipPlane(newPlane);
     } else if (this.clipPlane) {
+      this.applyClipPlane(null);
+    }
+
+    this.renderer.render(this.scene, this.cameraController.camera);
+  }
+
+  private applyClipPlane(newPlane: THREE.Plane | null) {
+    if (newPlane && (!this.clipPlane || !this.clipPlane.equals(newPlane))) {
+      this.clipPlane = newPlane;
+      this.modelGroup.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
+          (obj.material as THREE.Material).clippingPlanes = [this.clipPlane!];
+        }
+      });
+    } else if (!newPlane && this.clipPlane) {
       this.clipPlane = null;
       this.modelGroup.traverse((obj) => {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
@@ -910,11 +924,9 @@ export class ThreeSceneController {
         }
       });
     }
-
-    this.renderer.render(this.scene, this.cameraController.camera);
   }
 
-  private buildClipPlane(section: { axis: 'down' | 'front' | 'side'; position: number; flipped: boolean }): THREE.Plane {
+  private buildAxisClipPlane(section: { axis: 'down' | 'front' | 'side'; position: number; flipped: boolean }): THREE.Plane {
     const bounds = this.modelBounds!;
     const axisVec: Record<string, THREE.Vector3> = {
       down: new THREE.Vector3(0, -1, 0),
@@ -930,6 +942,21 @@ export class ThreeSceneController {
     (pointOnPlane as any)[axisKey] = worldPos;
 
     return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, pointOnPlane);
+  }
+
+  // Corte orientado al elemento (tipo Dalux): en vez de un eje fijo global,
+  // la normal viene de la cara del elemento donde se agarró la tijera.
+  // 'offset' es cuánto se desplazó esa tijera a lo largo de esa normal
+  // (arrastre del usuario), en unidades del modelo.
+  private buildElementClipPlane(section: {
+    origin: { x: number; y: number; z: number };
+    normal: { x: number; y: number; z: number };
+    offset: number;
+  }): THREE.Plane {
+    const normal = new THREE.Vector3(section.normal.x, section.normal.y, section.normal.z).normalize();
+    const origin = new THREE.Vector3(section.origin.x, section.origin.y, section.origin.z);
+    const pointOnPlane = origin.clone().addScaledVector(normal, section.offset);
+    return new THREE.Plane().setFromNormalAndCoplanarPoint(normal.clone().negate(), pointOnPlane);
   }
 
   dispose() {

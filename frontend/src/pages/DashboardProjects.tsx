@@ -1,5 +1,5 @@
 // .. pages/DashboardProjects.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Upload, FileText, AlertCircle, 
@@ -56,6 +56,19 @@ const DashboardProjects: React.FC = () => {
   const [sidebarVisible, setSidebarVisible] = useState(false);
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  // Cierra el menú de usuario al hacer click en cualquier otro lado de la
+  // página — antes solo se cerraba tocando "Cerrar sesión" adentro del
+  // propio menú, así que quedaba abierto para siempre si clickeabas afuera.
+  const userMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const { canEditProject } = usePermissions();
   const { isOwner, checkingOwner, userRole } = useProjectInvitations(project?.project_id || 0);
@@ -230,11 +243,19 @@ const DashboardProjects: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="relative border-l border-gray-200 pl-4">
+              <div className="relative border-l border-gray-200 pl-4" ref={userMenuRef}>
                 <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-sm font-bold">
-                    {user?.name?.charAt(0).toUpperCase() || 'U'}
-                  </div>
+                  {user?.profile_picture_url ? (
+                    <img
+                      src={user.profile_picture_url}
+                      alt={user.name}
+                      className="w-8 h-8 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-sm font-bold">
+                      {user?.name?.charAt(0).toUpperCase() || 'U'}
+                    </div>
+                  )}
                   <span className="text-sm font-medium text-gray-700">{user?.name || 'Usuario'}</span>
                   <svg
                     className={`w-4 h-4 text-gray-500 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`}
@@ -247,9 +268,17 @@ const DashboardProjects: React.FC = () => {
                 {isUserMenuOpen && (
                   <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 border border-gray-100 py-5 px-5 z-50 animate-fadeInUp">
                     <div className="flex items-center gap-4 mb-4">
-                      <div className="w-14 h-14 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-xl font-bold ring-2 ring-white shadow-sm flex-shrink-0">
-                        {user?.name?.charAt(0).toUpperCase() || 'U'}
-                      </div>
+                      {user?.profile_picture_url ? (
+                        <img
+                          src={user.profile_picture_url}
+                          alt={user.name}
+                          className="w-14 h-14 rounded-full object-cover ring-2 ring-white shadow-sm flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-14 h-14 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-xl font-bold ring-2 ring-white shadow-sm flex-shrink-0">
+                          {user?.name?.charAt(0).toUpperCase() || 'U'}
+                        </div>
+                      )}
                       <div className="min-w-0">
                         <p className="font-bold text-base text-gray-800 truncate">{user?.name}</p>
                         <p className="text-xs text-gray-400 truncate">{user?.email}</p>

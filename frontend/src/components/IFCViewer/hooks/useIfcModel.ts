@@ -9,6 +9,7 @@ import { useCrossTool } from './useCrossTool';
 import { useViewerBackground } from './useViewerBackground';
 import { useCameraControls } from './useCameraControls';
 import { useSectionPlane } from './useSectionPlane';
+import { useElementCutTool } from './useElementCutTool';
 import { usePaintTool } from './usePaintTool';
 export type { ViewPreset } from '../types';
 
@@ -21,12 +22,10 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
 
   const background = useViewerBackground(rendererRef);
   const walk = useWalkMode(rendererRef, canvasRef);
-  // Snap magnético NATIVO del renderer (raycastSceneMagnetic) para medición
-  // simple. La cruz usa su propio método del renderer (raycastFaceCross), que
-  // reconstruye la cara plana y su borde real — ver ThreeSceneController.ts.
   const measure = useMeasureTool(rendererRef, canvasRef);
   const cross = useCrossTool(rendererRef, canvasRef);
   const section = useSectionPlane(rendererRef);
+  const elementCut = useElementCutTool(rendererRef, canvasRef);
 
   const selection = useEntitySelection(rendererRef, storeRef);
   const paint = usePaintTool(rendererRef, canvasRef);
@@ -35,8 +34,13 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     walk.updateWalkMovement(dt);
     measure.reprojectOnFrame();
     cross.reprojectOnFrame();
+    elementCut.reprojectOnFrame();
     selection.reprojectPopup();
-  }, [walk, measure, cross, selection]);
+  }, [walk, measure, cross, elementCut, selection]);
+
+  const getCombinedSectionPlane = useCallback(() => {
+    return elementCut.getSectionPlane() ?? section.getSectionPlane();
+  }, [elementCut, section]);
 
   const loader = useModelLoader(
     fileBuffer,
@@ -44,7 +48,7 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     {
       onFrame,
       getClearColor: background.getClearColor,
-      getSectionPlane: section.getSectionPlane,
+      getSectionPlane: getCombinedSectionPlane,
     }
   );
 
@@ -55,6 +59,16 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     else selection.clearSelection();
   }, [selection.selectEntityById, selection.clearSelection]);
 
+  const onZoom = useCallback(() => {
+    if (elementCut.cutArmed) return;
+    selection.dismissPopup();
+  }, [elementCut.cutArmed, selection.dismissPopup]);
+
+  const onZoomEnd = useCallback(() => {
+    if (elementCut.cutArmed) return;
+    selection.restorePopup();
+  }, [elementCut.cutArmed, selection.restorePopup]);
+
   useCameraControls({
     ready: loader.ready,
     canvasRef,
@@ -62,15 +76,13 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     isWalkModeRef: walk.isWalkModeRef,
     walkStateRef: walk.walkStateRef,
     measureModeRef: measure.measureModeRef,
-      onPaintMouseDown: paint.handlePaintMouseDown,
-  onPaintMouseMove: paint.handlePaintMouseMove,
-  onPaintMouseUp: paint.handlePaintMouseUp,
-    // useCameraControls.ts sigue nombrando este parámetro "laserModeRef" — le
-    // pasamos el ref del modo cruz. Renombrar ahí es opcional.
+    onPaintMouseDown: paint.handlePaintMouseDown,
+    onPaintMouseMove: paint.handlePaintMouseMove,
+    onPaintMouseUp: paint.handlePaintMouseUp,
     laserModeRef: cross.crossModeRef,
     onPick,
-    onZoom: selection.dismissPopup,
-    onZoomEnd: selection.restorePopup,
+    onZoom,
+    onZoomEnd,
     onMeasureMouseDown: measure.handleMeasureMouseDown,
     onMeasureMouseMove: measure.handleMeasureMouseMove,
     onMeasureMouseUp: measure.handleMeasureMouseUp,
@@ -79,6 +91,9 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     onLaserMouseMove: cross.handleCrossMouseMove,
     onLaserMouseUp: cross.handleCrossMouseUp,
     onLaserHover: cross.updateCrossHover,
+    onCutMouseDown: elementCut.handleCutMouseDown,
+    onCutMouseMove: elementCut.handleCutMouseMove,
+    onCutMouseUp: elementCut.handleCutMouseUp,
   });
 
   return {
@@ -93,6 +108,7 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     ...measure,
     ...cross,
     ...section,
+    ...elementCut,
     ...paint,
   };
 }

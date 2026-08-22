@@ -46,7 +46,11 @@ const MisInvitaciones: React.FC = () => {
                 <div>
                   <p className="font-semibold text-gray-800">{inv.project.project_name}</p>
                   <p className="text-sm text-gray-500 mt-1">
-                    Invitado por <span className="font-medium">{inv.host_name}</span> como{' '}
+                    Invitado por{' '}
+                    <span className="font-medium">
+                      {inv.host_name}{inv.host_last_name ? ` ${inv.host_last_name}` : ''}
+                    </span>{' '}
+                    como{' '}
                     <span className="font-medium">{inv.project_role_name}</span>
                   </p>
                   <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
