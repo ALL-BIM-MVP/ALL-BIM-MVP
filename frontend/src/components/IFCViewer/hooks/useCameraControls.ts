@@ -1,7 +1,3 @@
-// Controles de cámara (orbit/pan/zoom), selección por click (picking) y modo caminar
-// (mirar con Pointer Lock). Consulta primero a la herramienta de medición, luego al
-// láser, luego a pintar: si alguna consume el evento (colocar/arrastrar un punto o
-// trazo), la cámara NO orbita/hace pan.
 import { useEffect } from 'react';
 
 interface UseCameraControlsParams {
@@ -26,6 +22,9 @@ interface UseCameraControlsParams {
   onPaintMouseDown?: (clientX: number, clientY: number) => boolean;
   onPaintMouseMove?: (clientX: number, clientY: number) => boolean;
   onPaintMouseUp?: () => boolean;
+  onCutMouseDown?: (clientX: number, clientY: number) => boolean;
+  onCutMouseMove?: (clientX: number, clientY: number) => boolean;
+  onCutMouseUp?: () => boolean;
 }
 
 export function useCameraControls(params: UseCameraControlsParams) {
@@ -51,6 +50,9 @@ export function useCameraControls(params: UseCameraControlsParams) {
     onPaintMouseDown,
     onPaintMouseMove,
     onPaintMouseUp,
+    onCutMouseDown,
+    onCutMouseMove,
+    onCutMouseUp,
   } = params;
 
   useEffect(() => {
@@ -70,15 +72,9 @@ export function useCameraControls(params: UseCameraControlsParams) {
     let wheelEndTimeout: number | null = null;
 
     const handleMouseDown = (e: MouseEvent) => {
-      // Prioridad: medición > láser > pintar > orbit/pan. Si alguna herramienta
-      // coloca o empieza a arrastrar un punto/trazo, no dejamos que además
-      // dispare la cámara.
       if (onMeasureMouseDown(e.clientX, e.clientY)) return;
+      if (e.button === 0 && onCutMouseDown?.(e.clientX, e.clientY)) return;
       if (onLaserMouseDown?.(e.clientX, e.clientY)) return;
-
-      // Pintar SOLO responde al botón izquierdo (e.button === 0). Así el
-      // click derecho / medio queda libre para seguir moviendo la cámara
-      // (pan) con total normalidad mientras el modo pintar está activo.
       if (e.button === 0 && onPaintMouseDown?.(e.clientX, e.clientY)) return;
 
       isDragging = true;
@@ -87,20 +83,19 @@ export function useCameraControls(params: UseCameraControlsParams) {
       downX = e.clientX; downY = e.clientY;
       canvas.style.cursor = isPanning ? 'move' : 'grabbing';
 
-      onZoom?.(); // esconde el popup al empezar a arrastrar (orbit/pan), igual que con zoom
+      onZoom?.();
     };
 
     const handleMouseMove = (e: MouseEvent) => {
       onMeasureHover(e.clientX, e.clientY);
       onLaserHover?.(e.clientX, e.clientY);
 
-      // Si hay un punto/trazo en arrastre (medición, láser o pintar), se
-      // re-raycastea y listo: no orbitar.
       const consumedByMeasure = onMeasureMouseMove(e.clientX, e.clientY);
-      const consumedByLaser = !consumedByMeasure && (onLaserMouseMove?.(e.clientX, e.clientY) ?? false);
-      const consumedByPaint = !consumedByMeasure && !consumedByLaser && (onPaintMouseMove?.(e.clientX, e.clientY) ?? false);
+      const consumedByCut = !consumedByMeasure && (onCutMouseMove?.(e.clientX, e.clientY) ?? false);
+      const consumedByLaser = !consumedByMeasure && !consumedByCut && (onLaserMouseMove?.(e.clientX, e.clientY) ?? false);
+      const consumedByPaint = !consumedByMeasure && !consumedByCut && !consumedByLaser && (onPaintMouseMove?.(e.clientX, e.clientY) ?? false);
 
-      if (consumedByMeasure || consumedByLaser || consumedByPaint) return;
+      if (consumedByMeasure || consumedByCut || consumedByLaser || consumedByPaint) return;
 
       if (isWalkModeRef.current && document.pointerLockElement === canvas) {
         const sensitivity = 0.0022;
@@ -123,9 +118,10 @@ export function useCameraControls(params: UseCameraControlsParams) {
     };
 
     const handleMouseUp = async (e: MouseEvent) => {
-      if (onMeasureMouseUp()) return; // se soltó un punto de medición en arrastre
-      if (onLaserMouseUp?.()) return; // se soltó un punto/codo del láser en arrastre
-      if (onPaintMouseUp?.()) return; // se soltó/terminó un trazo de pintado
+      if (onMeasureMouseUp()) return;
+      if (onCutMouseUp?.()) return;
+      if (onLaserMouseUp?.()) return;
+      if (onPaintMouseUp?.()) return;
 
       const wasDragging = isDragging;
       const moved = Math.hypot(e.clientX - downX, e.clientY - downY);
@@ -136,7 +132,6 @@ export function useCameraControls(params: UseCameraControlsParams) {
       if (isWalkModeRef.current) return;
 
       if (wasDragging && moved < 4 && renderer.pick) {
-        // Fue un click real (casi sin movimiento), no un arrastre de cámara.
         const rect = canvas.getBoundingClientRect();
         const scaleX = canvas.width / rect.width;
         const scaleY = canvas.height / rect.height;
@@ -149,8 +144,6 @@ export function useCameraControls(params: UseCameraControlsParams) {
           console.warn('Error en pick:', err);
         }
       } else if (wasDragging && moved >= 4) {
-        // Fue un arrastre real de cámara (orbit/pan) — restaura el popup del
-        // elemento que ya estaba seleccionado, si había uno.
         onZoomEnd?.();
       }
     };
@@ -158,6 +151,10 @@ export function useCameraControls(params: UseCameraControlsParams) {
     const handleMouseLeave = () => {
       isDragging = false;
       isPanning = false;
+      onCutMouseUp?.();
+      onLaserMouseUp?.();
+      onPaintMouseUp?.();
+      onMeasureMouseUp();
     };
 
     const handleWheel = (e: WheelEvent) => {
@@ -168,10 +165,10 @@ export function useCameraControls(params: UseCameraControlsParams) {
       camera.zoom(e.deltaY, false, mouseX, mouseY, canvas.width, canvas.height);
       renderer.render();
 
-      onZoom?.(); // oculta el popup mientras se está scrolleando
+      onZoom?.();
       if (wheelEndTimeout !== null) clearTimeout(wheelEndTimeout);
       wheelEndTimeout = window.setTimeout(() => {
-        onZoomEnd?.(); // reaparece cuando dejaste de scrollear (400ms sin nuevo scroll)
+        onZoomEnd?.();
       }, 400);
     };
 
@@ -224,5 +221,8 @@ export function useCameraControls(params: UseCameraControlsParams) {
     onPaintMouseDown,
     onPaintMouseMove,
     onPaintMouseUp,
+    onCutMouseDown,
+    onCutMouseMove,
+    onCutMouseUp,
   ]);
 }

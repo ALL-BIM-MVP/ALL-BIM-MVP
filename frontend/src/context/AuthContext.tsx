@@ -2,13 +2,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { loginUser, getCurrentUser } from '../services/auth.service';
 import { getRoleName, getRoleIdFromName } from '../utils/roles';
+import { resolveMediaUrl } from '../utils/media';
 
 interface AuthUser {
   id: number | null;
   name: string;
+  last_name: string | null;
   email: string;
   role: string;      // texto, ej: "ADMINISTRADOR" (solo para mostrar en UI)
   rol_id: number;     // número, ej: 1 (fuente de verdad para comparar permisos)
+  profile_picture_url: string | null;
 }
 
 // Forma común que devuelven TANTO /api/auth/login COMO /api/users/register
@@ -20,7 +23,9 @@ interface AuthApiResponse {
   user?: {
     id?: number;
     name?: string;
+    last_name?: string | null;
     correo?: string;
+    profile_picture_url?: string | null;
   };
 }
 
@@ -31,6 +36,7 @@ interface AuthContextType {
   loginWithResponse: (response: AuthApiResponse) => AuthUser;
   logout: () => void;
   isAuthenticated: () => boolean;
+  updateUser: (patch: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -51,14 +57,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const loadUser = async () => {
       try {
-        const backendUser = await getCurrentUser(); // user_id, name, email, role_name, created_at
+        const backendUser = await getCurrentUser(); // user_id, name, last_name, email, role_name, profile_picture_url, created_at
 
         setUser({
           id: backendUser.user_id,
           name: backendUser.name,
+          last_name: backendUser.last_name ?? null,
           email: backendUser.email,
           role: backendUser.role_name,
           rol_id: getRoleIdFromName(backendUser.role_name), // texto -> número
+          profile_picture_url: backendUser.profile_picture_url ? resolveMediaUrl(backendUser.profile_picture_url) : null,
         });
       } catch (err) {
         console.error('No se pudo obtener el usuario actual:', err);
@@ -97,9 +105,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const authUser: AuthUser = {
       id: response.user?.id ?? null,
       name: response.user?.name ?? '',
+      last_name: response.user?.last_name ?? null,
       email: response.user?.correo ?? '',
       role: roleName,
       rol_id: response.rol_id,
+      profile_picture_url: response.user?.profile_picture_url ? resolveMediaUrl(response.user.profile_picture_url) : null,
     };
 
     setUser(authUser);
@@ -135,8 +145,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const isAuthenticated = () => !!user;
 
+  // Actualiza campos puntuales del usuario en memoria (sin volver a
+  // pedir /users/me) — se usa después de editar el perfil o cambiar la
+  // foto, para que el nombre/avatar se refresquen en toda la app
+  // (PageHeader incluido) sin recargar la página.
+  const updateUser = (patch: Partial<AuthUser>) => {
+    setUser((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, loginWithResponse, logout, isAuthenticated }}>
+    <AuthContext.Provider value={{ user, loading, login, loginWithResponse, logout, isAuthenticated, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

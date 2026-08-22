@@ -1,8 +1,9 @@
 // src/components/PageHeader.tsx
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Search, HelpCircle, Bell, Mail, Check, X, Clock, RefreshCw, User, Settings, LogOut } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useInvitations } from "../context/InvitationsContext";
+import MiPerfilModal from "./MiPerfilModal";
 
 interface PageHeaderProps {
   title: string;
@@ -21,14 +22,29 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
-  const handleViewInfo = () => {
-    if (user) {
-      alert(`👤 Usuario: ${user.name}\n Email: ${user.email}\n Rol: ${user.role}\n ID: ${user.id}`);
-    } else {
-      alert("No hay usuario autenticado");
-    }
-  };
+  // Cierra los desplegables al hacer click en cualquier otro lado de la
+  // página — antes solo se cerraban tocando un botón de adentro del
+  // propio menú, así que quedaban abiertos para siempre si clickeabas
+  // afuera.
+  const menuRef = useRef<HTMLDivElement>(null);
+  const notificationsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
+      if (notificationsRef.current && !notificationsRef.current.contains(event.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const fullName = user ? `${user.name}${user.last_name ? ` ${user.last_name}` : ''}` : 'Usuario';
 
   return (
     <header className="sticky -top-8 -mt-8 -mx-8 z-40 w-[calc(100%+4rem)] bg-white border-b border-gray-200 px-8 py-2.5 flex justify-between items-center">
@@ -49,7 +65,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
         {/* ========================== */}
         {/* NOTIFICACIONES */}
         {/* ========================== */}
-        <div className="relative">
+        <div className="relative" ref={notificationsRef}>
           <button
             onClick={() => {
               setIsNotificationsOpen(!isNotificationsOpen);
@@ -153,7 +169,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
         {/* ========================== */}
         {/* USUARIO */}
         {/* ========================== */}
-        <div className="relative">
+        <div className="relative" ref={menuRef}>
           <button
             onClick={() => {
               setIsMenuOpen(!isMenuOpen);
@@ -161,9 +177,17 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
             }}
             className="flex items-center gap-2 pl-1.5 pr-3 py-1 bg-blue-50 hover:bg-blue-100 rounded-full transition-colors duration-200 border border-blue-200"
           >
-            <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
-              {user?.name?.charAt(0).toUpperCase() || "U"}
-            </div>
+            {user?.profile_picture_url ? (
+              <img
+                src={user.profile_picture_url}
+                alt={fullName}
+                className="w-7 h-7 rounded-full object-cover"
+              />
+            ) : (
+              <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center text-white text-sm font-semibold">
+                {user?.name?.charAt(0).toUpperCase() || "U"}
+              </div>
+            )}
             <span className="text-sm font-medium text-gray-700">{user?.name || "Usuario"}</span>
             <svg
               className={`w-3.5 h-3.5 text-gray-500 transition-transform ${isMenuOpen ? "rotate-180" : ""}`}
@@ -182,9 +206,17 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
           {isMenuOpen && (
             <div className="absolute right-0 mt-2 w-72 bg-white rounded-2xl shadow-xl ring-1 ring-black/5 border border-gray-100 py-5 px-5 z-50 animate-fadeInUp">
               <div className="flex items-center gap-4 mb-4">
-                <div className="w-14 h-14 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-xl font-bold ring-2 ring-white shadow-sm flex-shrink-0">
-                  {user?.name?.charAt(0).toUpperCase() || "U"}
-                </div>
+                {user?.profile_picture_url ? (
+                  <img
+                    src={user.profile_picture_url}
+                    alt={fullName}
+                    className="w-14 h-14 rounded-full object-cover ring-2 ring-white shadow-sm flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-xl font-bold ring-2 ring-white shadow-sm flex-shrink-0">
+                    {user?.name?.charAt(0).toUpperCase() || "U"}
+                  </div>
+                )}
                 <div className="min-w-0">
                   <p className="font-bold text-base text-gray-800 truncate">{user?.name || "Usuario"}</p>
                   <p className="text-xs text-gray-400 truncate">{user?.email || "Sin email"}</p>
@@ -201,7 +233,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
 
               <div className="border-t border-gray-100 pt-2 space-y-0.5">
                 <button
-                  onClick={() => { setIsMenuOpen(false); handleViewInfo(); }}
+                  onClick={() => { setIsMenuOpen(false); setIsProfileModalOpen(true); }}
                   className="w-full text-left px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-xl flex items-center gap-2.5 text-sm font-medium transition-colors"
                 >
                   <User size={16} className="text-gray-400" />
@@ -237,6 +269,8 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
         }
         .animate-fadeInUp { animation: fadeInUp 0.18s ease-out; }
       `}</style>
+
+      <MiPerfilModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
     </header>
   );
 };

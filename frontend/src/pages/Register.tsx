@@ -76,7 +76,7 @@ export default function Register() {
       style={{
         backgroundImage: `url(${fondo})`,
         backgroundSize: 'cover',
-        backgroundPosition: 'center',
+        backgroundPosition: 'right center',
         backgroundRepeat: 'no-repeat',
       }}>
       <div className="relative z-10 w-full max-w-[440px] bg-white border border-gray-200 shadow-xl p-10 flex flex-col rounded-xl">

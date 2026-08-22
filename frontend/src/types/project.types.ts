@@ -23,6 +23,7 @@ export interface Project {
   owner?: {
     user_id: number;
     user_name: string;
+    user_last_name: string | null;
   };
   client: string | null;
   contractor: string | null;
@@ -32,6 +33,7 @@ export interface Project {
 export interface ProjectFileUploader {
   user_id: number;
   user_name: string;
+  user_last_name: string | null;
   user_email: string;
 }
 

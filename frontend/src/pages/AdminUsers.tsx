@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { useUsers } from "../hooks/useUsers";
 import PageHeader from "../components/PageHeader";
+import { resolveMediaUrl } from "../utils/media";
 
 // ============================================================
 // Helpers de presentación — mismo patrón que Invitations.tsx: ícono/color
@@ -98,13 +99,23 @@ const AdminUsers: React.FC = () => {
                     >
                       <td className="px-8 py-3.5">
                         <div className="flex items-center gap-2.5">
-                          <span
-                            className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
-                            style={{ backgroundColor: avatarColorFor(u.email || u.name || String(u.user_id)) }}
-                          >
-                            {(u.name || u.email || "?").charAt(0).toUpperCase()}
+                          {u.profile_picture_url ? (
+                            <img
+                              src={resolveMediaUrl(u.profile_picture_url)}
+                              alt={u.name}
+                              className="w-7 h-7 rounded-full object-cover flex-shrink-0"
+                            />
+                          ) : (
+                            <span
+                              className="w-7 h-7 rounded-full flex items-center justify-center text-white text-[11px] font-bold flex-shrink-0"
+                              style={{ backgroundColor: avatarColorFor(u.email || u.name || String(u.user_id)) }}
+                            >
+                              {(u.name || u.email || "?").charAt(0).toUpperCase()}
+                            </span>
+                          )}
+                          <span className="text-gray-800">
+                            {u.name}{u.last_name ? ` ${u.last_name}` : ''}
                           </span>
-                          <span className="text-gray-800">{u.name}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3.5 text-gray-500 text-xs">{u.email}</td>

@@ -207,6 +207,15 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     toggleIsolateType,
     clearIsolation,
     clearAll,
+        
+    // --- Corte orientado a elemento (tijera, tipo Dalux) ---
+    cutArmed,
+    cutDragging,
+    scissorsScreen,
+    armCutAt,
+    exitCut,
+    dismissPopup,
+    handleCutMouseDown,
   } = useIfcModel(fileBuffer);
 
   useImperativeHandle(ref, () => ({
@@ -760,10 +769,15 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                       <span className="text-[10px] font-medium">Aislar</span>
                     </button>
 
-                    <button
-                      onClick={toggleSectionEnabled}
-                      className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#0056b3]"
-                    >
+                                  <button
+  onClick={() => {
+    if (popupScreenPos) armCutAt(popupScreenPos.x, popupScreenPos.y);
+    dismissPopup(); // saca el popup Ocultar/Aislar/Cortar al empezar a cortar
+  }}
+  className={`flex flex-col items-center gap-0.5 ${
+    cutArmed ? 'text-[#0056b3]' : 'text-gray-600 hover:text-[#0056b3]'
+  }`}
+>
                       <Scissors size={14} />
                       <span className="text-[10px] font-medium">Cortar</span>
                     </button>
@@ -772,6 +786,29 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                 <div className="w-2 h-2 bg-white rotate-45 mx-auto -mt-1 shadow-sm" />
               </div>
             )}
+
+            {cutArmed && scissorsScreen && (
+  <div
+    className="absolute z-40 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+    style={{ left: scissorsScreen.x, top: scissorsScreen.y }}
+  >
+    <div
+      className={`w-9 h-9 rounded-full flex items-center justify-center shadow-lg border-2 border-white transition-colors ${
+        cutDragging ? 'bg-[#004494] cursor-grabbing' : 'bg-[#0056b3] cursor-grab'
+      }`}
+      title="Arrastrá para definir el corte"
+    >
+      <Scissors size={16} className="text-white" />
+    </div>
+    <button
+      onClick={exitCut}
+      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white rounded-full shadow flex items-center justify-center text-gray-500 hover:text-gray-800 pointer-events-auto"
+      title="Salir del corte"
+    >
+      <XIcon size={9} />
+    </button>
+  </div>
+)}
           </>
         )}
 

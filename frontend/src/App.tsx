@@ -10,6 +10,7 @@ import MainLayout from './layouts/MainLayout';
 import Register from './pages/Register';
 import DashboardProjects from './pages/DashboardProjects';
 import MisInvitaciones from './pages/MisInvitaciones';
+
 import { AuthProvider } from './context/AuthContext';
 import { InvitationsProvider } from './context/InvitationsContext'; // 
 import { ROLE_IDS } from './utils/roles';
@@ -59,6 +60,11 @@ function App() {
                   <MisInvitaciones />
                 </ProtectedRoute>
               } />
+
+              {/* Nueva: pantalla de "Mi perfil" — cualquier usuario
+                  logueado puede editar sus propios datos, sin importar
+                  su rol. */}
+              
 
               {/* Redirección por defecto */}
               <Route path="/" element={<Navigate to="/login" replace />} />
