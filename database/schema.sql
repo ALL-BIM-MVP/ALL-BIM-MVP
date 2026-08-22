@@ -211,13 +211,169 @@ CREATE TABLE files (
     uploaded_by INT NOT NULL REFERENCES users(user_id)
 );
 
+-- ------------------------------------------------------------
+-- ESPECIALIDADES Y VERSIONADO DE IFC (Fase 3, ver
+-- docs/roadmap-modulos-y-permisos.md)
+-- ------------------------------------------------------------
+
+-- Catálogo en BD, mismo patrón que "modules" (code estable para
+-- referencias/Zod, name para mostrar). is_active permite desactivar
+-- una especialidad sin borrar el historial de documentos que ya la
+-- usan (specialty_id no se toca al desactivar).
+CREATE TABLE ifc_specialties (
+    ifc_specialty_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    code VARCHAR(40) UNIQUE NOT NULL,
+    name VARCHAR(80) NOT NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE
+);
+
+-- Identidad ESTABLE de "un IFC" a través de sus versiones (ej. "Modelo
+-- de Estructuras" — v1, v2, v3...). Las subidas concretas (cada .ifc
+-- físico, con su propia fila en files/ifc_files) cuelgan de acá vía
+-- ifc_files.ifc_document_id, ver abajo. specialty_id es nullable
+-- porque los documentos del backfill (IFCs subidos antes de esta
+-- fase) no tienen especialidad asignada — los documentos nuevos SÍ la
+-- piden por Zod al crearse (backend, no acá).
+CREATE TABLE ifc_documents (
+    ifc_document_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    name VARCHAR(150) NOT NULL,
+    specialty_id INT REFERENCES ifc_specialties(ifc_specialty_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id)
+);
+
 CREATE TABLE ifc_files (
     ifc_file_id BIGINT PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,
+    ifc_document_id BIGINT NOT NULL REFERENCES ifc_documents(ifc_document_id) ON DELETE CASCADE,
+    -- version_number SIEMPRE lo calcula el backend (MAX actual + 1
+    -- dentro de una transacción con lock, ver ifc-documents.service.ts)
+    -- nunca lo manda el cliente — así no hace falta (ni tiene sentido)
+    -- una restricción de "no saltar números": el backend físicamente
+    -- no puede generar un hueco.
+    version_number INT NOT NULL,
+    -- Solo una versión "vigente" por documento a la vez — la única que
+    -- tiene datos derivados cargados (ifc_elements/ifc_properties/
+    -- metrado_partidas/...). Cuando una versión nueva pasa a vigente,
+    -- la vieja queda como "tombstone": su fila ifc_files (y la de
+    -- files) persiste como registro histórico (quién subió, cuándo, el
+    -- .ifc físico sigue descargable) pero sus datos derivados se
+    -- borran — ver insertarResultado en ifc-processing-runner.ts. Por
+    -- eso ifc_elements/metrado_partidas de una versión is_current=false
+    -- nunca deberían existir en la práctica (invariante de aplicación,
+    -- reforzada por ese mismo flujo, no hay forma limpia de expresarlo
+    -- como CHECK entre tablas en Postgres).
+    is_current BOOLEAN NOT NULL DEFAULT TRUE,
     schema_version VARCHAR(10),
     status VARCHAR(20) NOT NULL DEFAULT 'processing'
         CHECK (status IN ('processing','done','error')),
     processed_at TIMESTAMPTZ,
-    error_message TEXT
+    error_message TEXT,
+
+    -- Fase 4 (clasificación manual, ver docs/roadmap-modulos-y-permisos.md):
+    -- snapshot de CON QUÉ config se clasificó esta versión puntual —
+    -- copia de la fila de ifc_classification_configs/_fields vigente en
+    -- el momento de procesar, no una referencia viva. Si el admin
+    -- cambia la config del proyecto después, esta versión ya procesada
+    -- sigue mostrando fielmente con qué se hizo (mismo espíritu que el
+    -- tombstone de versiones: nunca reinterpretar en silencio algo ya
+    -- procesado). NULL para todo lo procesado en modo 'norma' (no hay
+    -- nada que snapshotear, el comportamiento no varía por proyecto).
+    classification_config_used JSONB,
+
+    UNIQUE (ifc_document_id, version_number)
+);
+-- Como mucho una versión vigente por documento — ídem
+-- idx_un_project_cover/idx_un_template_default más abajo.
+CREATE UNIQUE INDEX idx_un_ifc_document_current ON ifc_files (ifc_document_id) WHERE is_current = true;
+
+-- Excel generado a partir de un IFC procesado (Fase 5, ver
+-- docs/roadmap-modulos-y-permisos.md) — ALTER acá (no en el CREATE
+-- TABLE de "files" más arriba) porque "ifc_files" recién se define en
+-- este punto del archivo, no antes. NULL para todo archivo que no sea
+-- un Excel generado (subidas normales, incluidos Excel sueltos sin
+-- relación a ningún IFC). ON DELETE CASCADE: si la versión de origen
+-- se borra DE VERDAD (no un reemplazo de versión tipo tombstone, que
+-- nunca borra la fila — ver Fase 3), los Excel generados desde ella se
+-- borran con ella. Apunta a la VERSIÓN puntual (no al documento) — un
+-- Excel siempre refleja el metrado de un momento específico; con un
+-- JOIN a ifc_files se resuelve también a qué documento pertenece esa
+-- versión, sin duplicar la columna.
+ALTER TABLE files ADD COLUMN generated_from_ifc_file_id BIGINT REFERENCES ifc_files(ifc_file_id) ON DELETE CASCADE;
+
+
+-- ------------------------------------------------------------
+-- CLASIFICACIÓN ALTERNATIVA POR PROPIEDADES (Fase 4, ver
+-- docs/roadmap-modulos-y-permisos.md)
+-- ------------------------------------------------------------
+
+-- Config activa de clasificación por proyecto — una sola fila por
+-- proyecto (no hay "varias configs guardadas", a diferencia de
+-- metrado_templates). mode='norma' (default) es el comportamiento de
+-- siempre (clasifica contra norma_completa.json); mode='manual' lee
+-- directo de propiedades que el usuario escribió a mano en cada
+-- elemento IFC, identificadas por property_prefix (ver
+-- ifc_classification_config_fields) — NUNCA por Pset_WallCommon ni
+-- ningún otro Pset "técnico" que exporte Revit solo.
+CREATE TABLE ifc_classification_configs (
+    project_id INT PRIMARY KEY REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Cómo se AGRUPAN los elementos en partidas — 'norma' (default,
+    -- contra norma_completa.json) o 'manual' (propiedades exactas, ver
+    -- ifc_classification_config_fields). Independiente de
+    -- property_prefix de abajo — un proyecto puede clasificar contra
+    -- la norma Y filtrar sus propiedades capturadas por prefijo al
+    -- mismo tiempo, son dos preguntas distintas.
+    mode VARCHAR(20) NOT NULL DEFAULT 'norma' CHECK (mode IN ('norma','manual')),
+    mode_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Prefijo de nombre de propiedad (ej. "CSRT-") que distingue lo que
+    -- el usuario escribió a mano de lo que Revit exporta solo — filtra
+    -- la captura general de propiedades de ese archivo
+    -- (ifc_properties/columnas de plantilla) Y decide la prioridad de
+    -- metrado (texto-prefijado > geométrico > tipado si hay prefijo;
+    -- tipado > geométrico > texto si no) — en CUALQUIER mode, no solo
+    -- 'manual'. NULL/"" = sin filtro, comportamiento de siempre.
+    property_prefix VARCHAR(60),
+    property_prefix_locked BOOLEAN NOT NULL DEFAULT FALSE,
+    -- mode_locked/property_prefix_locked son locks INDEPENDIENTES a
+    -- propósito (no un solo "locked" grupal) — se puede bloquear cómo
+    -- se clasifica sin bloquear el prefijo, o viceversa. Un "bloquear
+    -- todo" en la UI es responsabilidad del frontend (mandar los dos
+    -- PUT), no un concepto del backend. Solo owner/admin los tocan
+    -- (permiso 'configure' del módulo metrados).
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by INT REFERENCES users(user_id)
+);
+
+-- Los 3 campos (código/descripción/unidad) que arma cada "partida" en
+-- modo manual — normalizado en tabla aparte (no 3 pares de columnas
+-- fijas en ifc_classification_configs) a propósito: el día que haga
+-- falta soportar que un mismo elemento pertenezca a varias partidas
+-- simultáneas (confirmado con datos reales: ~21% de los elementos de
+-- un IFC de prueba real tenían 2+ códigos a la vez, ver roadmap) es
+-- agregar filas con otro `slot`, no migrar el schema. v1 usa
+-- ÚNICAMENTE slot=1 — el resto queda modular, no implementado todavía.
+CREATE TABLE ifc_classification_config_fields (
+    ifc_classification_config_field_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES ifc_classification_configs(project_id) ON DELETE CASCADE,
+    slot INT NOT NULL DEFAULT 1,
+    -- Nombre EXACTO de la propiedad tal cual el usuario la ve en su
+    -- IFC (ej. property_name="CSRT-Partida1") — nunca se reconstruye
+    -- concatenando property_prefix + un patrón fijo, cada cliente
+    -- puede nombrar sus propiedades distinto.
+    -- property_set es OPCIONAL (nullable) a propósito: si no se manda,
+    -- el pipeline busca la propiedad en CUALQUIER Pset del elemento
+    -- (ver extraction.extraer_valor_propiedad) — solo code_property_name
+    -- es obligatorio, sin nombre no hay con qué buscar nada.
+    code_property_set VARCHAR(255),
+    code_property_name VARCHAR(255) NOT NULL,
+    -- Opcionales — si faltan, el pipeline cae al mismo fallback que ya
+    -- existe (nombre del elemento IFC / inferir_unidad(dims)).
+    description_property_set VARCHAR(255),
+    description_property_name VARCHAR(255),
+    unit_property_set VARCHAR(255),
+    unit_property_name VARCHAR(255),
+
+    UNIQUE (project_id, slot)
 );
 
 -- "files" es el archivo físico (metadata + ruta en disco); esta tabla
@@ -362,6 +518,16 @@ CREATE TABLE ifc_element_property_values (
     PRIMARY KEY (element_id, property_id),
     FOREIGN KEY (value_id, property_id) REFERENCES ifc_property_values(value_id, property_id) ON DELETE CASCADE
 );
+-- Sin esto, cualquier DELETE que cascadee desde ifc_property_values
+-- (borrar un ifc_properties, o el ifc_files entero — pasa en CADA
+-- force=true, cada reemplazo de versión de Fase 3, y cada borrado de
+-- archivo) tiene que hacer un seq scan de ESTA tabla por cada fila que
+-- borra allá — el PK de acá es (element_id, property_id), no sirve
+-- para buscar por value_id. Encontrado en vivo probando Fase 4 con un
+-- archivo real de 26k elementos: un DELETE que debería ser instantáneo
+-- tardó ~2m30s sin este índice.
+CREATE INDEX idx_ifc_element_property_values_value_property
+    ON ifc_element_property_values (value_id, property_id);
 
 
 -- ------------------------------------------------------------

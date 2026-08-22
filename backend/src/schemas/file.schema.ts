@@ -34,6 +34,12 @@ export const optionalBooleanFlag = z.enum(["true", "false"])
 export const GetProjectFilesQuerySchema = z.object({
     file_type: z.enum(FILE_TYPES).optional(),
     processed: optionalBooleanFlag,
+    // Fase 3 (versionado de IFC) — sin este filtro, la lista trae TODAS
+    // las versiones vivas de cada documento IFC (viejas incluidas, como
+    // registro histórico). only_current=true la reduce a solo la
+    // versión vigente de cada ifc_documents — no afecta archivos que no
+    // son 'ifc' (is_current es null para esos, nunca se filtran).
+    only_current: optionalBooleanFlag,
 });
 
 export type GetProjectFilesQuery = z.infer<typeof GetProjectFilesQuerySchema>;

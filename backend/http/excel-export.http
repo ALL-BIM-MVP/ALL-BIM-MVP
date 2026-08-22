@@ -1,0 +1,106 @@
+@baseUrl = http://localhost:4000/api
+
+### =========================
+### Login Admin
+### =========================
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ismael@email.com",
+  "password": "Test1234!"
+}
+
+
+### Capturar tokens automáticamente
+@accessToken = {{login.response.body.access_token}}
+@refreshToken = {{login.response.body.refresh_token}}
+
+
+### =========================================================================
+### FLUJO COMPLETO: crear proyecto -> subir + clasificar (manual, CSRT-) ->
+### esperar a que termine -> generar Excel -> descargar.
+### Archivo real: processing/proceso-metrados-base/archives/CUS ET2 ST1 EST
+### BIM 5A ZZZ 1001.ifc (109MB, 26141 elementos) — el procesamiento tarda
+### varios minutos, no es instantáneo.
+### =========================================================================
+
+### 1. Crear el proyecto
+# @name createProject
+POST {{baseUrl}}/projects
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "CUS ET2 - Prueba exportación Excel",
+  "description": null,
+  "location": "Cusco, Perú",
+  "client": null,
+  "contractor": null,
+  "start_date": null,
+  "end_date": null
+}
+
+
+### Capturar el project_id recién creado
+@createdProjectId = {{createProject.response.body.project_id}}
+
+
+### 2. Subir + procesar en modo MANUAL — classification_override va como
+### JSON.stringify(...) en un campo de texto (multipart), mismo patrón que
+### specialty_id. specialty_id es obligatorio acá porque no hay
+### replaces_ifc_document_id (esto crea un ifc_documents nuevo).
+### ⚠️ Tarda varios minutos en terminar — este POST responde 202 casi al
+### instante, el procesamiento real sigue en background (ver request 4).
+# @name processIfc
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="specialty_id"
+
+2
+--WebAppBoundary
+Content-Disposition: form-data; name="document_name"
+
+CUS ET2 ST1 EST
+--WebAppBoundary
+Content-Disposition: form-data; name="classification_override"
+
+{"mode":"manual","property_prefix":"CSRT-","code_property_set":"Otros","code_property_name":"CSRT-Partida1","description_property_set":"Otros","description_property_name":"CSRT-DescripcionPartida1","unit_property_set":"Otros","unit_property_name":"CSRT-Unidad1"}
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="CUS_ET2.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/CUS ET2 ST1 EST BIM 5A ZZZ 1001.ifc
+--WebAppBoundary--
+
+
+### Capturar el ifc_file_id devuelto
+@ifcFileId = {{processIfc.response.body.ifc_file_id}}
+
+
+### 3. Consultar el estado del procesamiento (polling) — volvé a correr
+### este request cada 30-60s hasta que "status" pase de "processing" a
+### "done" (o "error") antes de seguir con el paso 4.
+GET {{baseUrl}}/ifc-files/{{ifcFileId}}
+Authorization: Bearer {{accessToken}}
+
+
+### 4. Generar el Excel — solo corré esto cuando el request 3 de arriba
+### ya muestre "status": "done". Guarda un archivo real
+### (file_type='excel', generated_from_ifc_file_id = {{ifcFileId}}).
+# @name exportExcel
+POST {{baseUrl}}/ifc-files/{{ifcFileId}}/export-excel
+Authorization: Bearer {{accessToken}}
+
+
+### Capturar el file_id del Excel recién generado
+@exportedExcelFileId = {{exportExcel.response.body.file_id}}
+
+
+### 5. Descargar el Excel generado
+GET {{baseUrl}}/files/{{exportedExcelFileId}}/content?download=true
+Authorization: Bearer {{accessToken}}

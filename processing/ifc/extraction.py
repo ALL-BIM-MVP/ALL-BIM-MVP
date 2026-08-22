@@ -83,6 +83,34 @@ def extraer_datos_clasificacion(el):
     return None, None
 
 
+def extraer_valor_propiedad(psets, property_set, property_name):
+    """Fase 4 (clasificación manual, ver classify.clasificar_elementos_manual)
+    — lee el valor CRUDO (sin uppercase, sin pasar por el fallback de
+    texto de extraer_metrados_revit_completo) de una propiedad puntual,
+    identificada por su nombre EXACTO tal cual lo escribió el usuario al
+    configurar el proyecto (ej. "CSRT-Partida1") — nunca se reconstruye
+    por patrón/prefijo, se busca literal.
+
+    property_set: si viene ("" no cuenta, se trata como "cualquiera"),
+    restringe la búsqueda a ESE IfcPropertySet puntual — si no, recorre
+    todos (mismo criterio que el resto del pipeline: nunca asumir que
+    todo vive en un Pset con nombre fijo, ver comentario de
+    clasificar_elementos_manual). Devuelve None si no está la propiedad,
+    o si está pero vacía ("" o None) — un valor vacío no cuenta como
+    "el usuario lo puso"."""
+    if not property_name:
+        return None
+    if property_set:
+        valor = psets.get(property_set, {}).get(property_name)
+        return valor if valor not in (None, "") else None
+    for props in psets.values():
+        if property_name in props:
+            valor = props[property_name]
+            if valor not in (None, ""):
+                return valor
+    return None
+
+
 def indexar_norma(norma):
     norma_index = {}
     for codigo_str, datos in norma.items():
@@ -917,14 +945,27 @@ def _valor_no_negativo(valor):
     return v if v >= 0 else None
 
 
-def extraer_metrados_revit_completo(el):
+def extraer_metrados_revit_completo(el, property_prefix=None):
     """Devuelve DOS dicts separados, no uno solo — metrados.py necesita
     distinguir la fuente para decidir prioridad (ver calcular_metrados_final):
     metrados_tipados sale de IfcElementQuantity (typed, sin ambigüedad,
     máxima confianza); metrados_texto sale de adivinar por palabra clave
     contra el nombre de una IfcPropertySingleValue cualquiera (fallback
     de menor confianza, ahora protegido con DESCALIFICADORES_DIMENSION +
-    no-negatividad, pero sigue siendo una adivinanza de texto)."""
+    no-negatividad, pero sigue siendo una adivinanza de texto).
+
+    property_prefix (Fase 4, clasificación manual — ver classify.py):
+    cuando el proyecto está en modo 'manual', el cliente escribe a mano,
+    en cada elemento, las propiedades que a ÉL le importan (identificadas
+    por este prefijo de nombre) — separadas de lo que Revit exporta solo
+    (Pset_WallCommon, Qto_*, etc, que el usuario ni ve). Si se pasa un
+    prefijo, CUALQUIER IfcPropertySingleValue cuyo nombre no empiece con
+    él se descarta ACÁ MISMO, antes de entrar a "propiedades" (que
+    después alimenta 1:1 ifc_properties/columnas de plantilla, ver
+    normalize.py) y antes de competir en el fallback de texto — no solo
+    se ignora para el metrado, directamente no se captura como propiedad
+    del archivo. property_prefix=None (default) no cambia nada del
+    comportamiento de siempre (modo 'norma')."""
     metrados_tipados = {"lon": None, "area": None, "vol": None, "count": None, "weight": None}
     metrados_texto = {"lon": None, "area": None, "vol": None, "count": None, "weight": None}
     propiedades = {}
@@ -982,6 +1023,8 @@ def extraer_metrados_revit_completo(el):
             if not (prop.is_a("IfcPropertySingleValue") and prop.NominalValue is not None):
                 continue
             nombre = getattr(prop, "Name", "").upper().strip()
+            if property_prefix and not nombre.startswith(property_prefix.upper()):
+                continue  # modo manual: no es una propiedad que el usuario escribió, se descarta del todo
             valor = prop.NominalValue.wrappedValue if hasattr(prop.NominalValue, 'wrappedValue') else prop.NominalValue
             propiedades[nombre] = valor
 

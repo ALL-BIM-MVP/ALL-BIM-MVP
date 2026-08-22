@@ -36,7 +36,7 @@ export const processIfcMetradosController = asyncHandler (
         }
 
         const { status, justStarted } = await processIfcMetradosService(
-            req.user, params.data, body.data.file_id, req.file, query.data
+            req.user, params.data, body.data, req.file, query.data
         );
 
         res.status(justStarted ? 202 : 200).json(status);

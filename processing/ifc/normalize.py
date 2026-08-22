@@ -113,10 +113,22 @@ def normalizar(elementos, norma_index, schema_version):
 
         if elem["tipo"] == "partida":
             tup_base = normalizar_codigo(elem["codigo_base"])
-            if tup_base is not None:
+            if tup_base:
+                # Código con estructura OE.x.x (modo 'norma') — arma
+                # ancestros/carpetas contra la norma, como siempre.
                 _registrar_ancestros_norma(partidas, tup_base, norma_index)
-            if elem["codigo_reporte"] != elem["codigo_base"]:
-                _registrar_partida(partidas, elem["codigo_reporte"], elem["codigo_base"],
+                if elem["codigo_reporte"] != elem["codigo_base"]:
+                    _registrar_partida(partidas, elem["codigo_reporte"], elem["codigo_base"],
+                                        elem["nombre_partida"], elem["unidad"])
+            else:
+                # Código plano, sin estructura de norma detrás (modo
+                # 'manual', Fase 4 — classify.clasificar_elementos_manual)
+                # — normalizar_codigo() devuelve () para algo como
+                # "C075-0196" (sin puntos), _registrar_ancestros_norma
+                # sería un no-op ahí (range(1,1) vacío) así que se
+                # registra la partida directo, sin padre — no hay árbol
+                # que armar.
+                _registrar_partida(partidas, elem["codigo_reporte"], None,
                                     elem["nombre_partida"], elem["unidad"])
         else:  # sin_especialidad / fuera_de_norma
             contenedor = elem["codigo_padre"]

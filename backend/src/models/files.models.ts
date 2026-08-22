@@ -31,6 +31,19 @@ export interface FileBase {
     // sanitizado que devuelve GET /ifc-files/:id, nunca el stack trace).
     ifc_status : IfcProcessingStatus | null;
     ifc_error_message : string | null;
+    // Versionado de IFC (Fase 3) — igual que ifc_status, viene de un
+    // LEFT JOIN a ifc_files (+ ifc_documents/ifc_specialties para el
+    // nombre/especialidad del documento), null para todo lo que no sea
+    // 'ifc'. is_current=false identifica una versión vieja (tombstone,
+    // sin datos derivados cargados — ver insertarResultado en
+    // ifc-processing-runner.ts), sigue listada salvo que se pida
+    // ?only_current=true.
+    ifc_document_id : number | null;
+    ifc_document_name : string | null;
+    version_number : number | null;
+    is_current : boolean | null;
+    specialty_code : string | null;
+    specialty_name : string | null;
     // Solo relevante para file_type='image' — null si no se pudo generar
     // la miniatura al subir (ver utils/thumbnail.ts) o si el archivo no
     // es una imagen. Cuando no es null, es una URL FIRMADA de corta
@@ -70,6 +83,12 @@ export const transformFileToFull = (f : FileRow) : FileFull => {
         uploaded_at: f.uploaded_at,
         ifc_status: f.ifc_status,
         ifc_error_message: f.ifc_error_message,
+        ifc_document_id: f.ifc_document_id,
+        ifc_document_name: f.ifc_document_name,
+        version_number: f.version_number,
+        is_current: f.is_current,
+        specialty_code: f.specialty_code,
+        specialty_name: f.specialty_name,
         thumbnail_url: f.thumbnail_path !== null ? buildSignedFileUrl(f.file_id, "thumbnail") : null,
         uploaded_by: {
             user_id: f.user_id,

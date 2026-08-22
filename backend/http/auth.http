@@ -587,13 +587,23 @@ Authorization: Bearer {{accessToken}}
 ### =========================================================================
 
 ### 1. Procesar un IFC nuevo (multipart: sube + procesa en un solo paso)
-### Responde 202 casi al instante con status="processing" — el procesamiento
-### real sigue corriendo en background (puede tardar ~1 min con este archivo).
+### Responde 202 casi al instante con status="processing" y is_current=false
+### — is_current recién pasa a true cuando termina bien (Fase 3, ver
+### docs/roadmap-modulos-y-permisos.md). specialty_id es OBLIGATORIO acá
+### porque no viene replaces_ifc_document_id (esto crea un ifc_documents
+### nuevo) — ver la lista de especialidades en el MÓDULO DE
+### ESPECIALIDADES/DOCUMENTOS IFC más abajo si 2 (Estructuras) no existe
+### en tu BD. El procesamiento real sigue corriendo en background (puede
+### tardar ~1 min con este archivo).
 # @name processIfcUpload
 POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
 Authorization: Bearer {{accessToken}}
 Content-Type: multipart/form-data; boundary=WebAppBoundary
 
+--WebAppBoundary
+Content-Disposition: form-data; name="specialty_id"
+
+2
 --WebAppBoundary
 Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
 Content-Type: application/octet-stream
@@ -601,8 +611,9 @@ Content-Type: application/octet-stream
 < ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
 --WebAppBoundary--
 
-### Capturar el ifc_file_id devuelto
+### Capturar el ifc_file_id y el ifc_document_id devueltos
 @processedIfcFileId = {{processIfcUpload.response.body.ifc_file_id}}
+@processedIfcDocumentId = {{processIfcUpload.response.body.ifc_document_id}}
 
 
 ### 2. Consultar el estado del procesamiento (polling)
@@ -648,6 +659,237 @@ Content-Type: application/json
 
 {
   "file_id": 99999
+}
+
+
+### =========================================================================
+### ESPECIALIDADES Y VERSIONADO DE IFC (Fase 3, ver
+### docs/roadmap-modulos-y-permisos.md) — documentos IFC + versiones,
+### complementa el MÓDULO DE METRADOS IFC de arriba.
+### =========================================================================
+
+### 1. Catálogo de especialidades (no depende de proyecto)
+GET {{baseUrl}}/ifc-specialties
+Authorization: Bearer {{accessToken}}
+
+
+### 2. Documentos IFC del proyecto, con todas sus versiones — lo que arma
+### el selector "reemplazar esta versión" del frontend.
+GET {{baseUrl}}/projects/{{createdProjectId}}/ifc-documents
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Subir una VERSIÓN NUEVA del documento creado en la request 1 del
+### MÓDULO DE METRADOS IFC (replaces_ifc_document_id, no specialty_id —
+### la especialidad es del documento, no de la versión). Al terminar
+### bien, esta versión pasa a is_current=true y la vieja
+### ({{processedIfcFileId}}) pierde sus datos derivados (tombstone) pero
+### su fila sigue viva como historial — ver insertarResultado en
+### ifc-processing-runner.ts.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="replaces_ifc_document_id"
+
+{{processedIfcDocumentId}}
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 4. Caso de error: subir un archivo NUEVO sin specialty_id ni
+### replaces_ifc_document_id -> 400 IFC_SPECIALTY_REQUIRED
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 5. Caso de error: specialty_id y replaces_ifc_document_id juntos -> 400
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="replaces_ifc_document_id"
+
+{{processedIfcDocumentId}}
+--WebAppBoundary
+Content-Disposition: form-data; name="specialty_id"
+
+2
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 6. Caso de error: replaces_ifc_document_id de un documento que no
+### existe (o es de otro proyecto) -> 404
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="replaces_ifc_document_id"
+
+999999
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="Vista3D_ESTRUCTURAS.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/Vista3D_ESTRUCTURAS.ifc
+--WebAppBoundary--
+
+
+### 7. Lista de archivos del proyecto CON los campos de versión —
+### only_current=true reduce a solo la versión vigente de cada documento
+### (útil para no listar tombstones viejos en la UI principal).
+GET {{baseUrl}}/projects/{{createdProjectId}}/files?file_type=ifc&only_current=true
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### CLASIFICACIÓN MANUAL POR PROPIEDADES (Fase 4, ver
+### docs/roadmap-modulos-y-permisos.md) — DOS configuraciones
+### independientes: "mode" (norma/manual, cómo se agrupan los
+### elementos) y "property_prefix" (qué propiedades se capturan,
+### aplica en CUALQUIER mode) — cada una con su propio *_locked, sin
+### lock grupal. "CSRT-" acá es solo el prefijo real que usa ESTE
+### cliente de prueba — el código nunca lo hardcodea, es 100%
+### configurable.
+### =========================================================================
+
+### 1. Config por defecto de un proyecto — mode='norma', sin prefijo,
+### nada bloqueado (creada automáticamente al crear el proyecto, ver
+### Fase 4 en el roadmap — ya no depende de un default implícito).
+GET {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+
+
+### 2. Configurar modo 'manual' — solo owner/admin (permiso 'configure').
+### property_prefix es OPCIONAL acá (independiente de mode, ver
+### comentario de cabecera) — se manda igual en este ejemplo porque
+### este cliente de prueba SÍ tiene propiedades con ese prefijo.
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "manual",
+  "mode_locked": false,
+  "property_prefix": "CSRT-",
+  "property_prefix_locked": false,
+  "code_property_set": "Otros",
+  "code_property_name": "CSRT-Partida1",
+  "description_property_set": "Otros",
+  "description_property_name": "CSRT-DescripcionPartida1",
+  "unit_property_set": "Otros",
+  "unit_property_name": "CSRT-Unidad1"
+}
+
+
+### 2b. mode='norma' CON property_prefix igual — demuestra que son
+### independientes: clasifica contra la norma técnica de siempre, pero
+### solo captura propiedades que arrancan con el prefijo.
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "norma",
+  "property_prefix": "CSRT-"
+}
+
+
+### 3. Caso de error: mode='manual' sin code_property_name -> 400 (Zod)
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "manual"
+}
+
+
+### 4. Volver a modo 'norma' sin prefijo — limpio de una.
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "norma"
+}
+
+
+### 5. Procesar un IFC con classification_override (mode manual +
+### property_prefix puntuales al subir, en vez de usar el default del
+### proyecto) — multipart, mismo patrón que specialty_id: el campo va
+### como JSON.stringify(...) en un form-data de texto.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="specialty_id"
+
+2
+--WebAppBoundary
+Content-Disposition: form-data; name="classification_override"
+
+{"mode":"manual","code_property_set":"Otros","code_property_name":"CSRT-Partida1","description_property_set":"Otros","description_property_name":"CSRT-DescripcionPartida1","unit_property_set":"Otros","unit_property_name":"CSRT-Unidad1","property_prefix":"CSRT-"}
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="CUS_ET2.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/CUS ET2 ST1 EST BIM 5A ZZZ 1001.ifc
+--WebAppBoundary--
+
+
+### 6. Override de SOLO property_prefix, sin tocar mode — sigue
+### clasificando con lo que tenga el proyecto, pero cambia qué
+### propiedades se capturan para esta subida puntual.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "file_id": {{uploadedFileId}},
+  "classification_override": {
+    "property_prefix": "CSRT-"
+  }
+}
+
+
+### 7. Caso de error: classification_override con mode='manual' y la
+### config del proyecto con mode_locked=true -> 409
+### IFC_CLASSIFICATION_MODE_LOCKED (correr la request 2 con
+### "mode_locked": true antes de probar esto). Un override que solo
+### trae property_prefix (request 6) seguiría funcionando igual, porque
+### es un lock independiente.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "file_id": {{uploadedFileId}},
+  "classification_override": {
+    "mode": "manual",
+    "code_property_name": "CSRT-Partida1"
+  }
 }
 
 
@@ -750,6 +992,51 @@ Content-Type: application/json
 {
   "template_id": 999999
 }
+
+
+### =========================================================================
+### EXPORTACIÓN A EXCEL (Fase 5, ver docs/roadmap-modulos-y-permisos.md)
+### — formato fijo, reusa el metrado ya procesado (mismo
+### {{processedIfcFileId}} de arriba, tiene que estar en status "done").
+### Se puede llamar más de una vez: cada llamada crea un archivo Excel
+### NUEVO, nunca pisa el anterior.
+### =========================================================================
+
+### 1. Generar el Excel — guarda un archivo real (file_type='excel',
+### generated_from_ifc_file_id = este ifc_file_id) y devuelve su metadata,
+### mismo shape que cualquier archivo de la lista de GET .../files.
+# @name exportExcel
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/export-excel
+Authorization: Bearer {{accessToken}}
+
+
+### Capturar el file_id del Excel recién generado
+@exportedExcelFileId = {{exportExcel.response.body.file_id}}
+
+
+### 2. Descargar el Excel generado — mismo endpoint de contenido que
+### cualquier archivo, no hay un mecanismo de descarga aparte.
+GET {{baseUrl}}/files/{{exportedExcelFileId}}/content?download=true
+Authorization: Bearer {{accessToken}}
+
+
+### 3. Caso de error: ifc_file_id inexistente -> 404 (assertIfcFileAccess
+### corta acá, ni llega a resolver el contexto de exportación)
+POST {{baseUrl}}/ifc-files/999999/export-excel
+Authorization: Bearer {{accessToken}}
+
+
+### 4. Caso de error: el IFC existe pero todavía no terminó de procesar
+### (o falló) -> 409 IFC_NOT_PROCESSED. Para probarlo de verdad hace
+### falta un ifc_file_id recién creado, todavía en "processing" —
+### normalmente esto se ve solo si se llama export-excel muy rápido
+### después del POST de "process", antes de que termine. Dejado como
+### referencia del código de error, no hay un ifc_file_id "processing"
+### fijo para pegarle acá — reemplazá el ifc_file_id de abajo por uno que
+### sepas que está a medio procesar si querés probarlo de verdad (tal
+### cual, contra {{processedIfcFileId}} ya "done", esto da 201, no 409).
+POST {{baseUrl}}/ifc-files/{{processedIfcFileId}}/export-excel
+Authorization: Bearer {{accessToken}}
 
 
 ### =========================================================================

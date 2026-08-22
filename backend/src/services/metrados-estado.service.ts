@@ -22,11 +22,19 @@ export const getEstadoElementosService = async (
     await assertModulePermission(projectId, user.user_id, "metrados", "view");
 
     // A nivel de PROYECTO (todos los archivos IFC ya procesados, no
-    // uno solo) — por diseño: si el mismo archivo se subió/procesó más
-    // de una vez sin borrar la versión vieja, esto también lo saca a
-    // la luz (cada elemento aparece "repetido" tantas veces como
-    // versiones del archivo sigan vivas), que es justamente el tipo de
-    // problema que esta consulta busca detectar.
+    // uno solo) — por diseño: si el mismo elemento aparece en más de un
+    // documento IFC (dos archivos DISTINTOS con el mismo elemento), esto
+    // lo saca a la luz, que es justamente el tipo de problema que esta
+    // consulta busca detectar.
+    //
+    // ifl.is_current = true (Fase 3, ver
+    // docs/roadmap-modulos-y-permisos.md) — con versionado, subir una
+    // versión nueva de un documento ya NO deja a la vieja como "archivo
+    // vivo" con datos cargados (el tombstone le borra los derivados, ver
+    // insertarResultado en ifc-processing-runner.ts), así que este
+    // filtro es en la práctica un no-op salvo por el rato entre que una
+    // versión nueva termina de procesar y la vieja se apaga — se deja
+    // explícito igual, no depender del efecto secundario del borrado.
     const { rows } = await pool.query<ElementoConjuntoRow>(
         `SELECT
             fl.name AS file_name,
@@ -38,7 +46,7 @@ export const getEstadoElementosService = async (
         JOIN ifc_elements e ON e.element_id = me.element_id
         JOIN ifc_files ifl ON ifl.ifc_file_id = e.ifc_file_id
         JOIN files fl ON fl.file_id = ifl.ifc_file_id
-        WHERE fl.project_id = $1`,
+        WHERE fl.project_id = $1 AND ifl.is_current = true`,
         [projectId]
     );
 

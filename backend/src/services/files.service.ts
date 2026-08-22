@@ -93,6 +93,8 @@ export const saveFileService = async (
             RETURNING
                 file_id, project_id, file_type, name, file_size, checksum, mime_type, uploaded_at, thumbnail_path,
                 NULL AS ifc_status, NULL AS ifc_error_message,
+                NULL AS ifc_document_id, NULL AS ifc_document_name, NULL AS version_number, NULL AS is_current,
+                NULL AS specialty_code, NULL AS specialty_name,
                 uploaded_by AS user_id,
                 (SELECT name FROM users WHERE user_id = uploaded_by) AS user_name,
                 (SELECT last_name FROM users WHERE user_id = uploaded_by) AS user_last_name,
@@ -113,7 +115,7 @@ export const saveFileService = async (
 
 export const getProjectFilesService = async (
     { user_id : userId } : DecodedToken, { projectId } : ProjectIdParam,
-    { file_type : fileType, processed } : GetProjectFilesQuery
+    { file_type : fileType, processed, only_current : onlyCurrent } : GetProjectFilesQuery
 ) : Promise<FileFull[]> => {
 
     await assertProjectAccess(projectId, userId);
@@ -123,9 +125,13 @@ export const getProjectFilesService = async (
             f.file_id, f.project_id, f.file_type, f.name, f.file_size, f.checksum, f.mime_type, f.uploaded_at,
             f.thumbnail_path,
             i.status AS ifc_status, i.error_message AS ifc_error_message,
+            i.ifc_document_id, d.name AS ifc_document_name, i.version_number, i.is_current,
+            s.code AS specialty_code, s.name AS specialty_name,
             u.user_id, u.name AS user_name, u.last_name AS user_last_name, u.email AS user_email
         FROM files f
         LEFT JOIN ifc_files i ON i.ifc_file_id = f.file_id
+        LEFT JOIN ifc_documents d ON d.ifc_document_id = i.ifc_document_id
+        LEFT JOIN ifc_specialties s ON s.ifc_specialty_id = d.specialty_id
         INNER JOIN users u ON u.user_id = f.uploaded_by
         WHERE f.project_id = $1
             AND ($2::VARCHAR IS NULL OR f.file_type = $2)
@@ -135,11 +141,16 @@ export const getProjectFilesService = async (
                 OR ($3 = false AND f.file_type = 'ifc'                          -- processed=false siempre implica ifc
                     AND (i.ifc_file_id IS NULL OR i.status = 'error'))
             )
+            AND (
+                $4::BOOLEAN IS NULL OR $4 = false                               -- no se pidió only_current
+                OR i.ifc_file_id IS NULL                                        -- no es ifc, no se filtra
+                OR i.is_current = true
+            )
             AND NOT EXISTS (                                                   -- la portada (y cualquier futura
                 SELECT 1 FROM project_images pi WHERE pi.file_id = f.file_id    -- imagen de galería) no es un
             )                                                                   -- "archivo del proyecto", es un rol
         ORDER BY f.uploaded_at DESC`,
-        [projectId, fileType ?? null, processed ?? null]
+        [projectId, fileType ?? null, processed ?? null, onlyCurrent ?? null]
     );
 
     return result.rows.map((f) => transformFileToFull(f));
@@ -211,6 +222,16 @@ export const deleteFileService = async (
 
     await assertProjectAccess(projectId, userId);
 
+    // Fase 5 (Excel ligado al IFC) — si este archivo es un IFC del que
+    // se generaron Excel (files.generated_from_ifc_file_id), el DELETE
+    // de abajo se los va a llevar puestos en la BD (ON DELETE CASCADE),
+    // pero eso no borra sus BYTES del disco — hay que juntar sus paths
+    // ANTES de borrar la fila, después ya no hay de dónde sacarlos.
+    const generatedResult = await pool.query<{ file_path : string; thumbnail_path : string | null }>(
+        `SELECT file_path, thumbnail_path FROM files WHERE generated_from_ifc_file_id = $1`,
+        [fileId]
+    );
+
     const result = await pool.query<{ file_path : string; thumbnail_path : string | null }>(
         `DELETE FROM files f
         USING projects p
@@ -224,6 +245,25 @@ export const deleteFileService = async (
     const deleted = result.rows[0];
 
     if (!deleted) throw new AppError(FILE_ERRORS.FILE_NOT_FOUND);
+
+    for (const generated of generatedResult.rows) {
+        await fs.promises.rm(generated.file_path, { force: true });
+        if (generated.thumbnail_path) await fs.promises.rm(generated.thumbnail_path, { force: true });
+    }
+
+    // Si el archivo borrado era una versión de un ifc_documents (Fase
+    // 3), el DELETE de arriba ya se llevó su fila ifc_files (ON DELETE
+    // CASCADE files -> ifc_files). Si esa era la ÚLTIMA versión del
+    // documento, el documento queda sin ninguna razón para seguir
+    // existiendo — sin este barrido quedaría fantasma para siempre en
+    // GET /projects/:id/ifc-documents (0 versiones, nunca elegible como
+    // replaces_ifc_document_id). No-op barato el resto de las veces.
+    await pool.query(
+        `DELETE FROM ifc_documents d
+        WHERE d.project_id = $1
+            AND NOT EXISTS (SELECT 1 FROM ifc_files i WHERE i.ifc_document_id = d.ifc_document_id)`,
+        [projectId]
+    );
 
     await fs.promises.rm(deleted.file_path, { force: true });
     if (deleted.thumbnail_path) await fs.promises.rm(deleted.thumbnail_path, { force: true });
