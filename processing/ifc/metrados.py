@@ -85,13 +85,28 @@ def _metrados_acero(el):
     return {"lon": largo, "area": 0.0, "vol": volumen, "weight": weight, "count": 1.0}
 
 
-def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto):
+def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto, prioridad="norma"):
     """Punto de entrada único: dado el elemento IFC, sus dimensiones
     (obtener_dimensiones) y las dos fuentes que se pudieron extraer
     directo del IFC (extraction.extraer_metrados_revit_completo —
     tipada y de texto, por separado a propósito, ver comentario de
     cabecera), devuelve el dict final de 5 valores:
-    {lon, area, vol, weight, count}."""
+    {lon, area, vol, weight, count}.
+
+    prioridad="norma" (default, sin cambios de comportamiento): tipado
+    > geométrico > texto, tal cual el comentario de cabecera.
+
+    prioridad="manual" (Fase 4, ver classify.clasificar_elementos_manual):
+    el orden se invierte en las puntas — texto > geométrico > tipado.
+    En este modo, metrados_texto ya viene FILTRADO por property_prefix
+    (solo lo que el usuario escribió a mano, ver
+    extraction.extraer_metrados_revit_completo) — es la fuente más
+    confiable acá, al revés que en modo norma. metrados_tipados
+    (IfcElementQuantity/Qto_*) es SIEMPRE generado por el exportador de
+    Revit, nunca algo que el usuario tipeó — por eso pasa a ser el
+    último recurso, no el primero. geometría real queda en el medio en
+    los dos modos, sin cambios."""
+    primero, ultimo = (metrados_texto, metrados_tipados) if prioridad == "manual" else (metrados_tipados, metrados_texto)
 
     acero = _metrados_acero(el)
     if acero is not None:
@@ -114,11 +129,12 @@ def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto):
             "_vol_neta_huecos": False,
         }
 
-    # 1. Tipado (IfcElementQuantity)
-    lon = metrados_tipados.get("lon")
-    area = metrados_tipados.get("area")
-    vol = metrados_tipados.get("vol")
-    count = metrados_tipados.get("count")
+    # 1. Primera fuente según el modo (tipado en 'norma', texto filtrado
+    # por prefijo en 'manual' — ver docstring)
+    lon = primero.get("lon")
+    area = primero.get("area")
+    vol = primero.get("vol")
+    count = primero.get("count")
 
     # area_neta_huecos/vol_neta_huecos: si el valor final terminó
     # saliendo de la geometría (calcular_metrados) Y esa geometría vino
@@ -147,15 +163,16 @@ def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto):
             vol = geometrico["vol"]
             vol_neta_huecos = geometrico["_vol_neta_huecos"]
 
-    # 3. Texto de Revit (último recurso, adivinado por nombre de propiedad)
+    # 3. Última fuente según el modo (texto en 'norma', tipado en
+    # 'manual' — ver docstring)
     if lon is None:
-        lon = metrados_texto.get("lon")
+        lon = ultimo.get("lon")
     if area is None:
-        area = metrados_texto.get("area")
+        area = ultimo.get("area")
     if vol is None:
-        vol = metrados_texto.get("vol")
+        vol = ultimo.get("vol")
     if count is None:
-        count = metrados_texto.get("count")
+        count = ultimo.get("count")
 
     if count is None:
         count = 1.0

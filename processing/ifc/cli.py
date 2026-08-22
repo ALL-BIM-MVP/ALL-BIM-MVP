@@ -41,6 +41,17 @@ def main():
     parser.add_argument("ifc_path", help="Ruta al archivo .ifc")
     parser.add_argument("--norma", required=True, help="Ruta al norma.json")
     parser.add_argument(
+        "--classification-config",
+        help=(
+            "Ruta a un JSON con la config de clasificación manual (Fase 4) — "
+            "{\"mode\": \"manual\", \"property_prefix\": ..., "
+            "\"code_property_set\"/\"code_property_name\", "
+            "\"description_property_set\"/\"description_property_name\" (opcionales), "
+            "\"unit_property_set\"/\"unit_property_name\" (opcionales)}. "
+            "Si se omite, clasifica en modo 'norma' (comportamiento de siempre)."
+        ),
+    )
+    parser.add_argument(
         "--out",
         help=(
             "Archivo de salida. Si se omite, se guarda en "
@@ -59,7 +70,12 @@ def main():
     )
     args = parser.parse_args()
 
-    resultado = procesar_ifc(args.ifc_path, args.norma)
+    classification_config = None
+    if args.classification_config:
+        with open(args.classification_config, "r", encoding="utf-8") as f:
+            classification_config = json.load(f)
+
+    resultado = procesar_ifc(args.ifc_path, args.norma, classification_config)
 
     # Sin --out (uso manual, pensado para que un humano lo abra) ->
     # indentado por defecto. Con --out explícito (el runner de Node

@@ -763,6 +763,102 @@ Authorization: Bearer {{accessToken}}
 
 
 ### =========================================================================
+### CLASIFICACIÓN MANUAL POR PROPIEDADES (Fase 4, ver
+### docs/roadmap-modulos-y-permisos.md) — modo 'manual' en vez de
+### norma_completa.json, config por proyecto + override puntual al
+### procesar. "CSRT-" acá es solo el prefijo real que usa ESTE cliente de
+### prueba — el código nunca lo hardcodea, es 100% configurable.
+### =========================================================================
+
+### 1. Config por defecto de un proyecto que nunca configuró nada — sin
+### fila propia, implica mode='norma' (comportamiento de siempre).
+GET {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+
+
+### 2. Configurar modo 'manual' — solo owner/admin (permiso 'configure').
+### locked=false: los usuarios van a poder elegir "Manual" puntual al
+### procesar (override, request 5 más abajo); locked=true lo bloquea.
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "manual",
+  "property_prefix": "CSRT-",
+  "code_property_set": "Otros",
+  "code_property_name": "CSRT-Partida1",
+  "description_property_set": "Otros",
+  "description_property_name": "CSRT-DescripcionPartida1",
+  "unit_property_set": "Otros",
+  "unit_property_name": "CSRT-Unidad1",
+  "locked": false
+}
+
+
+### 3. Caso de error: mode='manual' sin property_prefix ni
+### code_property_name -> 400 (Zod)
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "manual"
+}
+
+
+### 4. Volver a modo 'norma' — no hace falta mandar los campos de
+### propiedad, se ignoran/limpian igual (DELETE del slot=1 existente).
+PUT {{baseUrl}}/projects/{{createdProjectId}}/ifc-classification-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "mode": "norma"
+}
+
+
+### 5. Procesar un IFC con classification_override (modo "Manual" puntual
+### al subir, en vez de usar el default del proyecto) — multipart, mismo
+### patrón que specialty_id/replaces_ifc_document_id: el campo va como
+### JSON.stringify(...) en un form-data de texto.
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="specialty_id"
+
+2
+--WebAppBoundary
+Content-Disposition: form-data; name="classification_override"
+
+{"property_prefix":"CSRT-","code_property_set":"Otros","code_property_name":"CSRT-Partida1","description_property_set":"Otros","description_property_name":"CSRT-DescripcionPartida1","unit_property_set":"Otros","unit_property_name":"CSRT-Unidad1"}
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="CUS_ET2.ifc"
+Content-Type: application/octet-stream
+
+< ../../processing/proceso-metrados-base/archives/CUS ET2 ST1 EST BIM 5A ZZZ 1001.ifc
+--WebAppBoundary--
+
+
+### 6. Caso de error: classification_override con la config del proyecto
+### locked=true -> 409 IFC_CLASSIFICATION_CONFIG_LOCKED (correr la
+### request 2 con "locked": true antes de probar esto).
+POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "file_id": {{uploadedFileId}},
+  "classification_override": {
+    "property_prefix": "CSRT-",
+    "code_property_name": "CSRT-Partida1"
+  }
+}
+
+
+### =========================================================================
 ### MÓDULO DE PARTIDAS (árbol + detalle)
 ### (requiere que {{processedIfcFileId}} ya esté en status "done" — correr
 ### primero "2. Consultar el estado del procesamiento" de arriba hasta

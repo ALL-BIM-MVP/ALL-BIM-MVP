@@ -74,29 +74,53 @@ export const getProjectByIdService = async (
     return transformProjectFull(p);
 };
 
-export const createProjectService = async ( 
+export const createProjectService = async (
     {user_id : userId } : DecodedToken, data : ProjectCreate
 ) : Promise<ProjectFull> => {
 
-    const result = await pool.query<ProjectRow>(
-        `INSERT INTO
-            projects(name, description, location, client, contractor, start_date, end_date, created_by, owner_id)
-        VALUES
-            ($1, $2, $3, $4, $5, $6, $7, $8, $8)
-        RETURNING
-            project_id, name, description, location, client, contractor, start_date, end_date, created_at,
-            owner_id AS user_id,
-            (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
-            (SELECT last_name FROM users WHERE user_id = owner_id) AS user_last_name,
-            (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
-        [data.name, data.description, data.location, data.client, data.contractor, data.start_date, data.end_date, userId]
-    );
+    const client = await pool.connect();
+    let p: ProjectRow | undefined;
+    try {
+        await client.query("BEGIN");
 
-    const p = result.rows[0] ;
+        const result = await client.query<ProjectRow>(
+            `INSERT INTO
+                projects(name, description, location, client, contractor, start_date, end_date, created_by, owner_id)
+            VALUES
+                ($1, $2, $3, $4, $5, $6, $7, $8, $8)
+            RETURNING
+                project_id, name, description, location, client, contractor, start_date, end_date, created_at,
+                owner_id AS user_id,
+                (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
+                (SELECT last_name FROM users WHERE user_id = owner_id) AS user_last_name,
+                (SELECT role_id FROM users WHERE user_id = owner_id) AS role_id`,
+            [data.name, data.description, data.location, data.client, data.contractor, data.start_date, data.end_date, userId]
+        );
+        p = result.rows[0];
 
-    if (!p) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
+        if (!p) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
 
-    return transformProjectFull(p);
+        // Fase 4 (clasificación manual, ver docs/roadmap-modulos-y-permisos.md)
+        // — la config de clasificación queda anclada al alta del
+        // proyecto, mode='norma' explícito (no un default implícito
+        // resuelto en código cuando falta la fila) — así es un recurso
+        // real desde el día uno, con updated_by de quién creó el
+        // proyecto, no una ausencia que hay que interpretar.
+        await client.query(
+            `INSERT INTO ifc_classification_configs (project_id, mode, updated_by)
+            VALUES ($1, 'norma', $2)`,
+            [p.project_id, userId]
+        );
+
+        await client.query("COMMIT");
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    }
+
+    return transformProjectFull(p!);
 };
 
 export const updateProjectService = async(

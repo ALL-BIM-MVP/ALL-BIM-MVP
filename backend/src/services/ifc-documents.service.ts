@@ -48,7 +48,7 @@ export const listIfcDocumentsService = async (
 
     const versions = await pool.query<IfcDocumentVersionRow & { ifc_document_id: number }>(
         `SELECT i.ifc_document_id, i.ifc_file_id, i.version_number, i.is_current,
-            i.status, i.error_message, i.processed_at,
+            i.status, i.error_message, i.processed_at, i.classification_config_used,
             f.uploaded_at, f.name, f.file_size,
             f.uploaded_by, u.name AS uploader_name, u.last_name AS uploader_last_name
         FROM ifc_files i

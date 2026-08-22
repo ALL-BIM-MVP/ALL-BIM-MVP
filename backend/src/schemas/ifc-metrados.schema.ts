@@ -1,6 +1,7 @@
 import z from 'zod';
 import { optionalBooleanFlag } from './file.schema.js';
 import { TemplateColumnInputSchema } from './templates.schema.js';
+import { ClassificationOverrideFieldSchema } from './ifc-classification.schema.js';
 
 export const IfcFileIdParamSchema = z.object({
     ifcFileId: z.coerce.number(),
@@ -29,11 +30,18 @@ export type IfcFileIdParam = z.infer<typeof IfcFileIdParamSchema>;
 //   valida en el service (existe + is_active), no acá.
 // - document_name: nombre del ifc_documents nuevo; si no viene, el
 //   service usa el nombre del archivo subido.
+// classification_override (Fase 4, ver docs/roadmap-modulos-y-permisos.md)
+// — la opción "Manual" que el usuario elige en vez de "Default" (usar
+// la config de clasificación del proyecto tal cual). Sin esto, se usa
+// siempre el default del proyecto (norma, o manual si así está
+// configurado) — rechazado con 409 si el proyecto tiene la config
+// bloqueada (locked=true).
 export const ProcessIfcMetradosBodySchema = z.object({
     file_id: z.coerce.number().optional(),
     replaces_ifc_document_id: z.coerce.number().optional(),
     specialty_id: z.coerce.number().optional(),
     document_name: z.string().trim().min(1).max(150).optional(),
+    classification_override: ClassificationOverrideFieldSchema,
 }).refine(
     (body) => !(body.replaces_ifc_document_id !== undefined && body.specialty_id !== undefined),
     { message: "No se puede mandar replaces_ifc_document_id y specialty_id al mismo tiempo — la especialidad es del documento, no de la versión.", path: ["specialty_id"] }

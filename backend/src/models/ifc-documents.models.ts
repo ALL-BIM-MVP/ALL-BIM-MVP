@@ -1,3 +1,5 @@
+import type { IfcClassificationSnapshot } from "./ifc-classification.models.js";
+
 export interface IfcSpecialtyRow {
     ifc_specialty_id: number;
     code: string;
@@ -27,6 +29,11 @@ export interface IfcDocumentVersionRow {
     uploaded_by: number;
     uploader_name: string;
     uploader_last_name: string | null;
+    // Fase 4 — snapshot de con qué se clasificó ESTA versión (copia
+    // congelada, no una referencia viva a la config del proyecto, ver
+    // ifc-classification.service.ts). NULL si se procesó en modo
+    // 'norma'.
+    classification_config_used: IfcClassificationSnapshot | null;
 }
 
 export interface IfcDocumentRow {

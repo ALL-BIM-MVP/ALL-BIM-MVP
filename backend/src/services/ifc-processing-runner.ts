@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import pool from "../db/database.js";
 import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
+import type { IfcClassificationSnapshot } from "../models/ifc-classification.models.js";
 
 // ------------------------------------------------------------------
 // El "worker" real: invoca el pipeline de Python como subprocess,
@@ -222,7 +223,9 @@ const calcularTotalesPorPartida = (
 // ROLLBACK deja los datos viejos intactos, nunca queda "ni lo viejo ni
 // lo nuevo".
 // ------------------------------------------------------------------
-const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): Promise<void> => {
+const insertarResultado = async (
+    ifcFileId: number, resultado: PipelineResult, classificationSnapshot: IfcClassificationSnapshot | null
+): Promise<void> => {
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
@@ -359,9 +362,10 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
 
         await client.query(
             `UPDATE ifc_files
-                SET status = 'done', schema_version = $2, processed_at = NOW(), error_message = NULL, is_current = true
+                SET status = 'done', schema_version = $2, processed_at = NOW(), error_message = NULL, is_current = true,
+                    classification_config_used = $3
             WHERE ifc_file_id = $1`,
-            [ifcFileId, resultado.schema_version]
+            [ifcFileId, resultado.schema_version, classificationSnapshot ? JSON.stringify(classificationSnapshot) : null]
         );
 
         await client.query("COMMIT");
@@ -379,7 +383,9 @@ const insertarResultado = async (ifcFileId: number, resultado: PipelineResult): 
  * desde el request HTTP. Todo error se resuelve escribiendo
  * status='error' en ifc_files, no hay a quién devolvérselo por HTTP.
  */
-export const runIfcProcessing = async (ifcFileId: number, filePath: string): Promise<void> => {
+export const runIfcProcessing = async (
+    ifcFileId: number, filePath: string, classificationSnapshot: IfcClassificationSnapshot | null = null
+): Promise<void> => {
     if (jobsInFlight.has(ifcFileId)) return; // ya está corriendo — no duplicar
     jobsInFlight.add(ifcFileId);
 
@@ -395,14 +401,28 @@ export const runIfcProcessing = async (ifcFileId: number, filePath: string): Pro
     await acquireSlot();
     try {
         const tmpOutPath = path.join(os.tmpdir(), `ifc-metrados-${ifcFileId}-${crypto.randomUUID()}.json`);
+        // Fase 4 — solo existe cuando el proyecto (o un override puntual
+        // al procesar) está en modo 'manual'; en 'norma' se pasa sin
+        // --classification-config y cli.py usa el comportamiento de
+        // siempre. Se limpia en el finally de abajo igual que tmpOutPath.
+        const tmpConfigPath = classificationSnapshot
+            ? path.join(os.tmpdir(), `ifc-classification-${ifcFileId}-${crypto.randomUUID()}.json`)
+            : null;
 
         try {
-            await execFileAsync(PYTHON_BIN, [
+            if (tmpConfigPath) {
+                await fs.writeFile(tmpConfigPath, JSON.stringify(classificationSnapshot), "utf-8");
+            }
+
+            const args = [
                 "-m", "processing.ifc.cli",
                 resolvedPath,
                 "--norma", NORMA_JSON_PATH,
                 "--out", tmpOutPath,
-            ], {
+            ];
+            if (tmpConfigPath) args.push("--classification-config", tmpConfigPath);
+
+            await execFileAsync(PYTHON_BIN, args, {
                 cwd: REPO_ROOT,
                 timeout: PROCESSING_TIMEOUT_MS,
                 maxBuffer: EXEC_MAX_BUFFER,
@@ -415,6 +435,8 @@ export const runIfcProcessing = async (ifcFileId: number, filePath: string): Pro
             console.error(`[ifc-metrados] fallo en subprocess Python (ifc_file_id=${ifcFileId}):`, err.stderr || err.message);
             await markError(ifcFileId, detalle);
             return;
+        } finally {
+            if (tmpConfigPath) await fs.rm(tmpConfigPath, { force: true });
         }
 
         let resultado: PipelineResult;
@@ -430,7 +452,7 @@ export const runIfcProcessing = async (ifcFileId: number, filePath: string): Pro
         }
 
         try {
-            await insertarResultado(ifcFileId, resultado);
+            await insertarResultado(ifcFileId, resultado, classificationSnapshot);
         } catch (error) {
             console.error(`[ifc-metrados] fallo insertando resultado (ifc_file_id=${ifcFileId}):`, error);
             await markError(ifcFileId, (error as Error).message ?? String(error));

@@ -17,6 +17,7 @@ from .extraction import (
     get_storey_and_space, obtener_unidad_por_mayoria,
     extraer_dimensiones_parametricas, extraer_dimensiones_por_aristas,
     get_openings, extraer_element_id, extraer_metrados_revit_completo,
+    extraer_valor_propiedad,
 )
 from .metrados import calcular_metrados_final
 
@@ -227,11 +228,17 @@ def clasificar_elementos(model, norma_index, hijos):
     return elementos, elementos_sin_clasificacion
 
 
-def reasignar_sin_clasificacion(elementos_sin_clasificacion, elementos_clasificados, model):
+def reasignar_sin_clasificacion(elementos_sin_clasificacion, elementos_clasificados, model, property_prefix=None):
     """Segundo intento para los elementos que no traían código OE.xx:
     si el nombre del elemento contiene el nombre de una partida ya
     detectada (heurística por texto), se lo asigna ahí. Port de
-    core.py:reasignar_sin_clasificacion, adaptado a la lista plana."""
+    core.py:reasignar_sin_clasificacion, adaptado a la lista plana.
+
+    property_prefix (Fase 4): se pasa tal cual a extraer_metrados_revit_completo
+    y a calcular_metrados_final ('manual' si vino un prefijo, 'norma' si
+    no) — un elemento reasignado por esta heurística tiene que calcular
+    su metrado con el MISMO criterio que el resto del archivo, sea cual
+    sea el modo del proyecto."""
     nombres_partidas = {}
     for elem in elementos_clasificados:
         if elem["tipo"] != "partida":
@@ -271,8 +278,9 @@ def reasignar_sin_clasificacion(elementos_sin_clasificacion, elementos_clasifica
         codigo, datos = encontrado
         psets = ifcopenshell.util.element.get_psets(el_ifc)
         dims = obtener_dimensiones(el_ifc, psets)
-        revit_data = extraer_metrados_revit_completo(el_ifc)
-        metrados = calcular_metrados_final(el_ifc, dims, revit_data["metrados_tipados"], revit_data["metrados_texto"])
+        revit_data = extraer_metrados_revit_completo(el_ifc, property_prefix=property_prefix)
+        prioridad = "manual" if property_prefix else "norma"
+        metrados = calcular_metrados_final(el_ifc, dims, revit_data["metrados_tipados"], revit_data["metrados_texto"], prioridad=prioridad)
         unidad = datos["unidad"] or inferir_unidad(dims)
         metrados = _aplicar_descuento_huecos(metrados, el_ifc, dims, unidad)
         storey, space = get_storey_and_space(el_ifc, model)
@@ -290,3 +298,76 @@ def reasignar_sin_clasificacion(elementos_sin_clasificacion, elementos_clasifica
     print(f"  Elementos sin clasificación reasignados: {len(reasignados)}")
     print(f"  Elementos sin clasificación sin asignar: {len(sin_asignar)}")
     return reasignados, sin_asignar
+
+
+def clasificar_elementos_manual(model, config):
+    """Fase 4 — clasificación SIN norma_completa.json, leyendo el código/
+    descripción/unidad de partida directo de propiedades que el usuario
+    escribió a mano en cada elemento (ver
+    docs/roadmap-modulos-y-permisos.md, sección Fase 4). Sin árbol: cada
+    código encontrado es una partida hoja, plana (no hay jerarquía de
+    norma detrás de la cual colgar carpetas/sub-niveles).
+
+    config: dict con code_property_set/code_property_name (obligatorio),
+    description_property_set/description_property_name (opcional),
+    unit_property_set/unit_property_name (opcional), property_prefix
+    (obligatorio — filtra tanto la captura general de propiedades como
+    el fallback de texto del metrado, ver extraction.extraer_metrados_revit_completo).
+
+    v1 — un solo "slot" (un elemento, una partida). El día que haga
+    falta soportar que un elemento pertenezca a varias partidas a la vez
+    (confirmado con datos reales que pasa, ver roadmap) esto itera sobre
+    una LISTA de configs de slot en vez de una sola — mismo contrato de
+    salida, un elemento simplemente aparecería más de una vez en
+    `elementos`. No implementado todavía, a propósito.
+
+    Devuelve (elementos, elementos_sin_clasificacion) — mismo contrato
+    que clasificar_elementos(), reasignar_sin_clasificacion() se puede
+    aplicar igual sobre elementos_sin_clasificacion."""
+    elementos = []
+    elementos_sin_clasificacion = []
+    property_prefix = config.get("property_prefix")
+
+    for el in model.by_type("IfcProduct"):
+        if el.is_a('IfcOpeningElement') or el.is_a('IfcSpace'):
+            continue
+
+        psets = ifcopenshell.util.element.get_psets(el)
+        codigo = extraer_valor_propiedad(psets, config.get("code_property_set"), config["code_property_name"])
+        if not codigo:
+            elementos_sin_clasificacion.append({
+                "express_id": el.id(),
+                "clase": el.is_a(),
+                "nombre": getattr(el, "Name", None),
+            })
+            continue
+        codigo = str(codigo).strip()
+
+        descripcion = extraer_valor_propiedad(
+            psets, config.get("description_property_set"), config.get("description_property_name")
+        )
+        nombre_partida = str(descripcion).strip() if descripcion else (getattr(el, "Name", None) or codigo)
+
+        dims = obtener_dimensiones(el, psets)
+        revit_data = extraer_metrados_revit_completo(el, property_prefix=property_prefix)
+        metrados = calcular_metrados_final(
+            el, dims, revit_data["metrados_tipados"], revit_data["metrados_texto"], prioridad="manual"
+        )
+        storey, space = get_storey_and_space(el, model)
+
+        unidad_val = extraer_valor_propiedad(psets, config.get("unit_property_set"), config.get("unit_property_name"))
+        unidad = str(unidad_val).strip() if unidad_val else inferir_unidad(dims)
+
+        metrados = _aplicar_descuento_huecos(metrados, el, dims, unidad)
+
+        elementos.append(_elemento_base(
+            el, dims, metrados, storey, space, revit_data["propiedades"],
+            tipo="partida",
+            codigo_reporte=codigo,
+            codigo_base=codigo,
+            codigo_padre=None,
+            nombre_partida=nombre_partida,
+            unidad=unidad,
+        ))
+
+    return elementos, elementos_sin_clasificacion

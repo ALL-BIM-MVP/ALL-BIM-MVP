@@ -11,6 +11,8 @@ import { transformIfcFileStatus, type IfcFileStatusFull, type IfcFileStatusRow }
 import { saveFileService } from "./files.service.js";
 import { assertModulePermission } from "./project-access.service.js";
 import { runIfcProcessing } from "./ifc-processing-runner.js";
+import { resolveClassificationForProcessing } from "./ifc-classification.service.js";
+import type { IfcClassificationSnapshot } from "../models/ifc-classification.models.js";
 
 // Todo esto es trabajo del módulo METRADOS BIM — único módulo
 // funcional hoy (Fase 2, ver docs/roadmap-modulos-y-permisos.md). El
@@ -20,7 +22,7 @@ const METRADOS_MODULE_CODE = "metrados";
 
 const UNIQUE_VIOLATION = "23505";
 
-const STATUS_COLUMNS = `ifc_file_id, ifc_document_id, version_number, is_current, status, schema_version, processed_at, error_message`;
+const STATUS_COLUMNS = `ifc_file_id, ifc_document_id, version_number, is_current, status, schema_version, processed_at, error_message, classification_config_used`;
 
 interface DecisionResult {
     shouldSpawn: boolean;
@@ -238,11 +240,19 @@ export const processIfcMetradosService = async (
     };
 
     let decision: DecisionResult;
+    let classificationSnapshot: IfcClassificationSnapshot | null;
     try {
+        // Se resuelve ANTES de decideProcessingState a propósito — si
+        // vino un classification_override y la config del proyecto está
+        // bloqueada (CONFIG_LOCKED), no queremos haber creado ya un
+        // ifc_documents/ifc_files nuevo para un procesamiento que ni
+        // siquiera va a arrancar.
+        const resolved = await resolveClassificationForProcessing(projectId, body.classification_override);
+        classificationSnapshot = resolved.snapshot;
         decision = await decideProcessingState(fileId, force ?? false, newFileContext);
     } catch (error) {
-        // Si el archivo se acaba de subir por multipart y la creación
-        // del documento/versión falló (ej. IFC_SPECIALTY_REQUIRED), no
+        // Si el archivo se acaba de subir por multipart y algo de lo de
+        // arriba falló (ej. IFC_SPECIALTY_REQUIRED, CONFIG_LOCKED), no
         // dejamos una fila "files" huérfana sin ifc_files ni bytes
         // recuperables por ningún endpoint — se borra igual que si la
         // subida nunca hubiera pasado. Si vino por file_id (archivo ya
@@ -253,7 +263,7 @@ export const processIfcMetradosService = async (
     const { shouldSpawn, row } = decision;
 
     if (shouldSpawn) {
-        void runIfcProcessing(fileId, filePath);
+        void runIfcProcessing(fileId, filePath, classificationSnapshot);
     }
 
     return { status: transformIfcFileStatus(row), justStarted: shouldSpawn };
@@ -265,7 +275,8 @@ export const getIfcFileStatusService = async (
 
     const { rows } = await pool.query<IfcFileStatusRow & { project_id: number }>(
         `SELECT i.ifc_file_id, i.ifc_document_id, i.version_number, i.is_current,
-            i.status, i.schema_version, i.processed_at, i.error_message, f.project_id
+            i.status, i.schema_version, i.processed_at, i.error_message,
+            i.classification_config_used, f.project_id
         FROM ifc_files i
         INNER JOIN files f ON f.file_id = i.ifc_file_id
         WHERE i.ifc_file_id = $1`,

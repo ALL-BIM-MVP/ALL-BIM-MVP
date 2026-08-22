@@ -270,11 +270,91 @@ CREATE TABLE ifc_files (
     processed_at TIMESTAMPTZ,
     error_message TEXT,
 
+    -- Fase 4 (clasificación manual, ver docs/roadmap-modulos-y-permisos.md):
+    -- snapshot de CON QUÉ config se clasificó esta versión puntual —
+    -- copia de la fila de ifc_classification_configs/_fields vigente en
+    -- el momento de procesar, no una referencia viva. Si el admin
+    -- cambia la config del proyecto después, esta versión ya procesada
+    -- sigue mostrando fielmente con qué se hizo (mismo espíritu que el
+    -- tombstone de versiones: nunca reinterpretar en silencio algo ya
+    -- procesado). NULL para todo lo procesado en modo 'norma' (no hay
+    -- nada que snapshotear, el comportamiento no varía por proyecto).
+    classification_config_used JSONB,
+
     UNIQUE (ifc_document_id, version_number)
 );
 -- Como mucho una versión vigente por documento — ídem
 -- idx_un_project_cover/idx_un_template_default más abajo.
 CREATE UNIQUE INDEX idx_un_ifc_document_current ON ifc_files (ifc_document_id) WHERE is_current = true;
+
+
+-- ------------------------------------------------------------
+-- CLASIFICACIÓN ALTERNATIVA POR PROPIEDADES (Fase 4, ver
+-- docs/roadmap-modulos-y-permisos.md)
+-- ------------------------------------------------------------
+
+-- Config activa de clasificación por proyecto — una sola fila por
+-- proyecto (no hay "varias configs guardadas", a diferencia de
+-- metrado_templates). mode='norma' (default) es el comportamiento de
+-- siempre (clasifica contra norma_completa.json); mode='manual' lee
+-- directo de propiedades que el usuario escribió a mano en cada
+-- elemento IFC, identificadas por property_prefix (ver
+-- ifc_classification_config_fields) — NUNCA por Pset_WallCommon ni
+-- ningún otro Pset "técnico" que exporte Revit solo.
+CREATE TABLE ifc_classification_configs (
+    project_id INT PRIMARY KEY REFERENCES projects(project_id) ON DELETE CASCADE,
+    mode VARCHAR(20) NOT NULL DEFAULT 'norma' CHECK (mode IN ('norma','manual')),
+    -- Prefijo de nombre de propiedad (ej. "CSRT-") que distingue lo que
+    -- el usuario escribió a mano de lo que Revit exporta solo — filtra
+    -- TANTO la clasificación como la captura general de propiedades de
+    -- ese archivo (ifc_properties/columnas de plantilla) cuando
+    -- mode='manual'. Obligatorio en ese modo (validado en el service,
+    -- no acá — ver ifc-classification.errors.ts) — no existe todavía
+    -- un modo "sin prefijo, traer todo menos lo técnico", queda
+    -- pendiente de confirmar con el cliente antes de construirlo.
+    property_prefix VARCHAR(60),
+    -- Si está en TRUE, nadie puede elegir "manual" puntual al procesar
+    -- (ver ProcessIfcMetradosBodySchema) — se usa siempre esta config
+    -- tal cual, sin poder pisarla por archivo. Sigue siendo visible
+    -- igual (el usuario ve cómo está configurado, no puede cambiarlo).
+    -- Solo owner/admin del proyecto lo tocan (permiso 'configure' del
+    -- módulo metrados).
+    locked BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by INT REFERENCES users(user_id)
+);
+
+-- Los 3 campos (código/descripción/unidad) que arma cada "partida" en
+-- modo manual — normalizado en tabla aparte (no 3 pares de columnas
+-- fijas en ifc_classification_configs) a propósito: el día que haga
+-- falta soportar que un mismo elemento pertenezca a varias partidas
+-- simultáneas (confirmado con datos reales: ~21% de los elementos de
+-- un IFC de prueba real tenían 2+ códigos a la vez, ver roadmap) es
+-- agregar filas con otro `slot`, no migrar el schema. v1 usa
+-- ÚNICAMENTE slot=1 — el resto queda modular, no implementado todavía.
+CREATE TABLE ifc_classification_config_fields (
+    ifc_classification_config_field_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES ifc_classification_configs(project_id) ON DELETE CASCADE,
+    slot INT NOT NULL DEFAULT 1,
+    -- Nombre EXACTO de la propiedad tal cual el usuario la ve en su
+    -- IFC (ej. property_name="CSRT-Partida1") — nunca se reconstruye
+    -- concatenando property_prefix + un patrón fijo, cada cliente
+    -- puede nombrar sus propiedades distinto.
+    -- property_set es OPCIONAL (nullable) a propósito: si no se manda,
+    -- el pipeline busca la propiedad en CUALQUIER Pset del elemento
+    -- (ver extraction.extraer_valor_propiedad) — solo code_property_name
+    -- es obligatorio, sin nombre no hay con qué buscar nada.
+    code_property_set VARCHAR(255),
+    code_property_name VARCHAR(255) NOT NULL,
+    -- Opcionales — si faltan, el pipeline cae al mismo fallback que ya
+    -- existe (nombre del elemento IFC / inferir_unidad(dims)).
+    description_property_set VARCHAR(255),
+    description_property_name VARCHAR(255),
+    unit_property_set VARCHAR(255),
+    unit_property_name VARCHAR(255),
+
+    UNIQUE (project_id, slot)
+);
 
 -- "files" es el archivo físico (metadata + ruta en disco); esta tabla
 -- es el ROL que cumple ese archivo para un proyecto — hoy solo se usa
@@ -418,6 +498,16 @@ CREATE TABLE ifc_element_property_values (
     PRIMARY KEY (element_id, property_id),
     FOREIGN KEY (value_id, property_id) REFERENCES ifc_property_values(value_id, property_id) ON DELETE CASCADE
 );
+-- Sin esto, cualquier DELETE que cascadee desde ifc_property_values
+-- (borrar un ifc_properties, o el ifc_files entero — pasa en CADA
+-- force=true, cada reemplazo de versión de Fase 3, y cada borrado de
+-- archivo) tiene que hacer un seq scan de ESTA tabla por cada fila que
+-- borra allá — el PK de acá es (element_id, property_id), no sirve
+-- para buscar por value_id. Encontrado en vivo probando Fase 4 con un
+-- archivo real de 26k elementos: un DELETE que debería ser instantáneo
+-- tardó ~2m30s sin este índice.
+CREATE INDEX idx_ifc_element_property_values_value_property
+    ON ifc_element_property_values (value_id, property_id);
 
 
 -- ------------------------------------------------------------
