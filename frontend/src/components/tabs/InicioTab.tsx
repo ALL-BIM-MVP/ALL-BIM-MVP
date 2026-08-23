@@ -190,14 +190,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
                 ) : (
                   <h2 className="text-xl font-bold text-gray-800 leading-tight truncate">{project.name}</h2>
                 )}
-                <span className={`inline-flex items-center gap-1.5 mt-2 px-2.5 py-1 rounded-[4px] text-[11px] font-semibold border ${
-                  project.hasIFC
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                }`}>
-                  {project.hasIFC ? <CheckCircle size={13} weight="fill" /> : <WarningCircle size={13} weight="fill" />}
-                  {project.hasIFC ? 'IFC Cargado' : 'Sin IFC'}
-                </span>
+                
               </div>
             </div>
 

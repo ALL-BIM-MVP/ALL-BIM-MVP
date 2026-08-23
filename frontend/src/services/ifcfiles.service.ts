@@ -17,10 +17,77 @@
 // de ese documento, no como archivo suelto. Ver
 // docs/roadmap-modulos-y-permisos.md, sección "Fase 3", para el porqué
 // del diseño (tombstone de versiones viejas, etc.).
+//
+// Fase 4 (clasificación manual CSRT, 2026-08-22): dos configuraciones
+// independientes por proyecto — `mode` (norma vs manual) y
+// `property_prefix` (filtro de propiedades). Ambas se resuelven por
+// separado, cada una con su propio candado. Ver
+// docs/roadmap-modulos-y-permisos.md, sección "Fase 4", para el detalle
+// completo (incluida la corrección de modelado que el cliente detectó).
 
 import { api } from './api';
 
 export type IfcStatus = 'processing' | 'done' | 'error' | null;
+
+// ============================================================
+// FASE 4 — Clasificación (snapshot + config)
+// ============================================================
+
+export interface ClassificationSnapshot {
+  mode: 'norma' | 'manual';
+  property_prefix: string | null;
+  code_property_set: string | null;
+  code_property_name: string | null;
+  description_property_set: string | null;
+  description_property_name: string | null;
+  unit_property_set: string | null;
+  unit_property_name: string | null;
+}
+
+export interface ClassificationConfigField {
+  slot: number;
+  code_property_set: string | null;
+  code_property_name: string;
+  description_property_set: string | null;
+  description_property_name: string | null;
+  unit_property_set: string | null;
+  unit_property_name: string | null;
+}
+
+export interface ClassificationConfig {
+  project_id: number;
+  mode: 'norma' | 'manual';
+  mode_locked: boolean;
+  property_prefix: string | null;
+  property_prefix_locked: boolean;
+  updated_at: string;
+  updated_by: number | null;
+  fields: ClassificationConfigField[];
+}
+
+export interface ClassificationConfigInput {
+  mode: 'norma' | 'manual';
+  mode_locked?: boolean;
+  property_prefix?: string;
+  property_prefix_locked?: boolean;
+  code_property_set?: string;
+  code_property_name?: string;
+  description_property_set?: string;
+  description_property_name?: string;
+  unit_property_set?: string;
+  unit_property_name?: string;
+}
+
+export interface ClassificationOverrideInput {
+  mode?: 'manual';
+  code_property_set?: string;
+  code_property_name?: string;
+  description_property_set?: string;
+  description_property_name?: string;
+  unit_property_set?: string;
+  unit_property_name?: string;
+  property_prefix?: string;
+}
 
 export interface IfcFile {
   file_id: string;
@@ -61,6 +128,10 @@ export interface IfcProcessStatus {
   ifc_document_id?: string;
   version_number?: number;
   is_current?: boolean;
+  // Fase 4 — foto de con qué config se procesó ESTA versión puntual.
+  // Siempre viene (nunca null/undefined), incluso si todo quedó en
+  // default (mode: "norma", sin prefijo, propiedades null).
+  classification_config_used: ClassificationSnapshot;
 }
 
 /**
@@ -147,11 +218,18 @@ export type IfcDocumentContext =
  * IFC_SPECIALTY_REQUIRED. Ver el modal "¿Qué es este archivo?" en
  * Visor3DTab.tsx, que es quien arma este objeto según lo que elige el
  * usuario.
+ *
+ * Fase 4: classificationOverride es OPCIONAL — pisa la config del
+ * proyecto solo para ESTA subida. Tiene dos partes independientes:
+ * `mode` (clasificación) y `property_prefix` (filtro de propiedades).
+ * Podés mandar una, la otra, las dos, o ninguna. Si el proyecto tiene
+ * el candado correspondiente activo, el backend responde 409.
  */
 export const uploadAndProcessIfcFile = async (
   projectId: number,
   file: File,
-  documentContext: IfcDocumentContext
+  documentContext: IfcDocumentContext,
+  classificationOverride?: ClassificationOverrideInput
 ): Promise<IfcProcessStatus> => {
   const formData = new FormData();
   formData.append('file', file);
@@ -162,6 +240,9 @@ export const uploadAndProcessIfcFile = async (
     }
   } else {
     formData.append('replaces_ifc_document_id', documentContext.replacesIfcDocumentId);
+  }
+  if (classificationOverride) {
+    formData.append('classification_override', JSON.stringify(classificationOverride));
   }
   const response = await api.postFormData(
     `/api/projects/${projectId}/ifc-metrados/process`,
@@ -248,6 +329,9 @@ export interface IfcDocumentVersion {
   uploaded_by: number;
   uploader_name: string;
   uploader_last_name: string | null;
+  // Fase 4 — foto de con qué config se procesó esta versión puntual.
+  // Siempre viene, igual que en IfcProcessStatus.
+  classification_config_used: ClassificationSnapshot;
 }
 
 export interface IfcDocument {
@@ -275,6 +359,42 @@ export interface IfcDocument {
 export const listIfcDocuments = async (projectId: number): Promise<IfcDocument[]> => {
   const response = await api.get(`/api/projects/${projectId}/ifc-documents`);
   return response || [];
+};
+
+// ============================================================
+// CONFIGURACIÓN DE CLASIFICACIÓN — Fase 4
+// ============================================================
+
+/**
+ * Trae la config de clasificación del proyecto. Todo proyecto ya tiene
+ * una desde que se crea (mode: "norma", sin prefijo, nada bloqueado) —
+ * no hace falta pedirle nada al usuario para que funcione.
+ */
+export const getClassificationConfig = async (
+  projectId: number
+): Promise<ClassificationConfig> => {
+  const response = await api.get(
+    `/api/projects/${projectId}/ifc-classification-config`
+  );
+  return response;
+};
+
+/**
+ * Guarda la config de clasificación del proyecto. OJO: es un PUT que
+ * reemplaza TODA la config de una — si no mandás mode_locked o
+ * property_prefix_locked, se resetean a false. Siempre leé primero con
+ * getClassificationConfig, mostralo en el formulario, y mandá todo de
+ * vuelta con los cambios.
+ */
+export const setClassificationConfig = async (
+  projectId: number,
+  config: ClassificationConfigInput
+): Promise<ClassificationConfig> => {
+  const response = await api.put(
+    `/api/projects/${projectId}/ifc-classification-config`,
+    config
+  );
+  return response;
 };
 
 // ============================================================
@@ -381,3 +501,12 @@ export function metradoFieldForUnit(unit: string): keyof Pick<
   if (unit === 'kg') return 'weight';
   return 'quantity';
 }
+/**
+ * Genera un archivo Excel con el metrado del IFC ya procesado.
+ * Fase 5 — el Excel se guarda como archivo del proyecto (no es
+ * descarga directa), queda atado a la versión del IFC que lo generó.
+ * Requiere que el IFC esté en status "done" (409 si no).
+ */
+export const exportToExcel = async (ifcFileId: string): Promise<IfcFile> => {
+  return await api.post(`/api/ifc-files/${ifcFileId}/export-excel`, {});
+};

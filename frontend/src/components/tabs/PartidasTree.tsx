@@ -161,7 +161,7 @@ const PartidaDetailScreen: React.FC<{
 
   return (
     <div className="flex flex-col h-full relative">
-      <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 flex-shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <button
             onClick={onBack}
@@ -175,7 +175,7 @@ const PartidaDetailScreen: React.FC<{
               {node.code} · {node.description}
             </p>
             {detail && (
-              <p className="text-[9px] text-gray-500 leading-tight">
+              <p className="text-[9px] text-gray-500 leading-tight truncate">
                 {detail.groups.length} grupo(s) · total {formatNumber(detail.total)} {node.unit}
               </p>
             )}

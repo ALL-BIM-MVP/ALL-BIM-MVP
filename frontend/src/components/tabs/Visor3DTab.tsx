@@ -1,20 +1,23 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom'
 import {
   Upload, FileText, X, Maximize2, Minimize2, FileSearch, Box,
   ChevronLeft, ChevronRight, Search, RefreshCw, FileDown,
   HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2, Info,
-  FileStack, Layers,
+  FileStack, Layers, Settings, FileSpreadsheet,
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
 import { UploadSimple, X as XIcon } from '@phosphor-icons/react';
 import PartidasTree from './PartidasTree';
+import ClassificationConfigModal from './ClassificationConfigModal';
 import {
   IfcFile,
   IfcStatus,
   IfcSpecialty,
   IfcDocument,
   IfcDocumentContext,
+  ClassificationOverrideInput,
   listProjectIfcFiles,
   getFileContentArrayBuffer,
   uploadAndProcessIfcFile,
@@ -22,6 +25,8 @@ import {
   pollIfcProcessStatus,
   listIfcSpecialties,
   listIfcDocuments,
+  getClassificationConfig,
+  exportToExcel,
 } from '../../services/ifcfiles.service';
 import { getMyModuleAccess } from '../../services/module.service';
 import type { ModuleAccess } from '../../services/module.service';
@@ -109,6 +114,11 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   }, [projectId]);
   const canUpload = metradosAccess?.permissions.upload ?? false;
   const canProcess = metradosAccess?.permissions.process ?? false;
+  const canConfigure = metradosAccess?.permissions.configure ?? false;
+  const canExport = metradosAccess?.permissions.export ?? false;
+
+  // Fase 5 — exportación a Excel
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const [ifcFile, setIfcFile] = useState<File | null>(null);
   const [ifcArrayBuffer, setIfcArrayBuffer] = useState<ArrayBuffer | null>(null);
@@ -147,6 +157,24 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const [documentSearch, setDocumentSearch] = useState('');
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
 
+  // Fase 4 — overrides de clasificación en el modal de subida
+  const [projectConfig, setProjectConfig] = useState<Awaited<ReturnType<typeof getClassificationConfig>> | null>(null);
+  const [overrideMode, setOverrideMode] = useState<'project' | 'manual'>('project');
+  const [overrideManualFields, setOverrideManualFields] = useState({
+    code_property_set: '',
+    code_property_name: '',
+    description_property_set: '',
+    description_property_name: '',
+    unit_property_set: '',
+    unit_property_name: '',
+  });
+  const [overridePrefixMode, setOverridePrefixMode] = useState<'project' | 'custom'>('project');
+  const [overridePrefix, setOverridePrefix] = useState('');
+
+  // Fase 4 — modal de configuración
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [partidasRefreshKey, setPartidasRefreshKey] = useState(0);
+
   useEffect(() => {
     if (!showDocumentModal) return;
     let cancelled = false;
@@ -160,6 +188,9 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
       .then((list) => { if (!cancelled) setDocuments(list); })
       .catch((err) => console.error('Error al cargar documentos IFC:', err))
       .finally(() => { if (!cancelled) setDocumentsLoading(false); });
+    getClassificationConfig(projectId)
+      .then((config) => { if (!cancelled) setProjectConfig(config); })
+      .catch((err) => console.error('Error al cargar config de clasificación:', err));
     return () => { cancelled = true; };
   }, [showDocumentModal, projectId]);
 
@@ -175,6 +206,18 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     setNewDocumentName('');
     setDocumentSearch('');
     setSelectedDocumentId(null);
+    setOverrideMode('project');
+    setOverrideManualFields({
+      code_property_set: '',
+      code_property_name: '',
+      description_property_set: '',
+      description_property_name: '',
+      unit_property_set: '',
+      unit_property_name: '',
+    });
+    setOverridePrefixMode('project');
+    setOverridePrefix('');
+    setProjectConfig(null);
   };
 
   const isDocumentContextReady =
@@ -259,10 +302,12 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
       file,
       existingFileId,
       documentContext,
+      classificationOverride,
     }: {
       file: File | null;
       existingFileId: string | null;
       documentContext?: IfcDocumentContext;
+      classificationOverride?: ClassificationOverrideInput;
     }) => {
       setPanelStatus('processing');
       setPanelErrorMessage(null);
@@ -272,7 +317,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
           const initial = await processExistingIfcFile(projectId, existingFileId);
           ifcFileId = String(initial.ifc_file_id ?? existingFileId);
         } else if (file && documentContext) {
-          const initial = await uploadAndProcessIfcFile(projectId, file, documentContext);
+          const initial = await uploadAndProcessIfcFile(projectId, file, documentContext, classificationOverride);
           ifcFileId = String(initial.ifc_file_id);
         } else {
           throw new Error('No hay archivo para procesar.');
@@ -292,6 +337,46 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     },
     [projectId]
   );
+
+  // Fase 5 — descargar archivo
+  const handleDownloadFile = async (fileId: string, fileName: string) => {
+    try {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch(`http://localhost:4000/api/files/${fileId}/content?download=true`, {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : '',
+        },
+      });
+      if (!res.ok) {
+        throw new Error(`Error al descargar (HTTP ${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      alert(err.message || 'Error al descargar el archivo');
+    }
+  };
+
+  // Fase 5 — exportar a Excel y descargar automáticamente
+  const handleExportExcel = async () => {
+    if (!currentFileId) return;
+    setExportingExcel(true);
+    try {
+      const result = await exportToExcel(currentFileId);
+      await handleDownloadFile(result.file_id, result.name);
+    } catch (err: any) {
+      alert(err.message || 'Error al generar el Excel');
+    } finally {
+      setExportingExcel(false);
+    }
+  };
 
   const openLocalPicker = () => {
     setShowEntryPopover(null);
@@ -347,10 +432,34 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         ? { specialtyId: selectedSpecialtyId!, documentName: newDocumentName.trim() || undefined }
         : { replacesIfcDocumentId: selectedDocumentId! };
 
+    let classificationOverride: ClassificationOverrideInput | undefined;
+    
+    if (overrideMode === 'manual') {
+      classificationOverride = {
+        mode: 'manual',
+        code_property_set: overrideManualFields.code_property_set || undefined,
+        code_property_name: overrideManualFields.code_property_name,
+        description_property_set: overrideManualFields.description_property_set || undefined,
+        description_property_name: overrideManualFields.description_property_name || undefined,
+        unit_property_set: overrideManualFields.unit_property_set || undefined,
+        unit_property_name: overrideManualFields.unit_property_name || undefined,
+      };
+    }
+    
+    if (overridePrefixMode === 'custom') {
+      if (!classificationOverride) classificationOverride = {};
+      classificationOverride.property_prefix = overridePrefix;
+    }
+
     const fileToProcess = fileAwaitingContext;
     closeDocumentModal();
 
-    await runProcessing({ file: fileToProcess, existingFileId: null, documentContext });
+    await runProcessing({ 
+      file: fileToProcess, 
+      existingFileId: null, 
+      documentContext,
+      classificationOverride,
+    });
   };
 
   const cancelPendingLocal = () => {
@@ -588,6 +697,34 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                     <p className="text-[9px] font-semibold text-emerald-700 whitespace-nowrap">Metrados listos</p>
                   </div>
                 )}
+                <div className="ml-auto flex items-center gap-1.5">
+                  {/* BOTÓN EXPORTAR EXCEL */}
+                  {panelStatus === 'done' && canExport && (
+                    <button
+                      onClick={handleExportExcel}
+                      disabled={exportingExcel}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      title="Exportar a Excel"
+                    >
+                      {exportingExcel ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <FileSpreadsheet size={13} />
+                      )}
+                      Excel
+                    </button>
+                  )}
+                  {/* BOTÓN CONFIGURACIÓN */}
+                  {canConfigure && (
+                    <button
+                      onClick={() => setShowConfigModal(true)}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-[#0056b3] hover:bg-blue-50 transition-colors"
+                      title="Configuración de clasificación"
+                    >
+                      <Settings size={16} />
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="relative flex items-center gap-2 bg-slate-100/60 border border-slate-300/60 rounded px-2 py-1.5 mb-2.5">
@@ -700,6 +837,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                 <div className="h-full min-h-0">
                   {currentFileId && (
                     <PartidasTree
+                      key={`${currentFileId}-${partidasRefreshKey}`}
                       ifcFileId={currentFileId}
                       currentUserId={user?.id ?? undefined}
                       onSelectAllInViewer={handleSelectAllInViewer}
@@ -802,7 +940,19 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
         </div>
       </div>
 
-      {pendingLocalFile && (
+      {/* Modal de configuración de clasificación */}
+      {showConfigModal && (
+        <ClassificationConfigModal
+          projectId={projectId}
+          onClose={() => setShowConfigModal(false)}
+          onSaved={() => {
+            setShowConfigModal(false);
+            setPartidasRefreshKey(prev => prev + 1);
+          }}
+        />
+      )}
+
+      {pendingLocalFile && createPortal(
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10200]">
           <div className="bg-white rounded w-[420px] shadow-2xl border border-gray-200 overflow-hidden">
             <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3">
@@ -858,12 +1008,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showDocumentModal && fileAwaitingContext && (
+      {showDocumentModal && fileAwaitingContext &&createPortal (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10300] p-6">
-          <div className="bg-white rounded-lg w-[480px] max-h-[85vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
+          <div className="bg-white rounded-lg w-[520px] max-h-[85vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
             <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3 flex-shrink-0">
               <div className="w-10 h-10 rounded bg-blue-50 flex items-center justify-center flex-shrink-0">
                 <FileStack size={18} className="text-[#0056b3]" />
@@ -875,6 +1026,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
             </div>
 
             <div className="p-5 overflow-y-auto space-y-4">
+              {/* Paso 1: Documento nuevo vs versión */}
               <label
                 className={`block rounded border p-3.5 cursor-pointer transition-colors ${
                   documentMode === 'new' ? 'border-[#0056b3] bg-blue-50/40' : 'border-gray-200 hover:border-gray-300'
@@ -989,6 +1141,128 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                   </div>
                 )}
               </label>
+
+              {/* Fase 4 — Paso 2: Override de clasificación */}
+              <div className="border-t border-gray-200 pt-4 space-y-4">
+                <p className="text-sm font-semibold text-slate-800">Clasificación (opcional)</p>
+
+                {/* Override de modo */}
+                <div className={`rounded border p-3 ${projectConfig?.mode_locked ? 'bg-gray-50 opacity-60' : 'bg-white'}`}>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <input
+                      type="radio"
+                      checked={overrideMode === 'project'}
+                      onChange={() => setOverrideMode('project')}
+                      disabled={projectConfig?.mode_locked}
+                      className="text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
+                    />
+                    <span className="text-sm text-slate-700">
+                      Usar la del proyecto ({projectConfig?.mode === 'manual' ? 'Manual' : 'Norma técnica'})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="radio"
+                      checked={overrideMode === 'manual'}
+                      onChange={() => setOverrideMode('manual')}
+                      disabled={projectConfig?.mode_locked}
+                      className="text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
+                    />
+                    <span className="text-sm text-slate-700">Manual, solo para esta subida</span>
+                  </div>
+
+                  {overrideMode === 'manual' && (
+                    <div className="mt-3 pl-6 space-y-2">
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={overrideManualFields.code_property_set}
+                          onChange={(e) => setOverrideManualFields(prev => ({ ...prev, code_property_set: e.target.value }))}
+                          placeholder="Grupo (opcional)"
+                          className="w-1/3 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                        />
+                        <input
+                          type="text"
+                          value={overrideManualFields.code_property_name}
+                          onChange={(e) => setOverrideManualFields(prev => ({ ...prev, code_property_name: e.target.value }))}
+                          placeholder="Propiedad de código *"
+                          className="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={overrideManualFields.description_property_set}
+                          onChange={(e) => setOverrideManualFields(prev => ({ ...prev, description_property_set: e.target.value }))}
+                          placeholder="Grupo (opcional)"
+                          className="w-1/3 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                        />
+                        <input
+                          type="text"
+                          value={overrideManualFields.description_property_name}
+                          onChange={(e) => setOverrideManualFields(prev => ({ ...prev, description_property_name: e.target.value }))}
+                          placeholder="Propiedad de descripción"
+                          className="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                        />
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={overrideManualFields.unit_property_set}
+                          onChange={(e) => setOverrideManualFields(prev => ({ ...prev, unit_property_set: e.target.value }))}
+                          placeholder="Grupo (opcional)"
+                          className="w-1/3 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                        />
+                        <input
+                          type="text"
+                          value={overrideManualFields.unit_property_name}
+                          onChange={(e) => setOverrideManualFields(prev => ({ ...prev, unit_property_name: e.target.value }))}
+                          placeholder="Propiedad de unidad"
+                          className="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Override de prefijo */}
+                <div className={`rounded border p-3 ${projectConfig?.property_prefix_locked ? 'bg-gray-50 opacity-60' : 'bg-white'}`}>
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <input
+                      type="radio"
+                      checked={overridePrefixMode === 'project'}
+                      onChange={() => setOverridePrefixMode('project')}
+                      disabled={projectConfig?.property_prefix_locked}
+                      className="text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
+                    />
+                    <span className="text-sm text-slate-700">
+                      Usar el del proyecto ({projectConfig?.property_prefix || 'Sin prefijo'})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2.5">
+                    <input
+                      type="radio"
+                      checked={overridePrefixMode === 'custom'}
+                      onChange={() => setOverridePrefixMode('custom')}
+                      disabled={projectConfig?.property_prefix_locked}
+                      className="text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
+                    />
+                    <span className="text-sm text-slate-700">Otro, solo para esta subida</span>
+                  </div>
+
+                  {overridePrefixMode === 'custom' && (
+                    <div className="mt-3 pl-6">
+                      <input
+                        type="text"
+                        value={overridePrefix}
+                        onChange={(e) => setOverridePrefix(e.target.value)}
+                        placeholder="p.ej. CSRT-"
+                        className="w-full px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="px-5 py-3.5 border-t border-gray-100 bg-gray-50/70 flex justify-end gap-2 flex-shrink-0">
@@ -1000,9 +1274,9 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               </button>
               <button
                 onClick={handleConfirmDocumentContext}
-                disabled={!isDocumentContextReady}
+                disabled={!isDocumentContextReady || (overrideMode === 'manual' && !overrideManualFields.code_property_name)}
                 className={`px-5 py-1.5 rounded text-sm font-semibold transition-colors ${
-                  isDocumentContextReady
+                  isDocumentContextReady && !(overrideMode === 'manual' && !overrideManualFields.code_property_name)
                     ? 'bg-[#0056b3] text-white hover:bg-[#004494]'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 }`}
@@ -1011,10 +1285,11 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {showLoadedModal && (
+      {showLoadedModal &&createPortal (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[10200]">
           <div className="bg-white rounded w-[520px] max-h-[80vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
@@ -1153,7 +1428,8 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body 
       )}
     </div>
   );
