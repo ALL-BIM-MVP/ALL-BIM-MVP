@@ -112,6 +112,24 @@ export const createProjectService = async (
             [p.project_id, userId]
         );
 
+        // "Elemento conjunto" (estado de cantidad de elementos, ver
+        // elemento-conjunto.service.ts) — mismo criterio que la config de
+        // clasificación de arriba: anclado desde el alta, con el default
+        // de siempre (los 4 campos builtin, en orden) explícito en filas
+        // reales, no un default implícito resuelto en código.
+        await client.query(
+            `INSERT INTO elemento_conjunto_configs (project_id, updated_by) VALUES ($1, $2)`,
+            [p.project_id, userId]
+        );
+        await client.query(
+            `INSERT INTO elemento_conjunto_config_fields (project_id, position, field_type, builtin_field)
+            VALUES ($1, 1, 'builtin', 'file_name'),
+                   ($1, 2, 'builtin', 'global_id'),
+                   ($1, 3, 'builtin', 'tag'),
+                   ($1, 4, 'builtin', 'partida_code')`,
+            [p.project_id]
+        );
+
         await client.query("COMMIT");
     } catch (error) {
         await client.query("ROLLBACK");

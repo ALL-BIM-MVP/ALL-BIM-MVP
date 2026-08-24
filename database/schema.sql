@@ -376,6 +376,46 @@ CREATE TABLE ifc_classification_config_fields (
     UNIQUE (project_id, slot)
 );
 
+-- "Elemento conjunto" (estado de cantidad de elementos, ver
+-- metrados-estado.*) — QUÉ campos componen la clave que decide si dos
+-- elementos son "el mismo" (duplicado) o no. Antes era fijo (archivo +
+-- guid + tag + código de partida, hardcodeado en el service); ahora es
+-- configurable por proyecto, a propósito: el criterio fijo de 4 campos
+-- no alcanza para todos los casos reales (ej. el cliente puede querer
+-- comparar por una propiedad propia suya, tipo "Marca", en vez de o
+-- además de esos 4). Se crea con default (los 4 campos builtin de
+-- siempre) al mismo tiempo que ifc_classification_configs, en
+-- POST /projects — así ningún proyecto queda sin config y el
+-- comportamiento de antes de esto sigue siendo el default.
+CREATE TABLE elemento_conjunto_configs (
+    project_id INT PRIMARY KEY REFERENCES projects(project_id) ON DELETE CASCADE,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_by INT REFERENCES users(user_id)
+);
+
+-- Cada fila es UN campo de la clave, en orden (`position`). Mínimo 2
+-- campos por proyecto (con 1 solo sería "filtrar por una propiedad",
+-- no un criterio compuesto de "elemento conjunto" — validado en el
+-- schema Zod, no acá). 'builtin' referencia uno de los 4 campos fijos
+-- de siempre; 'property' referencia una propiedad capturada del IFC
+-- (property_set OPCIONAL — igual que en clasificación manual, NULL
+-- busca en cualquier Pset del elemento).
+CREATE TABLE elemento_conjunto_config_fields (
+    elemento_conjunto_config_field_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES elemento_conjunto_configs(project_id) ON DELETE CASCADE,
+    position INT NOT NULL,
+    field_type VARCHAR(20) NOT NULL CHECK (field_type IN ('builtin', 'property')),
+    builtin_field VARCHAR(30) CHECK (builtin_field IN ('file_name', 'global_id', 'tag', 'partida_code')),
+    property_set VARCHAR(255),
+    property_name VARCHAR(255),
+    CHECK (
+        (field_type = 'builtin' AND builtin_field IS NOT NULL AND property_name IS NULL)
+        OR
+        (field_type = 'property' AND builtin_field IS NULL AND property_name IS NOT NULL)
+    ),
+    UNIQUE (project_id, position)
+);
+
 -- "files" es el archivo físico (metadata + ruta en disco); esta tabla
 -- es el ROL que cumple ese archivo para un proyecto — hoy solo se usa
 -- 'cover' (la portada, una sola por proyecto, ver el índice único de

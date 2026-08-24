@@ -1,0 +1,141 @@
+@baseUrl = http://localhost:4000/api
+
+### =========================================================================
+### Proyectos existentes en la BD de desarrollo (2026-08-24) — cambiá
+### @projectId más abajo por el que quieras probar:
+###   1  -> "12"
+###   2  -> "PROYECTO BIM"                        (11615 elementos, el usado
+###                                                 en las pruebas de abajo)
+###   4  -> "PROYECTO PROPIO"
+###   6  -> "12"
+###   11 -> "12"
+###   12 -> "CUS ET2 - Prueba exportación Excel"
+### =========================================================================
+@projectId = 2
+
+### =========================
+### Login Admin
+### =========================
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ismael@email.com",
+  "password": "Test1234!"
+}
+
+### Capturar tokens automáticamente
+@accessToken = {{login.response.body.access_token}}
+
+
+### =========================================================================
+### 1. Catálogo de campos disponibles — los 4 builtin (siempre) + el UNION
+### de property_set/property_name capturadas en cualquier documento IFC
+### vigente (is_current=true) del proyecto. Sirve para armar el selector
+### del PUT de más abajo (mirá la respuesta para ver qué propiedades reales
+### tiene ESTE proyecto antes de elegir una en el paso 3).
+### =========================================================================
+GET {{baseUrl}}/projects/{{projectId}}/elemento-conjunto-config/available-fields
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### 2. Config actual — recién creado el proyecto, son los 4 builtin de
+### siempre (file_name, global_id, tag, partida_code), en ese orden.
+### =========================================================================
+GET {{baseUrl}}/projects/{{projectId}}/elemento-conjunto-config
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### 3. Reporte con la config default (los 4 builtin) — ANTES de cambiar
+### nada. Guardate estos números para comparar con el paso 5.
+### =========================================================================
+GET {{baseUrl}}/projects/{{projectId}}/metrados/estado-elementos
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### 4. Reconfigurar la clave: tag + una propiedad real (ALTURA, confirmada
+### en el catálogo del paso 1 para el proyecto 2 — cambiala si probás con
+### otro proyecto). Reemplaza TODA la lista de campos, no es un PATCH.
+### =========================================================================
+# @name setCustomConfig
+PUT {{baseUrl}}/projects/{{projectId}}/elemento-conjunto-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fields": [
+    { "field_type": "builtin", "builtin_field": "tag" },
+    { "field_type": "property", "property_name": "ALTURA" }
+  ]
+}
+
+
+### =========================================================================
+### 5. Reporte con la nueva clave (tag+ALTURA) — va a dar MUY distinto al
+### paso 3: la mayoría de los elementos no tiene "ALTURA" capturada, así
+### que van a salir como "faltantes" (no como "repetidos"). Es esperado,
+### no un bug — así se ve el efecto de elegir una propiedad que no todos
+### los elementos tienen.
+### =========================================================================
+GET {{baseUrl}}/projects/{{projectId}}/metrados/estado-elementos
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### 6. Restaurar la config default (los 4 builtin, mismo orden de siempre)
+### — corré esto al terminar de probar para dejar el proyecto como estaba.
+### =========================================================================
+PUT {{baseUrl}}/projects/{{projectId}}/elemento-conjunto-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fields": [
+    { "field_type": "builtin", "builtin_field": "file_name" },
+    { "field_type": "builtin", "builtin_field": "global_id" },
+    { "field_type": "builtin", "builtin_field": "tag" },
+    { "field_type": "builtin", "builtin_field": "partida_code" }
+  ]
+}
+
+
+### =========================================================================
+### 7. Reporte otra vez con el default restaurado — debería volver a dar
+### igual que el paso 3 (con_problemas: 0 en el proyecto 2 limpio).
+### =========================================================================
+GET {{baseUrl}}/projects/{{projectId}}/metrados/estado-elementos
+Authorization: Bearer {{accessToken}}
+
+
+### =========================================================================
+### CASOS DE ERROR — validaciones del PUT
+### =========================================================================
+
+### 8. Rechaza con 1 solo campo (esperado: 400 INVALID_REQUEST_DATA) — con
+### uno solo sería "filtrar por una propiedad", no un criterio compuesto.
+PUT {{baseUrl}}/projects/{{projectId}}/elemento-conjunto-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fields": [
+    { "field_type": "builtin", "builtin_field": "tag" }
+  ]
+}
+
+
+### 9. Rechaza campos duplicados (esperado: 400 INVALID_REQUEST_DATA).
+PUT {{baseUrl}}/projects/{{projectId}}/elemento-conjunto-config
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "fields": [
+    { "field_type": "builtin", "builtin_field": "tag" },
+    { "field_type": "builtin", "builtin_field": "tag" }
+  ]
+}
