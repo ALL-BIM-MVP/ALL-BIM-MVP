@@ -154,6 +154,7 @@ const escribirResumen = (wb: ExcelJS.Workbook, ctx: ExportContext, fecha: Date, 
     ws.getColumn(2).width = 70;
     ws.getColumn(3).width = 14;
     ws.getColumn(4).width = 16;
+    ws.getColumn(4).numFmt = "0.00"; // TOTAL — mismo redondeo que round2(), pero como formato real de celda
 
     escribirEncabezado(ws, "RESUMEN DE METRADOS", ctx, fecha);
 
@@ -163,6 +164,11 @@ const escribirResumen = (wb: ExcelJS.Workbook, ctx: ExportContext, fecha: Date, 
     headerRow.getCell(3).value = "UND";
     headerRow.getCell(4).value = "TOTAL";
     aplicarEstiloEncabezado(headerRow);
+
+    // Fila congelada — el encabezado (filas 1-9) queda siempre visible
+    // al bajar, importa con archivos de miles de filas (el caso real,
+    // 24k+ elementos).
+    ws.views = [{ state: "frozen", ySplit: 9 }];
 
     let fila = 10;
     const escribirNodo = (nodo: PartidaTreeNode, profundidad: number): void => {

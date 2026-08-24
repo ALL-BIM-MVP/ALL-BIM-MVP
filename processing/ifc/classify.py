@@ -13,7 +13,7 @@ import ifcopenshell.util.element
 from .config import ESPECIALIDADES_ACTIVAS, CLAVE_SIN_ESPECIALIDAD, CLAVE_FUERA_DE_NORMA
 from .extraction import (
     extraer_datos_clasificacion, normalizar_codigo, formatear_codigo,
-    buscar_entrada_norma, obtener_dimensiones, inferir_unidad,
+    buscar_entrada_norma, obtener_dimensiones, inferir_unidad, normalizar_unidad,
     get_storey_and_space, obtener_unidad_por_mayoria,
     extraer_dimensiones_parametricas, extraer_dimensiones_por_aristas,
     get_openings, extraer_element_id, extraer_metrados_revit_completo,
@@ -372,7 +372,7 @@ def clasificar_elementos_manual(model, config):
         storey, space = get_storey_and_space(el, model)
 
         unidad_val = extraer_valor_propiedad(psets, config.get("unit_property_set"), config.get("unit_property_name"))
-        unidad = str(unidad_val).strip() if unidad_val else inferir_unidad(dims)
+        unidad = normalizar_unidad(unidad_val) if unidad_val else inferir_unidad(dims)
 
         metrados = _aplicar_descuento_huecos(metrados, el, dims, unidad)
 

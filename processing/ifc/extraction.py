@@ -677,7 +677,25 @@ def obtener_dimensiones(el, psets):
     validada para tubos. area_total_m2 de geometria_proyeccion sigue
     existiendo para ÁREA (esa sí necesita identificar una cara), pero
     ya no calcula ningún volumen — el volumen final SIEMPRE sale de
-    esta integral universal, sin excepción por paso de la cascada."""
+    esta integral universal, sin excepción por paso de la cascada.
+
+    Fierro (acero) se prueba ACÁ, antes de crear ningún shape — es el
+    único paso de la cascada que no necesita geometría en absoluto
+    (confirmado con datos reales: ~76% de los elementos de un archivo
+    real resuelven acá), y `get_shape()` es la parte más cara de toda
+    esta función (~6.7ms/elemento, ver
+    docs/roadmap/consolidacion-y-hardening.md punto 2) — no tiene
+    sentido pagarla para después no usarla. El _vol_geom de respaldo
+    (más abajo) queda sin aplicar para estos elementos, igual que ya
+    pasaba antes con cualquier elemento sin malla geométrica válida
+    (shape=None) — no es un caso nuevo. metrados._metrados_acero ya
+    tiene su propio respaldo de volumen (diámetro nominal o sección
+    transversal); el _vol_geom geométrico solo entraba en juego si
+    NINGUNO de esos dos estaba presente, caso raro en acero real."""
+    dims_bar = extraer_dimensiones_fierro(el)
+    if dims_bar and dims_bar["Largo"] is not None:
+        return dims_bar
+
     shape = get_shape(el)  # una sola vez, se reusa para la cascada Y el volumen
     dims = _resolver_dimensiones_por_cascada(el, psets, shape)
 
@@ -690,10 +708,9 @@ def obtener_dimensiones(el, psets):
 
 
 def _resolver_dimensiones_por_cascada(el, psets, shape):
-    # 0. Fierro
-    dims_bar = extraer_dimensiones_fierro(el)
-    if dims_bar and dims_bar["Largo"] is not None:
-        return dims_bar
+    # 0. Fierro — ya se probó en obtener_dimensiones() ANTES de crear el
+    # shape (ver docstring de arriba); si llegamos acá es porque ya
+    # falló, no hace falta reintentarlo.
 
     # 0.4. Perfil circular (tubos) — Largo/Diametro salen del perfil
     # tipado (radio exacto, no hay que reconstruirlo), pero área/volumen
@@ -902,6 +919,30 @@ def inferir_unidad(dims):
     if largo:
         return "m"
     return "und"
+
+
+# Superíndices unicode -> dígito ASCII. SOLO aplica a clasificación
+# manual (Fase 4): ahí la unidad de una partida sale del texto que el
+# cliente tipeó a mano en una propiedad de Revit (ej. "CSRT-Unidad1")
+# — nunca de norma_completa.json (ya viene en ASCII). Si ese texto
+# llega tal cual ("m²"/"m³") a metrado_partidas.unit, ninguna
+# comparación exacta más abajo lo reconoce (UNIT_TO_METRADO_KEY/
+# METRADO_KEY_POR_UNIDAD en ifc-processing-runner.ts/
+# ifc-excel-export.service.ts deciden qué columna sumar para el total
+# de la partida) y el total cae en silencio al fallback de "quantity"
+# (cuenta elementos) en vez de sumar área/volumen real. Confirmado con
+# datos reales del cliente (CUS ET2): una partida m³ con 12.83 m³
+# reales quedó guardada como "23" (el conteo de elementos) por esto.
+_SUPERINDICES_UNIDAD = str.maketrans({"²": "2", "³": "3"})
+
+
+def normalizar_unidad(valor):
+    """Normaliza el texto crudo de unidad de una propiedad de Revit
+    escrita a mano (clasificación manual, Fase 4) — ver comentario de
+    _SUPERINDICES_UNIDAD arriba."""
+    if valor is None:
+        return None
+    return str(valor).translate(_SUPERINDICES_UNIDAD).strip().lower()
 
 
 # Si el nombre de una propiedad contiene cualquiera de estas palabras,

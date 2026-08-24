@@ -93,7 +93,7 @@ Authorization: Bearer {{accessToken}}
 ### ya muestre "status": "done". Guarda un archivo real
 ### (file_type='excel', generated_from_ifc_file_id = {{ifcFileId}}).
 # @name exportExcel
-POST {{baseUrl}}/ifc-files/{{ifcFileId}}/export-excel
+POST {{baseUrl}}/ifc-files/63/export-excel
 Authorization: Bearer {{accessToken}}
 
 
