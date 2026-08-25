@@ -98,6 +98,25 @@ def _aplicar_descuento_huecos(metrados, el, dims, unidad):
     return metrados
 
 
+# Mismo mapeo unidad->campo que UNIT_TO_METRADO_KEY en
+# ifc-processing-runner.ts/METRADO_KEY_POR_UNIDAD en
+# ifc-excel-export.service.ts — de los 5 valores que calcula
+# calcular_metrados_final, esta función decide CUÁL de ellos es
+# realmente "el metrado" para la partida de este elemento (según su
+# unidad), y se queda con la fuente de ESE (docs/roadmap/
+# consolidacion-y-hardening.md punto 6) — las otras 4 no se guardan,
+# no importan para esta partida puntual.
+_UNIDAD_A_CAMPO_FUENTE = {
+    "m": "_fuente_lon", "m2": "_fuente_area", "m3": "_fuente_vol",
+    "kg": "_fuente_peso", "und": "_fuente_count",
+}
+
+
+def resolver_origen_metrado(metrados, unidad):
+    campo = _UNIDAD_A_CAMPO_FUENTE.get(unidad, "_fuente_count")  # fallback igual que en Node ("?? quantity")
+    return metrados.get(campo)
+
+
 def _elemento_base(el, dims, metrados, storey, space, propiedades, **kwargs):
     elem = {
         "el": el,
@@ -176,6 +195,7 @@ def clasificar_elementos(model, norma_index, hijos, property_prefix=None):
                 codigo_padre=CLAVE_SIN_ESPECIALIDAD,
                 nombre_partida=nombre_partida or codigo,
                 unidad=unidad,
+                origen_metrado=resolver_origen_metrado(metrados, unidad),
             ))
             continue
 
@@ -193,6 +213,7 @@ def clasificar_elementos(model, norma_index, hijos, property_prefix=None):
                 codigo_padre=CLAVE_FUERA_DE_NORMA,
                 nombre_partida=nombre_partida or codigo_fmt,
                 unidad=unidad,
+                origen_metrado=resolver_origen_metrado(metrados, unidad),
             ))
             continue
 
@@ -228,6 +249,7 @@ def clasificar_elementos(model, norma_index, hijos, property_prefix=None):
             codigo_padre=entrada["codigo"] if codigo_reporte != entrada["codigo"] else None,
             nombre_partida=nombre_efectivo,
             unidad=unidad_norma,
+            origen_metrado=resolver_origen_metrado(metrados, unidad_norma),
         ))
 
     if codigos_malformados > 0:
@@ -303,6 +325,7 @@ def reasignar_sin_clasificacion(elementos_sin_clasificacion, elementos_clasifica
             codigo_padre=None,
             nombre_partida=datos["nombre"],
             unidad=unidad,
+            origen_metrado=resolver_origen_metrado(metrados, unidad),
         ))
 
     print(f"  Elementos sin clasificación reasignados: {len(reasignados)}")
@@ -384,6 +407,7 @@ def clasificar_elementos_manual(model, config):
             codigo_padre=None,
             nombre_partida=nombre_partida,
             unidad=unidad,
+            origen_metrado=resolver_origen_metrado(metrados, unidad),
         ))
 
     return elementos, elementos_sin_clasificacion

@@ -163,6 +163,12 @@ def normalizar(elementos, norma_index, schema_version):
             "area": met["area"],
             "volume": met["vol"],
             "weight": met["weight"],
+            # De cuál de los 5 valores de arriba (lon/area/vol/count/
+            # weight -> run_length/area/volume/quantity/weight) salió
+            # el metrado real de ESTA partida, según su unidad — ver
+            # classify.resolver_origen_metrado() y
+            # docs/roadmap/consolidacion-y-hardening.md punto 6.
+            "origen_metrado": elem.get("origen_metrado"),
         })
 
     # _registrar_ancestros_norma le pone unidad a CUALQUIER ancestro que

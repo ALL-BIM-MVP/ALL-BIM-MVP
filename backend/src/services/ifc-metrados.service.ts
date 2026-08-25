@@ -171,6 +171,43 @@ const resolveNewFileDocument = async (
     return { ifcDocumentId: Number(newDoc.rows[0]!.ifc_document_id), versionNumber: 1 };
 };
 
+// Todo archivo IFC real (formato STEP/SPF, ISO 10303-21) arranca con
+// este texto literal — un sniff-test barato ANTES de crear cualquier
+// fila en la BD o lanzar el subprocess de Python. Encontrado con datos
+// reales (docs/roadmap/consolidacion-y-hardening.md): una subida
+// masiva mandó como "archivo" el texto literal de una directiva
+// `< ruta` de un .http sin resolver (73 bytes de texto, no un IFC) —
+// el backend lo aceptaba, creaba la fila, lanzaba Python, y recién
+// ahí fallaba con "Unable to parse IFC SPF header", dejando el
+// registro basura permanentemente en estado 'error'. Este chequeo
+// corta eso en el primer paso, sin tocar la BD ni gastar un
+// subprocess — multer ya escribió el archivo en disco (diskStorage)
+// antes de que este código corra, así que si falla el chequeo hay que
+// borrar ese archivo a mano (ver uso más abajo), nadie más lo va a
+// limpiar.
+const IFC_MAGIC_HEADER = "ISO-10303-21";
+const IFC_MAGIC_CHECK_BYTES = 32;
+
+const assertLooksLikeIfc = async (filePath: string): Promise<void> => {
+    let header = "";
+    try {
+        const fd = await fs.open(filePath, "r");
+        try {
+            const buffer = Buffer.alloc(IFC_MAGIC_CHECK_BYTES);
+            const { bytesRead } = await fd.read(buffer, 0, IFC_MAGIC_CHECK_BYTES, 0);
+            header = buffer.subarray(0, bytesRead).toString("latin1");
+        } finally {
+            await fd.close();
+        }
+    } catch {
+        // Si ni siquiera se puede leer, tampoco es un IFC válido —
+        // header queda "" y cae al mismo error de abajo.
+    }
+    if (!header.includes(IFC_MAGIC_HEADER)) {
+        throw new AppError(IFC_METRADOS_ERRORS.INVALID_IFC_CONTENT);
+    }
+};
+
 // Deshace un saveFileService exitoso cuando la creación del documento/
 // versión (Fase 3) falla justo después — sin esto quedaría una fila
 // "files" con bytes en disco que ningún endpoint puede reprocesar
@@ -212,6 +249,12 @@ export const processIfcMetradosService = async (
     let fileName: string;
 
     if (multerFile) {
+        try {
+            await assertLooksLikeIfc(multerFile.path);
+        } catch (error) {
+            await fs.rm(multerFile.path, { force: true }).catch(() => {});
+            throw error;
+        }
         const saved = await saveFileService(user, { projectId }, "ifc", multerFile);
         fileId = saved.file_id;
         filePath = multerFile.path;

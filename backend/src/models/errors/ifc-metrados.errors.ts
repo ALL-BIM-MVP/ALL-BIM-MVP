@@ -16,6 +16,13 @@ export const IFC_METRADOS_ERRORS = {
             message: "El archivo indicado no es un IFC."
         }
     },
+    INVALID_IFC_CONTENT: {
+        statusCode: 422,
+        response: {
+            code: "IFC_INVALID_CONTENT",
+            message: "El archivo subido no tiene el encabezado de un IFC válido (ISO-10303-21) — puede que la subida haya fallado o el archivo esté corrupto/incompleto."
+        }
+    },
     STATUS_NOT_FOUND: {
         statusCode: 404,
         response: {

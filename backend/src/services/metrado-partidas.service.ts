@@ -149,7 +149,8 @@ export const getPartidaElementsService = async (
 
     const result = await pool.query<PartidaElementRow>(
         `SELECT e.element_id, e.express_id, e.name, e.level_name, e.space_name, e.tag,
-            me.length, me.run_length, me.width, me.height, me.diameter, me.quantity, me.area, me.volume, me.weight
+            me.length, me.run_length, me.width, me.height, me.diameter, me.quantity, me.area, me.volume, me.weight,
+            me.origen_metrado
         FROM metrado_elements me
         JOIN ifc_elements e ON e.element_id = me.element_id
         WHERE me.partida_id = $1

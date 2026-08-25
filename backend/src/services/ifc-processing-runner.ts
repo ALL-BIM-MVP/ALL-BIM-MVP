@@ -145,6 +145,10 @@ interface PipelineMetradoElement {
     area: number | null;
     volume: number | null;
     weight: number | null;
+    // De cuál de los 5 valores de arriba salió el metrado real de esta
+    // partida, según su unidad — ver docs/roadmap/consolidacion-y-hardening.md
+    // punto 6 y classify.resolver_origen_metrado() (Python).
+    origen_metrado: string | null;
 }
 
 interface PipelineResult {
@@ -394,10 +398,10 @@ const insertarResultado = async (
         for (const batch of chunk(metradoElementsResueltos, CHUNK_SIZE)) {
             await client.query(
                 `INSERT INTO metrado_elements
-                    (partida_id, element_id, length, run_length, width, height, diameter, quantity, area, volume, weight)
+                    (partida_id, element_id, length, run_length, width, height, diameter, quantity, area, volume, weight, origen_metrado)
                 SELECT * FROM UNNEST(
                     $1::bigint[], $2::bigint[], $3::numeric[], $4::numeric[], $5::numeric[], $6::numeric[],
-                    $7::numeric[], $8::numeric[], $9::numeric[], $10::numeric[], $11::numeric[]
+                    $7::numeric[], $8::numeric[], $9::numeric[], $10::numeric[], $11::numeric[], $12::varchar[]
                 )`,
                 [
                     batch.map((r) => r.partidaId),
@@ -411,6 +415,7 @@ const insertarResultado = async (
                     batch.map((r) => r.me.area),
                     batch.map((r) => r.me.volume),
                     batch.map((r) => r.me.weight),
+                    batch.map((r) => r.me.origen_metrado),
                 ]
             );
         }

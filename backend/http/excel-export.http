@@ -54,7 +54,7 @@ Content-Type: application/json
 ### ⚠️ Tarda varios minutos en terminar — este POST responde 202 casi al
 ### instante, el procesamiento real sigue en background (ver request 4).
 # @name processIfc
-POST {{baseUrl}}/projects/{{createdProjectId}}/ifc-metrados/process
+POST {{baseUrl}}/projects/2/ifc-metrados/process
 Authorization: Bearer {{accessToken}}
 Content-Type: multipart/form-data; boundary=WebAppBoundary
 
@@ -74,7 +74,7 @@ Content-Disposition: form-data; name="classification_override"
 Content-Disposition: form-data; name="file"; filename="CUS_ET2.ifc"
 Content-Type: application/octet-stream
 
-< ../../processing/proceso-metrados-base/archives/CUS ET2 ST1 EST BIM 5A ZZZ 1001.ifc
+< ../../processing/proceso-metrados-base/archives/CUS-ET2 ST1 EST BIM 5A ZZZ 1001.ifc
 --WebAppBoundary--
 
 
@@ -93,7 +93,7 @@ Authorization: Bearer {{accessToken}}
 ### ya muestre "status": "done". Guarda un archivo real
 ### (file_type='excel', generated_from_ifc_file_id = {{ifcFileId}}).
 # @name exportExcel
-POST {{baseUrl}}/ifc-files/63/export-excel
+POST {{baseUrl}}/ifc-files/{{ifcFileId}}/export-excel
 Authorization: Bearer {{accessToken}}
 
 

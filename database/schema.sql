@@ -501,6 +501,18 @@ CREATE TABLE metrado_elements (
     volume NUMERIC(18,6),
     weight NUMERIC(18,6),
 
+    -- De cuál de los 5 valores que calcula metrados.py
+    -- (lon/area/vol/count/weight) salió el metrado REAL de esta
+    -- partida, según su unidad (m->lon, m2->area, m3->vol, kg->weight,
+    -- und/otro->count) — no "una fuente por elemento", cada uno de los
+    -- 5 valores puede venir de una fuente distinta, esta columna se
+    -- queda solo con la del que de verdad importa acá. Valores:
+    -- 'tipado' | 'geometrico' | 'texto' | 'default' | 'acero' |
+    -- 'acero_diametro' | 'acero_seccion' | NULL (no se pudo resolver
+    -- ninguna fuente). Ver docs/roadmap/consolidacion-y-hardening.md
+    -- punto 6 y classify.resolver_origen_metrado().
+    origen_metrado VARCHAR(20),
+
     UNIQUE (partida_id, element_id)
 );
 CREATE INDEX idx_metrado_elements_partida ON metrado_elements (partida_id);
