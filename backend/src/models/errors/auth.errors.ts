@@ -10,6 +10,19 @@ export const AUTH_ERRORS = {
         }
     },
 
+    // Preparación para pruebas en red (docs/roadmap/consolidacion-y-hardening.md
+    // no lo cubre, es infraestructura, no una fase) — sin esto, /login
+    // queda abierto a fuerza bruta apenas es alcanzable desde internet.
+    // Sin registro público (los usuarios se crean por invitación), el
+    // límite es solo defensivo, no de abuso de cuota.
+    TOO_MANY_LOGIN_ATTEMPTS: {
+        statusCode: 429,
+        response: {
+            code: "AUTH_TOO_MANY_LOGIN_ATTEMPTS",
+            message: "Demasiados intentos de inicio de sesión. Probá de nuevo en unos minutos."
+        }
+    },
+
     ACCESS_TOKEN_MISSING: {
         statusCode: 401,
         response: { code: "AUTH_ACCESS_TOKEN_MISSING", message: "Access Token requerido." }

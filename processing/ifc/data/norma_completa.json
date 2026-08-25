@@ -1,0 +1,3068 @@
+{
+  "OE.1": {
+    "codigo": "OE.1",
+    "descripcion": "OBRAS PROVISIONALES, TRABAJOS PRELIMINARES, SEGURIDAD Y SALUD",
+    "tipo": "carpeta"
+  },
+  "OE.1.1": {
+    "codigo": "OE.1.1",
+    "descripcion": "OBRAS PROVISIONALES Y TRABAJOS PRELIMINARES",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.1": {
+    "codigo": "OE.1.1.1",
+    "descripcion": "CONSTRUCCIONES PROVISIONALES",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.1.1": {
+    "codigo": "OE.1.1.1.1",
+    "descripcion": "OFICINAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.1.2": {
+    "codigo": "OE.1.1.1.2",
+    "descripcion": "ALMACENES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.1.3": {
+    "codigo": "OE.1.1.1.3",
+    "descripcion": "CASETAS DE GUARDIANÍA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.1.4": {
+    "codigo": "OE.1.1.1.4",
+    "descripcion": "COMEDORES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.1.5": {
+    "codigo": "OE.1.1.1.5",
+    "descripcion": "VESTUARIOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.1.6": {
+    "codigo": "OE.1.1.1.6",
+    "descripcion": "SERVICIOS HIGIÉNICOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.1.7": {
+    "codigo": "OE.1.1.1.7",
+    "descripcion": "CERCOS",
+    "tipo": "partida",
+    "unidad": "m",
+    "unidad_alt": "m2"
+  },
+  "OE.1.1.1.8": {
+    "codigo": "OE.1.1.1.8",
+    "descripcion": "CARTELES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.1.1.2": {
+    "codigo": "OE.1.1.2",
+    "descripcion": "INSTALACIONES PROVISIONALES",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.2.1": {
+    "codigo": "OE.1.1.2.1",
+    "descripcion": "AGUA PARA LA CONSTRUCCIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.2.1.1": {
+    "codigo": "OE.1.1.2.1.1",
+    "descripcion": "OBTENCIÓN DEL SERVICIO",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.2.1.2": {
+    "codigo": "OE.1.1.2.1.2",
+    "descripcion": "ALMACENAMIENTO Y DISTRIBUCIÓN",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.2.2": {
+    "codigo": "OE.1.1.2.2",
+    "descripcion": "DESAGÜE PARA LA CONSTRUCCIÓN",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.2.3": {
+    "codigo": "OE.1.1.2.3",
+    "descripcion": "ENERGÍA ELÉCTRICA PROVISIONAL",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.2.3.1": {
+    "codigo": "OE.1.1.2.3.1",
+    "descripcion": "CONEXIÓN E INSTALACIÓN",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.2.3.2": {
+    "codigo": "OE.1.1.2.3.2",
+    "descripcion": "CONSUMO Y MANTENIMIENTO",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.2.4": {
+    "codigo": "OE.1.1.2.4",
+    "descripcion": "INSTALACIÓN TELEFÓNICA Y COMUNICACIÓN PROVISIONAL",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.2.4.1": {
+    "codigo": "OE.1.1.2.4.1",
+    "descripcion": "CONEXIÓN E INSTALACIÓN",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.2.4.2": {
+    "codigo": "OE.1.1.2.4.2",
+    "descripcion": "CONSUMO Y MANTENIMIENTO",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.3": {
+    "codigo": "OE.1.1.3",
+    "descripcion": "TRABAJOS PRELIMINARES",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.3.1": {
+    "codigo": "OE.1.1.3.1",
+    "descripcion": "LIMPIEZA DEL TERRENO",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.3.1.1": {
+    "codigo": "OE.1.1.3.1.1",
+    "descripcion": "ELIMINACIÓN DE BASURA Y ELEMENTOS SUELTOS Y LIVIANOS",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.1.1.3.1.2": {
+    "codigo": "OE.1.1.3.1.2",
+    "descripcion": "ELIMINACIÓN DE MALEZA Y ARBUSTOS DE FÁCIL EXTRACCIÓN",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.4": {
+    "codigo": "OE.1.1.4",
+    "descripcion": "ELIMINACIÓN DE OBSTRUCCIONES",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.4.1": {
+    "codigo": "OE.1.1.4.1",
+    "descripcion": "TALA DE ÁRBOLES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.1.1.4.2": {
+    "codigo": "OE.1.1.4.2",
+    "descripcion": "ELIMINACIÓN DE RAÍCES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.1.1.4.3": {
+    "codigo": "OE.1.1.4.3",
+    "descripcion": "ELIMINACIÓN DE ROCAS",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.1.1.4.4": {
+    "codigo": "OE.1.1.4.4",
+    "descripcion": "ELIMINACIÓN DE ELEMENTOS ENTERRADOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.1.1.5": {
+    "codigo": "OE.1.1.5",
+    "descripcion": "REMOCIONES",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.1.1.6": {
+    "codigo": "OE.1.1.6",
+    "descripcion": "DEMOLICIONES",
+    "tipo": "partida",
+    "unidad": "m3",
+    "unidad_alt": "m2"
+  },
+  "OE.1.1.6.1": {
+    "codigo": "OE.1.1.6.1",
+    "descripcion": "ELIMINACION DE DEMOLICIONES",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.1.1.7": {
+    "codigo": "OE.1.1.7",
+    "descripcion": "MOVILIZACIÓN DE CAMPAMENTO, MAQUINARIA Y HERRAMIENTAS",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.1.8": {
+    "codigo": "OE.1.1.8",
+    "descripcion": "APUNTALAMIENTOS DE CONSTRUCCIONES EXISTENTES",
+    "tipo": "partida",
+    "unidad": "glb" 
+  },
+  "OE.1.1.9": {
+    "codigo": "OE.1.1.9",
+    "descripcion": "TRAZOS, NIVELES Y REPLANTEO",
+    "tipo": "carpeta"
+  },
+  "OE.1.1.9.1": {
+    "codigo": "OE.1.1.9.1",
+    "descripcion": "TRAZO, NIVELES Y REPLANTEO PRELIMINAR",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.1.1.9.2": {
+    "codigo": "OE.1.1.9.2",
+    "descripcion": "REPLANTEO DURANTE EL PROCESO",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "glb"
+  },
+  "OE.1.2": {
+    "codigo": "OE.1.2",
+    "descripcion": "SEGURIDAD Y SALUD",
+    "tipo": "carpeta"
+  },
+  "OE.1.2.1": {
+    "codigo": "OE.1.2.1",
+    "descripcion": "ELABORACIÓN, IMPLEMENTACIÓN Y ADMINISTRACIÓN DEL PLAN DE SEGURIDAD Y SALUD EN EL TRABAJO",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.2.1.1": {
+    "codigo": "OE.1.2.1.1",
+    "descripcion": "EQUIPOS DE PROTECCIÓN INDIVIDUAL",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.1.2.1.2": {
+    "codigo": "OE.1.2.1.2",
+    "descripcion": "EQUIPOS DE PROTECCIÓN COLECTIVA",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.2.1.3": {
+    "codigo": "OE.1.2.1.3",
+    "descripcion": "SEÑALIZACIÓN TEMPORAL DE SEGURIDAD",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.2.1.4": {
+    "codigo": "OE.1.2.1.4",
+    "descripcion": "CAPACITACIÓN EN SEGURIDAD Y SALUD",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.1.2.2": {
+    "codigo": "OE.1.2.2",
+    "descripcion": "RECURSOS PARA RESPUESTAS ANTE EMERGENCIAS EN SEGURIDAD Y SALUD DURANTE EL TRABAJO",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.2": {
+    "codigo": "OE.2",
+    "descripcion": "ESTRUCTURAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.1": {
+    "codigo": "OE.2.1",
+    "descripcion": "MOVIMIENTO DE TIERRAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.1.1": {
+    "codigo": "OE.2.1.1",
+    "descripcion": "NIVELACIÓN DE TERRENO",
+    "tipo": "carpeta"
+  },
+  "OE.2.1.1.1": {
+    "codigo": "OE.2.1.1.1",
+    "descripcion": "NIVELACIÓN",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.1.1.2": {
+    "codigo": "OE.2.1.1.2",
+    "descripcion": "NIVELADO APISONADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.1.2": {
+    "codigo": "OE.2.1.2",
+    "descripcion": "EXCAVACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.2.1.2.1": {
+    "codigo": "OE.2.1.2.1",
+    "descripcion": "EXCAVACIONES MASIVAS",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.1.2.2": {
+    "codigo": "OE.2.1.2.2",
+    "descripcion": "EXCAVACIONES SIMPLES",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.1.3": {
+    "codigo": "OE.2.1.3",
+    "descripcion": "CORTES",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.1.4": {
+    "codigo": "OE.2.1.4",
+    "descripcion": "RELLENOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.1.4.1": {
+    "codigo": "OE.2.1.4.1",
+    "descripcion": "RELLENO CON MATERIAL PROPIO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.1.4.2": {
+    "codigo": "OE.2.1.4.2",
+    "descripcion": "RELLENOS CON MATERIAL DE PRÉSTAMO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.1.5": {
+    "codigo": "OE.2.1.5",
+    "descripcion": "NIVELACIÓN INTERIOR Y APISONADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.1.6": {
+    "codigo": "OE.2.1.6",
+    "descripcion": "ELIMINACIÓN DE MATERIAL EXCEDENTE",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.1.7": {
+    "codigo": "OE.2.1.7",
+    "descripcion": "TABLAESTACADO O ENTIBADO",
+    "tipo": "carpeta"
+  },
+  "OE.2.1.7.1": {
+    "codigo": "OE.2.1.7.1",
+    "descripcion": "TABLAESTACADO PARA EXCAVACIONES, ESTRUCTURAS, POZOS, CÁMARAS SUBTERRÁNEAS, ETC.",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.1.7.2": {
+    "codigo": "OE.2.1.7.2",
+    "descripcion": "TABLAESTACADO PARA EXCAVACIONES DE ZANJAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2": {
+    "codigo": "OE.2.2",
+    "descripcion": "OBRAS DE CONCRETO SIMPLE",
+    "tipo": "carpeta"
+  },
+  "OE.2.2.1": {
+    "codigo": "OE.2.2.1",
+    "descripcion": "CIMIENTOS CORRIDOS",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.2.2": {
+    "codigo": "OE.2.2.2",
+    "descripcion": "SUB ZAPATAS O FALSA ZAPATA",
+    "tipo": "carpeta"
+  },
+  "OE.2.2.2.1": {
+    "codigo": "OE.2.2.2.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.2.2.2": {
+    "codigo": "OE.2.2.2.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.3": {
+    "codigo": "OE.2.2.3",
+    "descripcion": "SOLADOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.4": {
+    "codigo": "OE.2.2.4",
+    "descripcion": "BASES DE CONCRETO",
+    "tipo": "carpeta"
+  },
+  "OE.2.2.4.1": {
+    "codigo": "OE.2.2.4.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.2.4.2": {
+    "codigo": "OE.2.2.4.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.5": {
+    "codigo": "OE.2.2.5",
+    "descripcion": "ESTRUCTURAS DE SOSTENIMIENTO DE EXCAVACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.2.2.5.1": {
+    "codigo": "OE.2.2.5.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.2.5.2": {
+    "codigo": "OE.2.2.5.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.6": {
+    "codigo": "OE.2.2.6",
+    "descripcion": "SOBRECIMIENTOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.2.6.1": {
+    "codigo": "OE.2.2.6.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.2.6.2": {
+    "codigo": "OE.2.2.6.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.7": {
+    "codigo": "OE.2.2.7",
+    "descripcion": "GRADAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.2.7.1": {
+    "codigo": "OE.2.2.7.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.2.7.2": {
+    "codigo": "OE.2.2.7.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO EN GRADAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.8": {
+    "codigo": "OE.2.2.8",
+    "descripcion": "RAMPAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.2.8.1": {
+    "codigo": "OE.2.2.8.1",
+    "descripcion": "PARA EL CONCRETO (ESPECIFICAR ESPESOR)",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.8.2": {
+    "codigo": "OE.2.2.8.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO EN RAMPAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.2.9": {
+    "codigo": "OE.2.2.9",
+    "descripcion": "FALSOPISO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3": {
+    "codigo": "OE.2.3",
+    "descripcion": "OBRAS DE CONCRETO ARMADO",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.1": {
+    "codigo": "OE.2.3.1",
+    "descripcion": "CIMIENTOS REFORZADOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.1.1": {
+    "codigo": "OE.2.3.1.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.1.2": {
+    "codigo": "OE.2.3.1.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.1.3": {
+    "codigo": "OE.2.3.1.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.2": {
+    "codigo": "OE.2.3.2",
+    "descripcion": "ZAPATAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.2.1": {
+    "codigo": "OE.2.3.2.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.2.2": {
+    "codigo": "OE.2.3.2.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.2.3": {
+    "codigo": "OE.2.3.2.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.3": {
+    "codigo": "OE.2.3.3",
+    "descripcion": "VIGAS DE CIMENTACIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.3.1": {
+    "codigo": "OE.2.3.3.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.3.2": {
+    "codigo": "OE.2.3.3.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.3.3": {
+    "codigo": "OE.2.3.3.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.4": {
+    "codigo": "OE.2.3.4",
+    "descripcion": "LOSAS DE CIMENTACIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.4.1": {
+    "codigo": "OE.2.3.4.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.4.2": {
+    "codigo": "OE.2.3.4.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.4.3": {
+    "codigo": "OE.2.3.4.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.5": {
+    "codigo": "OE.2.3.5",
+    "descripcion": "SOBRECIMIENTOS REFORZADOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.5.1": {
+    "codigo": "OE.2.3.5.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.5.2": {
+    "codigo": "OE.2.3.5.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.5.3": {
+    "codigo": "OE.2.3.5.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.6": {
+    "codigo": "OE.2.3.6",
+    "descripcion": "MUROS REFORZADOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.6.1": {
+    "codigo": "OE.2.3.6.1",
+    "descripcion": "MUROS DE CONTENCIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.6.1.1": {
+    "codigo": "OE.2.3.6.1.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.6.1.2": {
+    "codigo": "OE.2.3.6.1.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.6.1.3": {
+    "codigo": "OE.2.3.6.1.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.6.2": {
+    "codigo": "OE.2.3.6.2",
+    "descripcion": "MUROS DE CONCRETO, TABIQUES DE CONCRETO Y PLACAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.6.2.1": {
+    "codigo": "OE.2.3.6.2.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.6.2.2": {
+    "codigo": "OE.2.3.6.2.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.6.2.3": {
+    "codigo": "OE.2.3.6.2.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.6.3": {
+    "codigo": "OE.2.3.6.3",
+    "descripcion": "PANTALLAS, BARANDAS Y SIMILARES",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.6.3.1": {
+    "codigo": "OE.2.3.6.2.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.6.3.2": {
+    "codigo": "OE.2.3.6.2.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.6.3.3": {
+    "codigo": "OE.2.3.6.2.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.7": {
+    "codigo": "OE.2.3.7",
+    "descripcion": "COLUMNAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.7.1": {
+    "codigo": "OE.2.3.7.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.7.2": {
+    "codigo": "OE.2.3.7.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.7.3": {
+    "codigo": "OE.2.3.7.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.8": {
+    "codigo": "OE.2.3.8",
+    "descripcion": "VIGAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.8.1": {
+    "codigo": "OE.2.3.8.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.8.2": {
+    "codigo": "OE.2.3.8.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.8.3": {
+    "codigo": "OE.2.3.8.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9": {
+    "codigo": "OE.2.3.9",
+    "descripcion": "LOSAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.1": {
+    "codigo": "OE.2.3.9.1",
+    "descripcion": "LOSAS MACIZAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.1.1": {
+    "codigo": "OE.2.3.9.1.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.9.1.2": {
+    "codigo": "OE.2.3.9.1.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.9.1.3": {
+    "codigo": "OE.2.3.9.1.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9.2": {
+    "codigo": "OE.2.3.9.2",
+    "descripcion": "LOSAS ALIGERADAS CONVENCIONALES",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.2.1": {
+    "codigo": "OE.2.3.9.2.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.9.2.2": {
+    "codigo": "OE.2.3.9.2.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.9.2.3": {
+    "codigo": "OE.2.3.9.2.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9.2.4": {
+    "codigo": "OE.2.3.9.2.4",
+    "descripcion": "PARA LADRILLOS, BLOQUES HUECOS O ELEMENTOS LIVIANOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.3.9.3": {
+    "codigo": "OE.2.3.9.3",
+    "descripcion": "LOSAS ALIGERADAS CON VIGUETAS PREFABRICADAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.3.1": {
+    "codigo": "OE.2.3.9.3.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.9.3.2": {
+    "codigo": "OE.2.3.9.3.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.9.3.3": {
+    "codigo": "OE.2.3.9.3.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9.3.4": {
+    "codigo": "OE.2.3.9.3.4",
+    "descripcion": "PARA BLOQUES PROPORCIONADOS POR EL FABRICANTE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.3.9.3.5": {
+    "codigo": "OE.2.3.9.3.5",
+    "descripcion": "PARA VIGUETAS PROPORCIONADOS POR EL FABRICANTE",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.2.3.9.4": {
+    "codigo": "OE.2.3.9.4",
+    "descripcion": "LOSAS NERVADAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.4.1": {
+    "codigo": "OE.2.3.9.4.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.9.4.2": {
+    "codigo": "OE.2.3.9.4.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.9.4.3": {
+    "codigo": "OE.2.3.9.4.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9.5": {
+    "codigo": "OE.2.3.9.5",
+    "descripcion": "LOSAS CÁSCARA",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.5.1": {
+    "codigo": "OE.2.3.9.5.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.9.5.2": {
+    "codigo": "OE.2.3.9.5.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.9.5.3": {
+    "codigo": "OE.2.3.9.5.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9.6": {
+    "codigo": "OE.2.3.9.6",
+    "descripcion": "LOSA HONGO",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.6.1": {
+    "codigo": "OE.2.3.9.6.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.9.6.2": {
+    "codigo": "OE.2.3.9.6.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.9.6.3": {
+    "codigo": "OE.2.3.9.6.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9.7": {
+    "codigo": "OE.2.3.9.7",
+    "descripcion": "LOSAS ESPECIALES",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.9.7.1": {
+    "codigo": "OE.2.3.9.7.1",
+    "descripcion": "PARA CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.9.7.2": {
+    "codigo": "OE.2.3.9.7.2",
+    "descripcion": "PARA ENCOFRADOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.9.7.3": {
+    "codigo": "OE.2.3.9.7.3",
+    "descripcion": "PARA ARMADURA",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.9.7.4": {
+    "codigo": "OE.2.3.9.7.4",
+    "descripcion": " PARA ELEMENTOS COMPLEMENTARIOS(BLOQUES, DOMOS, ELEMENTOS ESPECIALES)",
+    "tipo": "partida",
+    "unidad": "und",
+    "unidad_alt": "glb"
+  },
+  "OE.2.3.10": {
+    "codigo": "OE.2.3.10",
+    "descripcion": "ESCALERAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.10.1": {
+    "codigo": "OE.2.3.10.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.10.2": {
+    "codigo": "OE.2.3.10.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.10.3": {
+    "codigo": "OE.2.3.10.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.11": {
+    "codigo": "OE.2.3.11",
+    "descripcion": "CAJA DE ASCENSORES Y SIMILARES",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.11.1": {
+    "codigo": "OE.2.3.11.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.11.2": {
+    "codigo": "OE.2.3.11.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.11.3": {
+    "codigo": "OE.2.3.11.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.12": {
+    "codigo": "OE.2.3.12",
+    "descripcion": "CISTERNAS SUBTERRÁNEAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.12.1": {
+    "codigo": "OE.2.3.12.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.12.2": {
+    "codigo": "OE.2.3.12.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.12.3": {
+    "codigo": "OE.2.3.12.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.13": {
+    "codigo": "OE.2.3.13",
+    "descripcion": "TANQUES ELEVADOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.13.1": {
+    "codigo": "OE.2.3.13.1",
+    "descripcion": "PARA EL CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.13.2": {
+    "codigo": "OE.2.3.13.2",
+    "descripcion": "PARA EL ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.13.3": {
+    "codigo": "OE.2.3.13.3",
+    "descripcion": "PARA LA ARMADURA DE ACERO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.14": {
+    "codigo": "OE.2.3.14",
+    "descripcion": "PILOTES",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.14.1": {
+    "codigo": "OE.2.3.14.1",
+    "descripcion": "PARA LOS PILOTES",
+    "tipo": "partida",
+    "unidad": "m",
+    "unidad_alt": "und"
+  },
+  "OE.2.3.15": {
+    "codigo": "OE.2.3.15",
+    "descripcion": "CAISSONES",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.15.1": {
+    "codigo": "OE.2.3.15.1",
+    "descripcion": "PARA CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.15.2": {
+    "codigo": "OE.2.3.15.2",
+    "descripcion": "PARA ENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.15.3": {
+    "codigo": "OE.2.3.15.3",
+    "descripcion": "PARA ARMADURA",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.16": {
+    "codigo": "OE.2.3.16",
+    "descripcion": "ESTRUCTURAS DE CONCRETO PRETENSADO O POSTENSADO",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.16.1": {
+    "codigo": "OE.2.3.16.1",
+    "descripcion": "VIGAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.16.1.1": {
+    "codigo": "OE.2.3.16.1.1",
+    "descripcion": "CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.16.1.2": {
+    "codigo": "OE.2.3.16.1.2",
+    "descripcion": "ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.16.1.3": {
+    "codigo": "OE.2.3.16.1.3",
+    "descripcion": "ACERO DE REFUERZO CONVENCIONAL",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.16.1.4": {
+    "codigo": "OE.2.3.16.1.4",
+    "descripcion": "PROCESO DE ANCLAJE Y REFUERZO",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.2.3.16.2": {
+    "codigo": "OE.2.3.16.2",
+    "descripcion": "LOSAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.3.16.2.1": {
+    "codigo": "OE.2.3.16.2.1",
+    "descripcion": "CONCRETO",
+    "tipo": "partida",
+    "unidad": "m3"
+  },
+  "OE.2.3.16.2.2": {
+    "codigo": "OE.2.3.16.2.2",
+    "descripcion": "ENCOFRADO Y DESENCOFRADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.3.16.2.3": {
+    "codigo": "OE.2.3.16.2.3",
+    "descripcion": "ACERO DE REFUERZO",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.2.3.16.2.4": {
+    "codigo": "OE.2.3.16.2.4",
+    "descripcion": "PROCESO DE ANCLAJE Y REFUERZO",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.2.3.17": {
+    "codigo": "OE.2.3.17",
+    "descripcion": "ESTRUCTURAS PREFABRICADAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4": {
+    "codigo": "OE.2.4",
+    "descripcion": "ESTRUCTURAS METÁLICAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.1": {
+    "codigo": "OE.2.4.1",
+    "descripcion": "COLUMNAS O PILARES",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.1.1": {
+    "codigo": "OE.2.4.1.1",
+    "descripcion": "PARA ARMADO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.1.2": {
+    "codigo": "OE.2.4.1.2",
+    "descripcion": "PARA MONTAJE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.2": {
+    "codigo": "OE.2.4.2",
+    "descripcion": "VIGAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.2.1": {
+    "codigo": "OE.2.4.2.1",
+    "descripcion": "PARA ARMADO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.2.2": {
+    "codigo": "OE.2.4.2.2",
+    "descripcion": "PARA MONTAJE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.3": {
+    "codigo": "OE.2.4.3",
+    "descripcion": "VIGUETAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.3.1": {
+    "codigo": "OE.2.4.3.1",
+    "descripcion": "PARA ARMADO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.3.2": {
+    "codigo": "OE.2.4.3.2",
+    "descripcion": "PARA MONTAJE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.4": {
+    "codigo": "OE.2.4.4",
+    "descripcion": "TIJERALES Y RETICULADOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.4.1": {
+    "codigo": "OE.2.4.4.1",
+    "descripcion": "PARA ARMADO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.4.2": {
+    "codigo": "OE.2.4.4.2",
+    "descripcion": "PARA MONTAJE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.5": {
+    "codigo": "OE.2.4.5",
+    "descripcion": "CORREAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.5.1": {
+    "codigo": "OE.2.4.5.1",
+    "descripcion": "PARA ARMADO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.5.2": {
+    "codigo": "OE.2.4.5.2",
+    "descripcion": "PARA MONTAJE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.4.6": {
+    "codigo": "OE.2.4.6",
+    "descripcion": "COBERTURAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.6.1": {
+    "codigo": "OE.2.4.6.1",
+    "descripcion": "CON PLANCHAS CORRUGADAS GALVANIZADAS",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.6.2": {
+    "codigo": "OE.2.4.6.2",
+    "descripcion": "CON PLANCHAS CORRUGADAS DE FIBRO-CEMENTO",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.6.3": {
+    "codigo": "OE.2.4.6.3",
+    "descripcion": "CON PLANCHAS CORRUGADAS DE ALUMINIO",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.6.4": {
+    "codigo": "OE.2.4.6.4",
+    "descripcion": "CON PLANCHAS CORRUGADAS PLÁSTICAS",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.6.5": {
+    "codigo": "OE.2.4.6.5",
+    "descripcion": "CON TEJAS",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.6.6": {
+    "codigo": "OE.2.4.6.6",
+    "descripcion": "CON LADRILLOS DE VIDRIO",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.6.7": {
+    "codigo": "OE.2.4.6.7",
+    "descripcion": "CON VIDRIO",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.7": {
+    "codigo": "OE.2.4.7",
+    "descripcion": "ELEMENTOS PARA AGUAS PLUVIALES",
+    "tipo": "carpeta"
+  },
+  "OE.2.4.7.1": {
+    "codigo": "OE.2.4.7.1",
+    "descripcion": "PARA CUMBRERAS",
+    "tipo": "partida",
+    "unidad": "m",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.7.2": {
+    "codigo": "OE.2.4.7.2",
+    "descripcion": "A CANALETAS",
+    "tipo": "partida",
+    "unidad": "m",
+    "unidad_alt": "und"
+  },
+  "OE.2.4.7.3": {
+    "codigo": "OE.2.4.7.3",
+    "descripcion": "PARA BAJANTES",
+    "tipo": "partida",
+    "unidad": "m",
+    "unidad_alt": "und"
+  },
+  "OE.2.5": {
+    "codigo": "OE.2.5",
+    "descripcion": "ESTRUCTURA DE MADERA",
+    "tipo": "carpeta"
+  },
+  "OE.2.5.1": {
+    "codigo": "OE.2.5.1",
+    "descripcion": "COLUMNAS O PILARES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.5.2": {
+    "codigo": "OE.2.5.2",
+    "descripcion": "VIGAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.5.3": {
+    "codigo": "OE.2.5.3",
+    "descripcion": "TIJERALES Y RETICULADOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.5.4": {
+    "codigo": "OE.2.5.4",
+    "descripcion": "CORREAS",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.2.5.5": {
+    "codigo": "OE.2.5.5",
+    "descripcion": "COBERTURAS",
+    "tipo": "carpeta"
+  },
+  "OE.2.5.5.1": {
+    "codigo": "OE.2.5.5.1",
+    "descripcion": "CON PLANCHAS CORRUGAS GALVANIZADAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.5.5.2": {
+    "codigo": "OE.2.5.5.2",
+    "descripcion": "CON PLANCHAS CORRUGADAS DE FIBRO-CEMENTO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.5.5.3": {
+    "codigo": "OE.2.5.5.3",
+    "descripcion": "CON PLANCHAS CORRUGADAS DE ALUMINIO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.5.5.4": {
+    "codigo": "OE.2.5.5.4",
+    "descripcion": "CON PLANCHAS CORRUGADAS PLÁSTICAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.5.5.5": {
+    "codigo": "OE.2.5.5.5",
+    "descripcion": "CON TEJAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.5.5.6": {
+    "codigo": "OE.2.5.5.6",
+    "descripcion": "CON MADERA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.5.5.7": {
+    "codigo": "OE.2.5.5.7",
+    "descripcion": "CON DIVERSAS PLANCHAS LISAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.2.5.6": {
+    "codigo": "OE.2.5.6",
+    "descripcion": "PILOTES DE MADERA",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.2.6": {
+    "codigo": "OE.2.6",
+    "descripcion": "VARIOS",
+    "tipo": "carpeta"
+  },
+  "OE.2.6.1": {
+    "codigo": "OE.2.6.1",
+    "descripcion": "JUNTAS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3": {
+    "codigo": "OE.3",
+    "descripcion": "ARQUITECTURA",
+    "tipo": "carpeta"
+  },
+  "OE.3.1": {
+    "codigo": "OE.3.1",
+    "descripcion": "MUROS Y TABIQUES DE ALBAÑILERIA",
+    "tipo": "carpeta"
+  },
+  "OE.3.1.1": {
+    "codigo": "OE.3.1.1",
+    "descripcion": "MUROS DE LADRILLO KING KONG DE ARCILLA (A MAQUINA O ARTESANALMENTE)",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.2": {
+    "codigo": "OE.3.1.2",
+    "descripcion": "MUROS DE LADRILLO CORRIENTE DE ARCILLA (A MAQUINA O ARTESANALMENTE)",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.3": {
+    "codigo": "OE.3.1.3",
+    "descripcion": "MUROS DE LADRILLO PANDERETA DE ARCILLA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.4": {
+    "codigo": "OE.3.1.4",
+    "descripcion": "MUROS DE BLOCK SÍLICO-CALCÁREO K.K. STANDARD",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.5": {
+    "codigo": "OE.3.1.5",
+    "descripcion": "MUROS DE BLOCK SÍLICO-CALCÁREO TABIQUES (TRES HUECOS)",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.6": {
+    "codigo": "OE.3.1.6",
+    "descripcion": "MUROS DE LADRILLO DE CONCRETO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.7": {
+    "codigo": "OE.3.1.7",
+    "descripcion": "MUROS DE BLOQUES HUECOS DE CONCRETO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.8": {
+    "codigo": "OE.3.1.8",
+    "descripcion": "MUROS DE ALBAÑILERÍA ARMADA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.9": {
+    "codigo": "OE.3.1.9",
+    "descripcion": "MUROS DE ALBAÑILERÍA CONFINADA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.10": {
+    "codigo": "OE.3.1.10",
+    "descripcion": "MUROS CON EL SISTEMA DE CONSTRUCCIÓN EN SECO ETERNIT (SISTEMA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.11": {
+    "codigo": "OE.3.1.11",
+    "descripcion": "MUROS DE PIEDRA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.12": {
+    "codigo": "OE.3.1.12",
+    "descripcion": "MUROS DE ADOBE (SIMPLE O ESTABILIZADO)",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.13": {
+    "codigo": "OE.3.1.13",
+    "descripcion": "TABIQUES CON ELEMENTOS LEVES (FIBROCEMENTO, QUINCHA, ETC.)",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.14": {
+    "codigo": "OE.3.1.14",
+    "descripcion": "OTROS TIPOS DE MUROS O TABIQUES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.1.15": {
+    "codigo": "OE.3.1.15",
+    "descripcion": "BARANDAS Y PARAPETOS",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "m"
+  },
+  "OE.3.1.16": {
+    "codigo": "OE.3.1.16",
+    "descripcion": "ARCOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.1.17": {
+    "codigo": "OE.3.1.17",
+    "descripcion": "ESTUFAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.1.18": {
+    "codigo": "OE.3.1.18",
+    "descripcion": "ACEROS DE AMARRE",
+    "tipo": "partida",
+    "unidad": "kg"
+  },
+  "OE.3.2": {
+    "codigo": "OE.3.2",
+    "descripcion": "REVOQUES Y REVESTIMIENTOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.2.1": {
+    "codigo": "OE.3.2.1",
+    "descripcion": "TARRAJEO RAYADO PRIMARIO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.2": {
+    "codigo": "OE.3.2.2",
+    "descripcion": "TARRAJEO EN INTERIORES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.3": {
+    "codigo": "OE.3.2.3",
+    "descripcion": "TARRAJEO EN EXTERIORES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.4": {
+    "codigo": "OE.3.2.4",
+    "descripcion": "TARRAJEO FINO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.5": {
+    "codigo": "OE.3.2.5",
+    "descripcion": "TARRAJEO EN COLUMNAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.6": {
+    "codigo": "OE.3.2.6",
+    "descripcion": "TARRAJEO EN VIGAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.7": {
+    "codigo": "OE.3.2.7",
+    "descripcion": "TARRAJEO DE MUROS DE CONCRETO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.8": {
+    "codigo": "OE.3.2.8",
+    "descripcion": "TARRAJEO CON IMPERMEABILIZANTES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.9": {
+    "codigo": "OE.3.2.9",
+    "descripcion": "TARRAJEO SALPICADO O ESCARCHADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.10": {
+    "codigo": "OE.3.2.10",
+    "descripcion": "TARRAJEO ESPECIALES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.11": {
+    "codigo": "OE.3.2.11",
+    "descripcion": "VESTIDURAS DE DERRAMES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.12": {
+    "codigo": "OE.3.2.12",
+    "descripcion": "VESTIDURA DE ELEMENTOS DE FACHADA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.13": {
+    "codigo": "OE.3.2.13",
+    "descripcion": "EMPASTADO DE MUROS DE ADOBE",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.14": {
+    "codigo": "OE.3.2.14",
+    "descripcion": "TARRAJEO SOBRE MALLA METÁLICA EN MUROS DE ADOBE",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.15": {
+    "codigo": "OE.3.2.15",
+    "descripcion": "TARRAJEO DE DUCTOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.16": {
+    "codigo": "OE.3.2.16",
+    "descripcion": "ENLUCIDO DE YESO",
+    "tipo": "carpeta"
+  },
+  "OE.3.2.16.1": {
+    "codigo": "OE.3.2.16.1",
+    "descripcion": "ENLUCIDO DE YESO SOBRE MUROS DE ADOBE",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.16.2": {
+    "codigo": "OE.3.2.16.2",
+    "descripcion": "ENLUCIDO DE YESO SOBRE MUROS DE CONCRETO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.16.3": {
+    "codigo": "OE.3.2.16.3",
+    "descripcion": "ENLUCIDO DE YESO SOBRE MUROS DE LADRILLO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.17": {
+    "codigo": "OE.3.2.17",
+    "descripcion": "ENLUCIDO DE CUARZO EN PARAMENTO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.18": {
+    "codigo": "OE.3.2.18",
+    "descripcion": "UNIÓN DE MUROS Y CIELORRASO",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.2.19": {
+    "codigo": "OE.3.2.19",
+    "descripcion": "BRUÑAS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.2.20": {
+    "codigo": "OE.3.2.20",
+    "descripcion": "TARRAJEO EN FONDO DE ESCALERA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.21": {
+    "codigo": "OE.3.2.21",
+    "descripcion": "PREPARACIÓN DE GRADAS DE CONCRETO",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.2.22": {
+    "codigo": "OE.3.2.22",
+    "descripcion": "PREPARACIÓN DE DESCANSOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.23": {
+    "codigo": "OE.3.2.23",
+    "descripcion": "DESCANSOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.2.24": {
+    "codigo": "OE.3.2.24",
+    "descripcion": "ENCHAPES",
+    "tipo": "carpeta"
+  },
+  "OE.3.2.24.1": {
+    "codigo": "OE.3.2.24.1",
+    "descripcion": "SOLAQUEO DE MUROS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3": {
+    "codigo": "OE.3.3",
+    "descripcion": "CIELORRASOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.3.1": {
+    "codigo": "OE.3.3.1",
+    "descripcion": "CIELORRASO CON YESO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3.2": {
+    "codigo": "OE.3.3.2",
+    "descripcion": "YESO EN VIGAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3.3": {
+    "codigo": "OE.3.3.3",
+    "descripcion": "CIELORRASO CON MEZCLA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3.4": {
+    "codigo": "OE.3.3.4",
+    "descripcion": "CIELORRASO PEGADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3.5": {
+    "codigo": "OE.3.3.5",
+    "descripcion": "CIELORRASO CON EL SISTEMA DE CONSTRUCCIÓN EN SECO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3.6": {
+    "codigo": "OE.3.3.6",
+    "descripcion": "FALSO CIELORRASO",
+    "tipo": "carpeta"
+  },
+  "OE.3.3.6.1": {
+    "codigo": "OE.3.3.6.1",
+    "descripcion": "DE MALLA METÁLICA",
+    "tipo": "carpeta"
+  },
+  "OE.3.3.6.1.1": {
+    "codigo": "OE.3.3.6.1.1",
+    "descripcion": "SOPORTE Y MALLA METÁLICA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3.6.1.2": {
+    "codigo": "OE.3.3.6.1.2",
+    "descripcion": "MEZCLA APLICADA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.3.6.2": {
+    "codigo": "OE.3.3.6.2",
+    "descripcion": "DE PANELES",
+    "tipo": "carpeta"
+  },
+  "OE.3.3.6.2.1": {
+    "codigo": "OE.3.3.6.2.1",
+    "descripcion": "PARA SUSPENSIÓN",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.3.3.6.2.2": {
+    "codigo": "OE.3.3.6.2.2",
+    "descripcion": "PARA PANELES",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.3.4": {
+    "codigo": "OE.3.4",
+    "descripcion": "PISOS Y PAVIMENTOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.4.1": {
+    "codigo": "OE.3.4.1",
+    "descripcion": "CONTRAPISOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2": {
+    "codigo": "OE.3.4.2",
+    "descripcion": "PISOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.4.2.1": {
+    "codigo": "OE.3.4.2.1",
+    "descripcion": "LOSETA CORRIENTE",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.2": {
+    "codigo": "OE.3.4.2.2",
+    "descripcion": "LOSETA VENECIANA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.3": {
+    "codigo": "OE.3.4.2.3",
+    "descripcion": "LOSETA TIPO CORCHO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.4": {
+    "codigo": "OE.3.4.2.4",
+    "descripcion": "LOSETA DE MÁRMOL RECONSTRUIDO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.5": {
+    "codigo": "OE.3.4.2.5",
+    "descripcion": "LOSETAS DE CANTO RODADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.6": {
+    "codigo": "OE.3.4.2.6",
+    "descripcion": "LOSETAS DE ACABADOS ESPECIALES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.7": {
+    "codigo": "OE.3.4.2.7",
+    "descripcion": "BALDOSA ASFÁLTICA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.8": {
+    "codigo": "OE.3.4.2.8",
+    "descripcion": "BALDOSA VINÍLICA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.9": {
+    "codigo": "OE.3.4.2.9",
+    "descripcion": "TERRAZO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.10": {
+    "codigo": "OE.3.4.2.10",
+    "descripcion": "MÁRMOL",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.11": {
+    "codigo": "OE.3.4.2.11",
+    "descripcion": "MAYÓLICA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.12": {
+    "codigo": "OE.3.4.2.12",
+    "descripcion": "PEPELMA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.13": {
+    "codigo": "OE.3.4.2.13",
+    "descripcion": "CANTOS RODADOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.14": {
+    "codigo": "OE.3.4.2.14",
+    "descripcion": "GRANITO LAVADO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.15": {
+    "codigo": "OE.3.4.2.15",
+    "descripcion": "LAJA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.16": {
+    "codigo": "OE.3.4.2.16",
+    "descripcion": "MADERA MACHIHEMBRADA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.17": {
+    "codigo": "OE.3.4.2.17",
+    "descripcion": "PARQUET",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.18": {
+    "codigo": "OE.3.4.2.18",
+    "descripcion": "IMITACIÓN MADERA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.19": {
+    "codigo": "OE.3.4.2.19",
+    "descripcion": "PISOS LAMINADOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.20": {
+    "codigo": "OE.3.4.2.20",
+    "descripcion": "PORCELANATOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.21": {
+    "codigo": "OE.3.4.2.21",
+    "descripcion": "CERÁMICOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.22": {
+    "codigo": "OE.3.4.2.22",
+    "descripcion": "LOSETAS DE CEMENTO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.2.23": {
+    "codigo": "OE.3.4.2.23",
+    "descripcion": "OTROS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.3": {
+    "codigo": "OE.3.4.3",
+    "descripcion": "PISOS DE CONCRETO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.4": {
+    "codigo": "OE.3.4.4",
+    "descripcion": "ACABADO DE CONCRETO EN PISOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.5": {
+    "codigo": "OE.3.4.5",
+    "descripcion": "SARDINELES",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.4.6": {
+    "codigo": "OE.3.4.6",
+    "descripcion": "VEREDAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.7": {
+    "codigo": "OE.3.4.7",
+    "descripcion": "PISTAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.4.8": {
+    "codigo": "OE.3.4.8",
+    "descripcion": "SOBREPISO O “PISO TÉCNICO”",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5": {
+    "codigo": "OE.3.5",
+    "descripcion": "ZOCALOS Y CONTRAZÓCALOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.5.1": {
+    "codigo": "OE.3.5.1",
+    "descripcion": "ZOCALOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.5.1.1": {
+    "codigo": "OE.3.5.1.1",
+    "descripcion": "PEPELMA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.2": {
+    "codigo": "OE.3.5.1.2",
+    "descripcion": "MÁRMOL",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.3": {
+    "codigo": "OE.3.5.1.3",
+    "descripcion": "GRANITO ARTIFICIAL",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.4": {
+    "codigo": "OE.3.5.1.4",
+    "descripcion": "DE CEMENTO SIMPLE",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.5": {
+    "codigo": "OE.3.5.1.5",
+    "descripcion": "DE CANTOS RODADOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.6": {
+    "codigo": "OE.3.5.1.6",
+    "descripcion": "DE MADERA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.7": {
+    "codigo": "OE.3.5.1.7",
+    "descripcion": "DE PLANCHAS PLÁSTICAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.8": {
+    "codigo": "OE.3.5.1.8",
+    "descripcion": "DE LADRILLOS DECORATIVOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.9": {
+    "codigo": "OE.3.5.1.9",
+    "descripcion": "REVESTIMIENTO ESPECIALES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.10": {
+    "codigo": "OE.3.5.1.10",
+    "descripcion": "PORCELANATO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.11": {
+    "codigo": "OE.3.5.1.11",
+    "descripcion": "CERÁMICO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.12": {
+    "codigo": "OE.3.5.1.12",
+    "descripcion": "ALUMINIO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.1.13": {
+    "codigo": "OE.3.5.1.13",
+    "descripcion": "OTROS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.5.2": {
+    "codigo": "OE.3.5.2",
+    "descripcion": "CONTRAZOCALOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.5.2.1": {
+    "codigo": "OE.3.5.2.1",
+    "descripcion": "LOSETA",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.2": {
+    "codigo": "OE.3.5.2.2",
+    "descripcion": "GRANITO VACIADO EN OBRA",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.3": {
+    "codigo": "OE.3.5.2.3",
+    "descripcion": "CEMENTO",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.4": {
+    "codigo": "OE.3.5.2.4",
+    "descripcion": "VINÍLICO",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.5": {
+    "codigo": "OE.3.5.2.5",
+    "descripcion": "ALUMINIO",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.6": {
+    "codigo": "OE.3.5.2.6",
+    "descripcion": "MÁRMOL",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.7": {
+    "codigo": "OE.3.5.2.7",
+    "descripcion": "MADERA",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.8": {
+    "codigo": "OE.3.5.2.8",
+    "descripcion": "PORCELANATO",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.9": {
+    "codigo": "OE.3.5.2.9",
+    "descripcion": "CERÁMICO",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.10": {
+    "codigo": "OE.3.5.2.10",
+    "descripcion": "ACERO INOXIDABLE",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.5.2.11": {
+    "codigo": "OE.3.5.2.11",
+    "descripcion": "OTROS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.6": {
+    "codigo": "OE.3.6",
+    "descripcion": "COBERTURAS",
+    "tipo": "carpeta"
+  },
+  "OE.3.6.1": {
+    "codigo": "OE.3.6.1",
+    "descripcion": "COBERTURA DE TORTA DE BARRO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.2": {
+    "codigo": "OE.3.6.2",
+    "descripcion": "LADRILLO PASTELERO SOBRE TORTA DE BARRO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.3": {
+    "codigo": "OE.3.6.3",
+    "descripcion": "LADRILLO PASTELERO SOBRE MORTERO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.4": {
+    "codigo": "OE.3.6.4",
+    "descripcion": "MATERIAL IMPERMEABILIZANTE",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.5": {
+    "codigo": "OE.3.6.5",
+    "descripcion": "RECUBRIMIENTOS SOBRE ESTRUCTURAS DE MADERA, METAL, ETC",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.6": {
+    "codigo": "OE.3.6.6",
+    "descripcion": "RECUBRIMIENTOS CON PLANCHAS METÁLICAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.7": {
+    "codigo": "OE.3.6.7",
+    "descripcion": "RECUBRIMIENTOS CON PANELES TERMO-ACÚSTICOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.8": {
+    "codigo": "OE.3.6.8",
+    "descripcion": "RECUBRIMIENTOS DE MANTO ASFÁLTICO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.6.9": {
+    "codigo": "OE.3.6.9",
+    "descripcion": "OTROS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.7": {
+    "codigo": "OE.3.7",
+    "descripcion": "CARPINTERIA DE MADERA",
+    "tipo": "carpeta"
+  },
+  "OE.3.7.1": {
+    "codigo": "OE.3.7.1",
+    "descripcion": "PUERTAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.7.2": {
+    "codigo": "OE.3.7.2",
+    "descripcion": "VENTANAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.7.3": {
+    "codigo": "OE.3.7.3",
+    "descripcion": "PERSIANAS DE MADERA",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.7.4": {
+    "codigo": "OE.3.7.4",
+    "descripcion": "MAMPARAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.7.5": {
+    "codigo": "OE.3.7.5",
+    "descripcion": "FORRO DE VANOS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.7.6": {
+    "codigo": "OE.3.7.6",
+    "descripcion": "DIVISIONES PARA SERVICIOS HIGIÉNICOS",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "m"
+  },
+  "OE.3.7.7": {
+    "codigo": "OE.3.7.7",
+    "descripcion": "DIVISIÓN ORNAMENTAL DE AMBIENTES",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "m"
+  },
+  "OE.3.7.8": {
+    "codigo": "OE.3.7.8",
+    "descripcion": "TABIQUES DE MADERA",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.7.9": {
+    "codigo": "OE.3.7.9",
+    "descripcion": "ESCALERAS DE MADERA",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.7.10": {
+    "codigo": "OE.3.7.10",
+    "descripcion": "BARANDAS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.7.11": {
+    "codigo": "OE.3.7.11",
+    "descripcion": "PASAMANOS AISLADOS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.7.12": {
+    "codigo": "OE.3.7.12",
+    "descripcion": "MUEBLES DE COCINA Y SIMILARES",
+    "tipo": "partida",
+    "unidad": "und",
+    "unidad_alt": "m"
+  },
+  "OE.3.7.13": {
+    "codigo": "OE.3.7.13",
+    "descripcion": "VITRINAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.7.14": {
+    "codigo": "OE.3.7.14",
+    "descripcion": "CLOSET",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.8": {
+    "codigo": "OE.3.8",
+    "descripcion": "CARPINTERÍA METÁLICA Y HERRERÍA",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.1": {
+    "codigo": "OE.3.8.1",
+    "descripcion": "VENTANAS DE FIERRO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.2": {
+    "codigo": "OE.3.8.2",
+    "descripcion": "PUERTAS DE FIERRO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.3": {
+    "codigo": "OE.3.8.3",
+    "descripcion": "MAMPARAS DE FIERRO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.4": {
+    "codigo": "OE.3.8.4",
+    "descripcion": "VENTANAS DE ALUMINIO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.5": {
+    "codigo": "OE.3.8.5",
+    "descripcion": "PUERTAS DE ALUMINIO",
+    "tipo": "partida",
+    "unidad": "m2",
+    "unidad_alt": "und"
+  },
+  "OE.3.8.6": {
+    "codigo": "OE.3.8.6",
+    "descripcion": "MAMPARAS DE ALUMINIO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.7": {
+    "codigo": "OE.3.8.7",
+    "descripcion": "CELOSÍAS DE ALUMINIO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.8": {
+    "codigo": "OE.3.8.8",
+    "descripcion": "CORTINAS ENROLLABLES DE FIERRO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.9": {
+    "codigo": "OE.3.8.9",
+    "descripcion": "PUERTAS PLEGABLES DE FIERRO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.10": {
+    "codigo": "OE.3.8.10",
+    "descripcion": "PUERTAS DE PLANCHA METÁLICA",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.11": {
+    "codigo": "OE.3.8.11",
+    "descripcion": "PUERTAS DE FIERRO Y MALLA",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.12": {
+    "codigo": "OE.3.8.12",
+    "descripcion": "DIVISIÓN DE PLANCHA DE ACERO GALVANIZADO PARA SERVICIOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.13": {
+    "codigo": "OE.3.8.13",
+    "descripcion": "DIVISIÓN DE ALUMINIO PARA SERVICIOS HIGIÉNICOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.14": {
+    "codigo": "OE.3.8.14",
+    "descripcion": "BARANDAS METÁLICAS",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.15": {
+    "codigo": "OE.3.8.15",
+    "descripcion": "PASAMANOS AISLADOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.16": {
+    "codigo": "OE.3.8.16",
+    "descripcion": "CERCOS DE FIERRO",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.17": {
+    "codigo": "OE.3.8.17",
+    "descripcion": "ESCALERAS METÁLICAS",
+    "tipo": "carpeta"
+  },
+  "OE.3.8.18": {
+    "codigo": "OE.3.8.18",
+    "descripcion": "ELEMENTOS METÁLICOS ESPECIALES",
+    "tipo": "carpeta"
+  },
+  "OE.3.9": {
+    "codigo": "OE.3.9",
+    "descripcion": "CERRAJERÍA",
+    "tipo": "carpeta"
+  },
+  "OE.3.9.1": {
+    "codigo": "OE.3.9.1",
+    "descripcion": "BISAGRAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.9.2": {
+    "codigo": "OE.3.9.2",
+    "descripcion": "CERRADURAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.9.3": {
+    "codigo": "OE.3.9.3",
+    "descripcion": "SISTEMAS O MECANISMOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.9.4": {
+    "codigo": "OE.3.9.4",
+    "descripcion": "ACCESORIOS DE CIERRE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.9.5": {
+    "codigo": "OE.3.9.5",
+    "descripcion": "ACCESORIOS EN GENERAL",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.9.6": {
+    "codigo": "OE.3.9.6",
+    "descripcion": "CERRAJERÍA PARA MUEBLES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.3.10": {
+    "codigo": "OE.3.10",
+    "descripcion": "VIDRIOS, CRISTALES Y SIMILARES",
+    "tipo": "carpeta"
+  },
+  "OE.3.10.1": {
+    "codigo": "OE.3.10.1",
+    "descripcion": "ESPEJOS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.10.2": {
+    "codigo": "OE.3.10.2",
+    "descripcion": "VITRAL",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.10.3": {
+    "codigo": "OE.3.10.3",
+    "descripcion": "BLOQUES DE VIDRIO",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.11": {
+    "codigo": "OE.3.11",
+    "descripcion": "PINTURA",
+    "tipo": "carpeta"
+  },
+  "OE.3.11.1": {
+    "codigo": "OE.3.11.1",
+    "descripcion": "PINTURA DE CIELOS RASOS, VIGAS, COLUMNAS Y PAREDES",
+    "tipo": "carpeta"
+  },
+  "OE.3.11.2": {
+    "codigo": "OE.3.11.2",
+    "descripcion": "PINTURA DE PUERTAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.11.3": {
+    "codigo": "OE.3.11.3",
+    "descripcion": "PINTURA DE VENTANAS",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.11.4": {
+    "codigo": "OE.3.11.4",
+    "descripcion": "PINTURA DE ENCHAPES",
+    "tipo": "partida",
+    "unidad": "m2"
+  },
+  "OE.3.11.5": {
+    "codigo": "OE.3.11.5",
+    "descripcion": "PINTURA DE CONTRAZÓCALOS Y BARANDAS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.11.6": {
+    "codigo": "OE.3.11.6",
+    "descripcion": "PINTURA DE ESTRUCTURAS METÁLICAS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.3.12": {
+    "codigo": "OE.3.12",
+    "descripcion": "VARIOS, LIMPIEZA, JARDINERÍA",
+    "tipo": "carpeta"
+  },
+  "OE.3.12.1": {
+    "codigo": "OE.3.12.1",
+    "descripcion": "LIMPIEZA PERMANENTE DE OBRA",
+    "tipo": "carpeta"
+  },
+  "OE.3.12.2": {
+    "codigo": "OE.3.12.2",
+    "descripcion": "LIMPIEZA FINAL",
+    "tipo": "carpeta"
+  },
+  "OE.3.12.3": {
+    "codigo": "OE.3.12.3",
+    "descripcion": "LIMPIEZA DE VIDRIOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.12.4": {
+    "codigo": "OE.3.12.4",
+    "descripcion": "ENCERADOS DE PISOS",
+    "tipo": "carpeta"
+  },
+  "OE.3.12.5": {
+    "codigo": "OE.3.12.5",
+    "descripcion": "SEMBRÍO DE GRASS",
+    "tipo": "carpeta"
+  },
+  "OE.3.12.6": {
+    "codigo": "OE.3.12.6",
+    "descripcion": "TRABAJOS DE JARDINERÍA",
+    "tipo": "carpeta"
+  },
+  "OE.3.13": {
+    "codigo": "OE.3.13",
+    "descripcion": "OTROS",
+    "tipo": "carpeta"
+  },
+  "OE.3.13.1": {
+    "codigo": "OE.3.13.1",
+    "descripcion": "PODIO DE CONCRETO",
+    "tipo": "carpeta"
+  },
+  "OE.4": {
+    "codigo": "OE.4",
+    "descripcion": "INSTALACIONES SANITARIAS",
+    "tipo": "carpeta"
+  },
+  "OE.4.1": {
+    "codigo": "OE.4.1",
+    "descripcion": "APARATOS SANITARIOS Y ACCESORIOS",
+    "tipo": "carpeta"
+  },
+  "OE.4.1.1": {
+    "codigo": "OE.4.1.1",
+    "descripcion": "SUMINISTRO DE APARATOS SANITARIOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.1.2": {
+    "codigo": "OE.4.1.2",
+    "descripcion": "SUMINISTRO DE ACCESORIOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.1.3": {
+    "codigo": "OE.4.1.3",
+    "descripcion": "INSTALACIÓN DE APARATOS SANITARIOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.1.4": {
+    "codigo": "OE.4.1.4",
+    "descripcion": "INSTALACIÓN DE ACCESORIOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.2": {
+    "codigo": "OE.4.2",
+    "descripcion": "SISTEMA DE AGUA FRIA",
+    "tipo": "carpeta"
+  },
+  "OE.4.2.1": {
+    "codigo": "OE.4.2.1",
+    "descripcion": "SALIDA DE AGUA FRÍA",
+    "tipo": "partida",
+    "unidad": "pto"
+  },
+  "OE.4.2.2": {
+    "codigo": "OE.4.2.2",
+    "descripcion": "REDES DE DISTRIBUCIÓN",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.4.2.3": {
+    "codigo": "OE.4.2.3",
+    "descripcion": "REDES DE ALIMENTACIÓN",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.4.2.4": {
+    "codigo": "OE.4.2.4",
+    "descripcion": "ACCESORIOS DE REDES DE AGUA",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.2.5": {
+    "codigo": "OE.4.2.5",
+    "descripcion": "VÁLVULAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.2.6": {
+    "codigo": "OE.4.2.6",
+    "descripcion": "ALMACENAMIENTO DE AGUA",
+    "tipo": "partida",
+    "unidad": "glb"
+  },
+  "OE.4.2.7": {
+    "codigo": "OE.4.2.7",
+    "descripcion": "EQUIPOS Y OTRAS INSTALACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.4.3": {
+    "codigo": "OE.4.3",
+    "descripcion": "SISTEMA DE AGUA CALIENTE",
+    "tipo": "carpeta"
+  },
+  "OE.4.3.1": {
+    "codigo": "OE.4.3.1",
+    "descripcion": "SALIDA DE AGUA CALIENTE",
+    "tipo": "partida",
+    "unidad": "pto"
+  },
+  "OE.4.3.2": {
+    "codigo": "OE.4.3.2",
+    "descripcion": "REDES DE DISTRIBUCIÓN DE AGUA CALIENTE",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.4.3.3": {
+    "codigo": "OE.4.3.3",
+    "descripcion": "ACCESORIOS DE REDES DE AGUA CALIENTE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.3.4": {
+    "codigo": "OE.4.3.4",
+    "descripcion": "VÁLVULAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.3.5": {
+    "codigo": "OE.4.3.5",
+    "descripcion": "EQUIPOS DE PRODUCCIÓN DE AGUA CALIENTE",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.4": {
+    "codigo": "OE.4.4",
+    "descripcion": "SISTEMA CONTRA INCENDIO",
+    "tipo": "carpeta"
+  },
+  "OE.4.4.1": {
+    "codigo": "OE.4.4.1",
+    "descripcion": "REDES DE ALIMENTACIÓN",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.4.4.2": {
+    "codigo": "OE.4.4.2",
+    "descripcion": "ACCESORIOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.4.3": {
+    "codigo": "OE.4.4.3",
+    "descripcion": "SUMINISTRO E INSTALACIÓN DE GABINETES CONTRA INCENDIO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.4.4": {
+    "codigo": "OE.4.4.4",
+    "descripcion": "SUMINISTRO E INSTALACIÓN DE JUNTA ANTISÍSMICA",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.4.5": {
+    "codigo": "OE.4.4.5",
+    "descripcion": "VÁLVULAS DE SISTEMA CONTRA INCENDIO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.4.6": {
+    "codigo": "OE.4.4.6",
+    "descripcion": "INSTALACIONES ESPECIALES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.5": {
+    "codigo": "OE.4.5",
+    "descripcion": "SISTEMA DE DRENAJE PLUVIAL",
+    "tipo": "carpeta"
+  },
+  "OE.4.5.1": {
+    "codigo": "OE.4.5.1",
+    "descripcion": "RED DE RECOLECCIÓN",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.4.5.2": {
+    "codigo": "OE.4.5.2",
+    "descripcion": "ACCESORIOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.6": {
+    "codigo": "OE.4.6",
+    "descripcion": "DESAGÜE Y VENTILACIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.4.6.1": {
+    "codigo": "OE.4.6.1",
+    "descripcion": "SALIDAS DE DESAGÜE",
+    "tipo": "partida",
+    "unidad": "pto"
+  },
+  "OE.4.6.2": {
+    "codigo": "OE.4.6.2",
+    "descripcion": "REDES DE DERIVACIÓN",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.4.6.3": {
+    "codigo": "OE.4.6.3",
+    "descripcion": "REDES COLECTORAS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.4.6.4": {
+    "codigo": "OE.4.6.4",
+    "descripcion": "ACCESORIOS DE REDES COLECTORAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.6.5": {
+    "codigo": "OE.4.6.5",
+    "descripcion": "CÁMARAS DE INSPECCIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.4.6.5.1": {
+    "codigo": "OE.4.6.5.1",
+    "descripcion": "PARA CAJAS DE REGISTRO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.6.5.2": {
+    "codigo": "OE.4.6.5.2",
+    "descripcion": "PARA BUZONES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.4.6.6": {
+    "codigo": "OE.4.6.6",
+    "descripcion": "INSTALACIONES ESPECIALES",
+    "tipo": "partida",
+    "unidad": "und",
+    "unidad_alt": "glb"
+  },
+  "OE.4.7": {
+    "codigo": "OE.4.7",
+    "descripcion": "VARIOS",
+    "tipo": "carpeta"
+  },
+  "OE.5": {
+    "codigo": "OE.5",
+    "descripcion": "INSTALACIONES ELÉCTRICAS Y MECÁNICAS",
+    "tipo": "carpeta"
+  },
+  "OE.5.1": {
+    "codigo": "OE.5.1",
+    "descripcion": "CONEXIÓN A LA RED EXTERNA DE MEDIDORES",
+    "tipo": "carpeta"
+  },
+  "OE.5.2": {
+    "codigo": "OE.5.2",
+    "descripcion": "SALIDAS PARA ALUMBRADO, TOMACORRIENTES, FUERZA Y SEÑALES",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.1": {
+    "codigo": "OE.5.2.1",
+    "descripcion": "SALIDA",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.2": {
+    "codigo": "OE.5.2.2",
+    "descripcion": "CANALIZACIONES, CONDUCTOS O TUBERÍAS",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.3": {
+    "codigo": "OE.5.2.3",
+    "descripcion": "CONDUCTORES Y CABLES DE ENERGÍA EN TUBERÍAS",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.4": {
+    "codigo": "OE.5.2.4",
+    "descripcion": "SISTEMAS DE CONDUCTOS",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.4.1": {
+    "codigo": "OE.5.2.4.1",
+    "descripcion": "BUZONES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.2.4.2": {
+    "codigo": "OE.5.2.4.2",
+    "descripcion": "CONDUCTOS",
+    "tipo": "partida",
+    "unidad": "m"
+  },
+  "OE.5.2.5": {
+    "codigo": "OE.5.2.5",
+    "descripcion": "INSTALACIONES EXPUESTAS",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.6": {
+    "codigo": "OE.5.2.6",
+    "descripcion": "TABLEROS PRINCIPALES",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.7": {
+    "codigo": "OE.5.2.7",
+    "descripcion": "TABLERO DE DISTRIBUCIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.8": {
+    "codigo": "OE.5.2.8",
+    "descripcion": "DISPOSITIVOS DE MANIOBRA Y PROTECCIÓN",
+    "tipo": "carpeta"
+  },
+  "OE.5.2.8.1": {
+    "codigo": "OE.5.2.8.1",
+    "descripcion": "DISPOSITIVOS UNIPOLARES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.2.8.2": {
+    "codigo": "OE.5.2.8.2",
+    "descripcion": "DISPOSITIVOS BIPOLARES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.2.8.3": {
+    "codigo": "OE.5.2.8.3",
+    "descripcion": "DISPOSITIVOS TRIPOLARES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.2.8.4": {
+    "codigo": "OE.5.2.8.4",
+    "descripcion": "DISPOSITIVOS TETRAPOLARES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.3": {
+    "codigo": "OE.5.3",
+    "descripcion": "INSTALACION DE PARARRAYOS",
+    "tipo": "carpeta"
+  },
+  "OE.5.4": {
+    "codigo": "OE.5.4",
+    "descripcion": "INSTALACIÓN DEL SISTEMA DE PUESTA A TIERRA",
+    "tipo": "carpeta"
+  },
+  "OE.5.5": {
+    "codigo": "OE.5.5",
+    "descripcion": "ARTEFACTOS",
+    "tipo": "carpeta"
+  },
+  "OE.5.5.1": {
+    "codigo": "OE.5.5.1",
+    "descripcion": "LÁMPARAS",
+    "tipo": "carpeta"
+  },
+  "OE.5.5.2": {
+    "codigo": "OE.5.5.2",
+    "descripcion": "REFLECTORES",
+    "tipo": "carpeta"
+  },
+  "OE.5.6": {
+    "codigo": "OE.5.6",
+    "descripcion": "EQUIPOS ELECTRICOS Y MECANICOS",
+    "tipo": "carpeta"
+  },
+  "OE.5.6.1": {
+    "codigo": "OE.5.6.1",
+    "descripcion": "BOMBA PARA AGUA",
+    "tipo": "carpeta"
+  },
+  "OE.5.6.2": {
+    "codigo": "OE.5.6.2",
+    "descripcion": "BOMBAS PARA DESAGÜE (IGUAL A BOMBAS PARA AGUA)",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.3": {
+    "codigo": "OE.5.6.3",
+    "descripcion": "OTRAS BOMBAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.4": {
+    "codigo": "OE.5.6.4",
+    "descripcion": "GRUPOS ELECTRÓGENOS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.5": {
+    "codigo": "OE.5.6.5",
+    "descripcion": "SISTEMA DE RECIRCULACIÓN",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.6": {
+    "codigo": "OE.5.6.6",
+    "descripcion": "ASCENSORES Y MONTACARGAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.7": {
+    "codigo": "OE.5.6.7",
+    "descripcion": "SISTEMAS DE PARLANTES",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.8": {
+    "codigo": "OE.5.6.8",
+    "descripcion": "SISTEMA DE MÚSICA AMBIENTAL",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.9": {
+    "codigo": "OE.5.6.9",
+    "descripcion": "SISTEMA DE TRADUCCIÓN SIMULTANEA",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.10": {
+    "codigo": "OE.5.6.10",
+    "descripcion": "SISTEMA DE SEGURIDAD",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.11": {
+    "codigo": "OE.5.6.11",
+    "descripcion": "PROYECTORES Y PANTALLAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.12": {
+    "codigo": "OE.5.6.12",
+    "descripcion": "CAMPANAS EXTRACTORAS",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.13": {
+    "codigo": "OE.5.6.13",
+    "descripcion": "SISTEMA DE VAPOR",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.14": {
+    "codigo": "OE.5.6.14",
+    "descripcion": "SISTEMA DE AIRE COMPRIMIDO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.15": {
+    "codigo": "OE.5.6.15",
+    "descripcion": "SISTEMA DE OXÍGENO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.16": {
+    "codigo": "OE.5.6.16",
+    "descripcion": "SISTEMA DE VENTILACIÓN MECÁNICA",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.17": {
+    "codigo": "OE.5.6.17",
+    "descripcion": "SISTEMA DE VACÍO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.5.6.18": {
+    "codigo": "OE.5.6.18",
+    "descripcion": "SISTEMA DE AIRE ACONDICIONADO",
+    "tipo": "partida",
+    "unidad": "und"
+  },
+  "OE.6": {
+    "codigo": "OE.6",
+    "descripcion": "INSTALACIONES DE COMUNICACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.6.1": {
+    "codigo": "OE.6.1",
+    "descripcion": "CABLEADO ESTRUCTURADO EN INTERIORES DE EDIFICIOS",
+    "tipo": "carpeta"
+  },
+  "OE.6.1.1": {
+    "codigo": "OE.6.1.1",
+    "descripcion": "CABLES EN TUBERÍAS",
+    "tipo": "carpeta"
+  },
+  "OE.6.2": {
+    "codigo": "OE.6.2",
+    "descripcion": "CANALETAS, CONDUCTOS Y/O TUBERÍAS",
+    "tipo": "carpeta"
+  },
+  "OE.6.3": {
+    "codigo": "OE.6.3",
+    "descripcion": "SALIDA DE COMUNICACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.6.4": {
+    "codigo": "OE.6.4",
+    "descripcion": "CONDUCTORES DE COMUNICACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.6.5": {
+    "codigo": "OE.6.5",
+    "descripcion": "PATCH PANEL",
+    "tipo": "carpeta"
+  },
+  "OE.6.6": {
+    "codigo": "OE.6.6",
+    "descripcion": "RACK DE COMUNICACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.6.7": {
+    "codigo": "OE.6.7",
+    "descripcion": "CAJA DE PASE PARA TRANSFORMADOR",
+    "tipo": "carpeta"
+  },
+  "OE.7": {
+    "codigo": "OE.7",
+    "descripcion": "INSTALACIONES DE GAS",
+    "tipo": "carpeta"
+  },
+  "OE.7.1": {
+    "codigo": "OE.7.1",
+    "descripcion": "TUBERÍAS",
+    "tipo": "carpeta"
+  },
+  "OE.7.1.1": {
+    "codigo": "OE.7.1.1",
+    "descripcion": "TUBERÍA A LA VISTA",
+    "tipo": "carpeta"
+  },
+  "OE.7.1.2": {
+    "codigo": "OE.7.1.2",
+    "descripcion": "TUBERÍA CON CANALETA O POR CONDUCTO:",
+    "tipo": "carpeta"
+  },
+  "OE.7.1.3": {
+    "codigo": "OE.7.1.3",
+    "descripcion": "TUBERÍA MONTANTE",
+    "tipo": "carpeta"
+  },
+  "OE.7.2": {
+    "codigo": "OE.7.2",
+    "descripcion": "ARTEFACTOS (GAS LICUADO DE PETRÓLEO Ó GAS NATURAL SECO)",
+    "tipo": "carpeta"
+  },
+  "OE.7.2.1": {
+    "codigo": "OE.7.2.1",
+    "descripcion": "INSTALACIÓN DE UN ARTEFACTO",
+    "tipo": "carpeta"
+  },
+  "OE.7.2.2": {
+    "codigo": "OE.7.2.2",
+    "descripcion": "CONVERSIÓN DE UN ARTEFACTO",
+    "tipo": "carpeta"
+  },
+  "OE.7.3": {
+    "codigo": "OE.7.3",
+    "descripcion": "ACCESORIOS",
+    "tipo": "carpeta"
+  },
+  "OE.7.4": {
+    "codigo": "OE.7.4",
+    "descripcion": "VENTILACIONES",
+    "tipo": "carpeta"
+  },
+  "OE.7.4.1": {
+    "codigo": "OE.7.4.1",
+    "descripcion": "VENTILACIÓN (SUPERIOR O INFERIOR)",
+    "tipo": "carpeta"
+  },
+  "OE.7.5": {
+    "codigo": "OE.7.5",
+    "descripcion": "DUCTOS",
+    "tipo": "carpeta"
+  },
+  "OE.7.5.1": {
+    "codigo": "OE.7.5.1",
+    "descripcion": "DUCTOS DE EVACUACIÓN DE HUMOS PARA LOS ARTEFACTOS A GAS",
+    "tipo": "carpeta"
+  },
+  "OE.7.6": {
+    "codigo": "OE.7.6",
+    "descripcion": "GABINETE DE REGULACIÓN",
+    "tipo": "carpeta"
+  }
+}

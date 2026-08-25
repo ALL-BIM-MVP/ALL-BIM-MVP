@@ -20,6 +20,16 @@ import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js'
 import { PUBLIC_UPLOADS_DIR } from './middlewares/upload.midleware.js';
 const app = express();
 
+// Detrás de un túnel/proxy (Cloudflare Tunnel corriendo en la misma
+// máquina) Express ve todas las requests como si vinieran de
+// localhost — sin esto, loginRateLimiter (rate-limit.middleware.ts)
+// contaría TODOS los intentos de TODOS los usuarios como si fueran
+// una sola IP, bloqueando a todo el mundo junto. "1" = confiar en UN
+// solo hop de proxy (cloudflared, el único entre internet y acá) para
+// leer X-Forwarded-For — ni cero (rompe el rate limit) ni "true" a
+// ciegas (confiaría en cualquier cantidad de hops, spoofeable).
+app.set('trust proxy', 1);
+
 app.use(corsConfig);
 app.use(express.json());
 app.use(express.urlencoded({extended: false}));

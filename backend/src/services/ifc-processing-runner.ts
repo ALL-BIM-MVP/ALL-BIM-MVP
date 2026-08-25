@@ -31,8 +31,14 @@ export const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 export const PYTHON_BIN = process.env.PROCESSING_PYTHON
     || path.join(REPO_ROOT, "processing", ".venv", "bin", "python");
 
+// Vive en processing/ifc/data/ (dato de negocio real, SÍ trackeado en
+// git — mismo criterio que database/system-data.sql: "parte del
+// producto en sí", no un dato de prueba) — NO en proceso-metrados-base/
+// (esa carpeta es scaffolding de desarrollo que en algún momento se
+// borra por completo, ver .gitignore; un dato del que depende el
+// modo 'norma' para funcionar no puede vivir ahí).
 const NORMA_JSON_PATH = process.env.NORMA_JSON_PATH
-    || path.join(REPO_ROOT, "processing", "proceso-metrados-base", "norma_completa.json");
+    || path.join(REPO_ROOT, "processing", "ifc", "data", "norma_completa.json");
 
 export const PROCESSING_TIMEOUT_MS = Number(process.env.PROCESSING_TIMEOUT_MS) || 10 * 60 * 1000; // 10 min
 const MAX_CONCURRENT_IFC_JOBS = Number(process.env.MAX_CONCURRENT_IFC_JOBS) || 2;
