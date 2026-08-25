@@ -1,6 +1,8 @@
 import { Router } from 'express';
-import { uploadSingleFile } from '../middlewares/upload.midleware.js';
-import { getIfcFileStatusController, processIfcMetradosController } from '../controllers/ifc-metrados.controller.js';
+import { uploadDryRunFile, uploadSingleFile } from '../middlewares/upload.midleware.js';
+import {
+    classificationDryRunController, getIfcFileStatusController, processIfcMetradosController,
+} from '../controllers/ifc-metrados.controller.js';
 import { getPartidaElementsController, getPartidasTreeController } from '../controllers/metrado-partidas.controller.js';
 import { getAvailableColumnsController } from '../controllers/templates.controller.js';
 import { getEstadoElementosController } from '../controllers/metrados-estado.controller.js';
@@ -17,6 +19,15 @@ router.post('/:projectId/ifc-metrados/process', requireAuth, uploadSingleFile, p
 // "Muestra de estado de cantidad de elementos" (prototipo) — a nivel
 // de PROYECTO, no de un solo archivo, ver metrados-estado.models.ts.
 router.get('/:projectId/metrados/estado-elementos', requireAuth, getEstadoElementosController);
+
+// Consolidación punto 5 — "probar" una config de clasificación manual
+// sin correr el pipeline completo. uploadDryRunFile (NO uploadSingleFile)
+// a propósito: el archivo, si viene, es solo para esta prueba puntual,
+// nunca se guarda en UPLOADS_DIR ni se crea ninguna fila — ver
+// ifc-metrados.service.ts.
+router.post(
+    '/:projectId/ifc-metrados/classification-dry-run', requireAuth, uploadDryRunFile, classificationDryRunController
+);
 
 export default router;
 

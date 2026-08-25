@@ -58,7 +58,12 @@ def _metrados_acero(el):
     calculan si hay diámetro nominal o sección transversal disponible;
     si ninguno está, quedan en None (no hay con qué inventarlos) pero
     lon/area/count se fijan igual.
-    """
+
+    fuente_peso: 'acero_diametro' | 'acero_seccion' | None — de dónde
+    salió weight/vol acá (ver origen_metrado en calcular_metrados_final,
+    docs/roadmap/consolidacion-y-hardening.md punto 6). None si no hubo
+    ni diámetro ni sección (vol queda para el fallback geométrico del
+    llamador, weight queda null)."""
     if not el.is_a('IfcReinforcingBar'):
         return None
 
@@ -68,6 +73,7 @@ def _metrados_acero(el):
 
     weight = None
     volumen = None
+    fuente_peso = None
 
     diametro = el.NominalDiameter
     if diametro:
@@ -75,14 +81,16 @@ def _metrados_acero(el):
         if kg_por_m is not None:
             weight = largo * kg_por_m
             volumen = weight / DENSIDAD_ACERO_KG_M3
+            fuente_peso = "acero_diametro"
 
     if weight is None:
         area_sec = el.CrossSectionArea
         if area_sec:
             volumen = area_sec * largo
             weight = volumen * DENSIDAD_ACERO_KG_M3
+            fuente_peso = "acero_seccion"
 
-    return {"lon": largo, "area": 0.0, "vol": volumen, "weight": weight, "count": 1.0}
+    return {"lon": largo, "area": 0.0, "vol": volumen, "weight": weight, "count": 1.0, "fuente_peso": fuente_peso}
 
 
 def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto, prioridad="norma"):
@@ -105,16 +113,28 @@ def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto, priorida
     (IfcElementQuantity/Qto_*) es SIEMPRE generado por el exportador de
     Revit, nunca algo que el usuario tipeó — por eso pasa a ser el
     último recurso, no el primero. geometría real queda en el medio en
-    los dos modos, sin cambios."""
+    los dos modos, sin cambios.
+
+    Además de los 5 valores, devuelve de dónde salió CADA UNO
+    (`_fuente_lon/_fuente_area/_fuente_vol/_fuente_count/_fuente_peso`
+    — 'tipado'|'geometrico'|'texto'|'default'|'acero'|'acero_diametro'|
+    'acero_seccion'|None) — ver docs/roadmap/consolidacion-y-hardening.md
+    punto 6. El llamador (classify.py) se queda con UNA sola de estas 5
+    según la unidad de la partida (origen_metrado), el resto se
+    descarta — no se guardan las 5 en la BD, solo la que de verdad
+    importa para esa partida."""
+    fuente_primero, fuente_ultimo = ("texto", "tipado") if prioridad == "manual" else ("tipado", "texto")
     primero, ultimo = (metrados_texto, metrados_tipados) if prioridad == "manual" else (metrados_tipados, metrados_texto)
 
     acero = _metrados_acero(el)
     if acero is not None:
         vol = acero["vol"]
+        fuente_vol = acero["fuente_peso"]
         if vol is None:
             # No hubo diámetro ni sección transversal para calcular vol —
             # como último recurso, geometría a partir de dimensiones.
             vol = calcular_metrados(dims, el)["vol"]
+            fuente_vol = "geometrico"
         return {
             "lon": acero["lon"],
             "area": acero["area"],
@@ -127,6 +147,10 @@ def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto, priorida
             # el resto de los retornos de esta función.
             "_area_neta_huecos": False,
             "_vol_neta_huecos": False,
+            # lon/area/count salen directo de BarLength del elemento —
+            # ni tipado, ni geométrico, ni texto, un origen propio.
+            "_fuente_lon": "acero", "_fuente_area": "acero", "_fuente_count": "acero",
+            "_fuente_vol": fuente_vol, "_fuente_peso": acero["fuente_peso"],
         }
 
     # 1. Primera fuente según el modo (tipado en 'norma', texto filtrado
@@ -135,6 +159,10 @@ def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto, priorida
     area = primero.get("area")
     vol = primero.get("vol")
     count = primero.get("count")
+    fuente_lon = fuente_primero if lon is not None else None
+    fuente_area = fuente_primero if area is not None else None
+    fuente_vol = fuente_primero if vol is not None else None
+    fuente_count = fuente_primero if count is not None else None
 
     # area_neta_huecos/vol_neta_huecos: si el valor final terminó
     # saliendo de la geometría (calcular_metrados) Y esa geometría vino
@@ -156,29 +184,39 @@ def calcular_metrados_final(el, dims, metrados_tipados, metrados_texto, priorida
         geometrico = calcular_metrados(dims, el)
         if lon is None:
             lon = geometrico["lon"]
+            fuente_lon = "geometrico"
         if area is None:
             area = geometrico["area"]
             area_neta_huecos = geometrico["_area_neta_huecos"]
+            fuente_area = "geometrico"
         if vol is None:
             vol = geometrico["vol"]
             vol_neta_huecos = geometrico["_vol_neta_huecos"]
+            fuente_vol = "geometrico"
 
     # 3. Última fuente según el modo (texto en 'norma', tipado en
     # 'manual' — ver docstring)
     if lon is None:
         lon = ultimo.get("lon")
+        fuente_lon = fuente_ultimo if lon is not None else None
     if area is None:
         area = ultimo.get("area")
+        fuente_area = fuente_ultimo if area is not None else None
     if vol is None:
         vol = ultimo.get("vol")
+        fuente_vol = fuente_ultimo if vol is not None else None
     if count is None:
         count = ultimo.get("count")
+        fuente_count = fuente_ultimo if count is not None else None
 
     if count is None:
         count = 1.0
+        fuente_count = "default"
 
     return {
         "lon": lon, "area": area, "vol": vol, "weight": None, "count": count,
         "_area_neta_huecos": area_neta_huecos,
         "_vol_neta_huecos": vol_neta_huecos,
+        "_fuente_lon": fuente_lon, "_fuente_area": fuente_area, "_fuente_vol": fuente_vol,
+        "_fuente_count": fuente_count, "_fuente_peso": None,
     }

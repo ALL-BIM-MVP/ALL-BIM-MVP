@@ -4,7 +4,10 @@ import pool from "../db/database.js";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { GetProjectsQuery, ProjectCreate, ProjectIdParam, ProjectUpdate } from "../schemas/projects.schema.js";
 import { buildProjectScopeFilter } from "../repositories/projects.repository.js";
-import { transformProjectFull, type ProjectFull, type ProjectRow } from "../models/projects.models.js";
+import {
+    transformProjectFull, type FileTypeSummary, type ProjectDetail, type ProjectFull, type ProjectRow,
+    type SpecialtySummary,
+} from "../models/projects.models.js";
 import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
 import { AppError } from "../models/errors/app-error.js";
 import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
@@ -39,9 +42,9 @@ export const getListProjectService = async (
     return result.rows.map((p) => transformProjectFull(p));
 };
 
-export const getProjectByIdService = async ( 
+export const getProjectByIdService = async (
     {user_id : userId } : DecodedToken , { projectId } : ProjectIdParam
-) : Promise< ProjectFull > => {
+) : Promise< ProjectDetail > => {
 
     const result = await pool.query<ProjectRow>(
         `SELECT
@@ -58,10 +61,10 @@ export const getProjectByIdService = async (
         LEFT JOIN files f
             ON f.file_id = pi.file_id
         WHERE p.project_id = $1 AND (
-                p.owner_id = $2 
-                OR EXISTS (        
-                    SELECT 1 FROM project_members pm 
-                    WHERE pm.project_id = p.project_id AND pm.user_id = $2 
+                p.owner_id = $2
+                OR EXISTS (
+                    SELECT 1 FROM project_members pm
+                    WHERE pm.project_id = p.project_id AND pm.user_id = $2
                 )
         ) LIMIT 1`,
         [projectId, userId ]
@@ -71,7 +74,50 @@ export const getProjectByIdService = async (
 
     if (!p) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
 
-    return transformProjectFull(p);
+    // Resumen de especialidades — cuenta DOCUMENTOS (ifc_documents),
+    // no versiones (ver ProjectDetail en projects.models.ts). INNER
+    // JOIN a propósito: documentos sin specialty_id (nullable en el
+    // schema, aunque el upload de uno nuevo lo exige salvo que sea un
+    // reemplazo de versión) simplemente no suman a ninguna fila —
+    // "mantenerlo simple" significa no inventar un bucket "sin
+    // especialidad" que nadie pidió todavía.
+    const specialtiesResult = await pool.query<SpecialtySummary>(
+        `SELECT s.code AS specialty_code, s.name AS specialty_name, COUNT(*)::int AS count
+        FROM ifc_documents d
+        INNER JOIN ifc_specialties s ON s.ifc_specialty_id = d.specialty_id
+        WHERE d.project_id = $1
+        GROUP BY s.ifc_specialty_id, s.code, s.name
+        ORDER BY count DESC, s.name`,
+        [projectId]
+    );
+
+    // Resumen de archivos por tipo — 'ifc' sale de ifc_documents (por
+    // lo mismo de arriba: documentos, no versiones), el resto es
+    // conteo directo de `files` (excluyendo la portada del proyecto,
+    // que no es "un archivo subido" para este resumen).
+    const ifcCountResult = await pool.query<{ count : number }>(
+        `SELECT COUNT(*)::int AS count FROM ifc_documents WHERE project_id = $1`,
+        [projectId]
+    );
+    const otherTypesResult = await pool.query<FileTypeSummary>(
+        `SELECT f.file_type, COUNT(*)::int AS count
+        FROM files f
+        WHERE f.project_id = $1 AND f.file_type != 'ifc'
+            AND NOT EXISTS (SELECT 1 FROM project_images pi WHERE pi.file_id = f.file_id)
+        GROUP BY f.file_type`,
+        [projectId]
+    );
+    const ifcCount = ifcCountResult.rows[0]?.count ?? 0;
+    const filesSummary: FileTypeSummary[] = [
+        ...(ifcCount > 0 ? [{ file_type: "ifc", count: ifcCount }] : []),
+        ...otherTypesResult.rows,
+    ].sort((a, b) => b.count - a.count);
+
+    return {
+        ...transformProjectFull(p),
+        specialties_summary: specialtiesResult.rows,
+        files_summary: filesSummary,
+    };
 };
 
 export const createProjectService = async (
@@ -110,6 +156,24 @@ export const createProjectService = async (
             `INSERT INTO ifc_classification_configs (project_id, mode, updated_by)
             VALUES ($1, 'norma', $2)`,
             [p.project_id, userId]
+        );
+
+        // "Elemento conjunto" (estado de cantidad de elementos, ver
+        // elemento-conjunto.service.ts) — mismo criterio que la config de
+        // clasificación de arriba: anclado desde el alta, con el default
+        // de siempre (los 4 campos builtin, en orden) explícito en filas
+        // reales, no un default implícito resuelto en código.
+        await client.query(
+            `INSERT INTO elemento_conjunto_configs (project_id, updated_by) VALUES ($1, $2)`,
+            [p.project_id, userId]
+        );
+        await client.query(
+            `INSERT INTO elemento_conjunto_config_fields (project_id, position, field_type, builtin_field)
+            VALUES ($1, 1, 'builtin', 'file_name'),
+                   ($1, 2, 'builtin', 'global_id'),
+                   ($1, 3, 'builtin', 'tag'),
+                   ($1, 4, 'builtin', 'partida_code')`,
+            [p.project_id]
         );
 
         await client.query("COMMIT");

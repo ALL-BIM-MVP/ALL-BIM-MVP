@@ -13,7 +13,7 @@ import ifcopenshell.util.element
 from .config import ESPECIALIDADES_ACTIVAS, CLAVE_SIN_ESPECIALIDAD, CLAVE_FUERA_DE_NORMA
 from .extraction import (
     extraer_datos_clasificacion, normalizar_codigo, formatear_codigo,
-    buscar_entrada_norma, obtener_dimensiones, inferir_unidad,
+    buscar_entrada_norma, obtener_dimensiones, inferir_unidad, normalizar_unidad,
     get_storey_and_space, obtener_unidad_por_mayoria,
     extraer_dimensiones_parametricas, extraer_dimensiones_por_aristas,
     get_openings, extraer_element_id, extraer_metrados_revit_completo,
@@ -98,6 +98,25 @@ def _aplicar_descuento_huecos(metrados, el, dims, unidad):
     return metrados
 
 
+# Mismo mapeo unidad->campo que UNIT_TO_METRADO_KEY en
+# ifc-processing-runner.ts/METRADO_KEY_POR_UNIDAD en
+# ifc-excel-export.service.ts — de los 5 valores que calcula
+# calcular_metrados_final, esta función decide CUÁL de ellos es
+# realmente "el metrado" para la partida de este elemento (según su
+# unidad), y se queda con la fuente de ESE (docs/roadmap/
+# consolidacion-y-hardening.md punto 6) — las otras 4 no se guardan,
+# no importan para esta partida puntual.
+_UNIDAD_A_CAMPO_FUENTE = {
+    "m": "_fuente_lon", "m2": "_fuente_area", "m3": "_fuente_vol",
+    "kg": "_fuente_peso", "und": "_fuente_count",
+}
+
+
+def resolver_origen_metrado(metrados, unidad):
+    campo = _UNIDAD_A_CAMPO_FUENTE.get(unidad, "_fuente_count")  # fallback igual que en Node ("?? quantity")
+    return metrados.get(campo)
+
+
 def _elemento_base(el, dims, metrados, storey, space, propiedades, **kwargs):
     elem = {
         "el": el,
@@ -176,6 +195,7 @@ def clasificar_elementos(model, norma_index, hijos, property_prefix=None):
                 codigo_padre=CLAVE_SIN_ESPECIALIDAD,
                 nombre_partida=nombre_partida or codigo,
                 unidad=unidad,
+                origen_metrado=resolver_origen_metrado(metrados, unidad),
             ))
             continue
 
@@ -193,6 +213,7 @@ def clasificar_elementos(model, norma_index, hijos, property_prefix=None):
                 codigo_padre=CLAVE_FUERA_DE_NORMA,
                 nombre_partida=nombre_partida or codigo_fmt,
                 unidad=unidad,
+                origen_metrado=resolver_origen_metrado(metrados, unidad),
             ))
             continue
 
@@ -228,6 +249,7 @@ def clasificar_elementos(model, norma_index, hijos, property_prefix=None):
             codigo_padre=entrada["codigo"] if codigo_reporte != entrada["codigo"] else None,
             nombre_partida=nombre_efectivo,
             unidad=unidad_norma,
+            origen_metrado=resolver_origen_metrado(metrados, unidad_norma),
         ))
 
     if codigos_malformados > 0:
@@ -303,6 +325,7 @@ def reasignar_sin_clasificacion(elementos_sin_clasificacion, elementos_clasifica
             codigo_padre=None,
             nombre_partida=datos["nombre"],
             unidad=unidad,
+            origen_metrado=resolver_origen_metrado(metrados, unidad),
         ))
 
     print(f"  Elementos sin clasificación reasignados: {len(reasignados)}")
@@ -372,7 +395,7 @@ def clasificar_elementos_manual(model, config):
         storey, space = get_storey_and_space(el, model)
 
         unidad_val = extraer_valor_propiedad(psets, config.get("unit_property_set"), config.get("unit_property_name"))
-        unidad = str(unidad_val).strip() if unidad_val else inferir_unidad(dims)
+        unidad = normalizar_unidad(unidad_val) if unidad_val else inferir_unidad(dims)
 
         metrados = _aplicar_descuento_huecos(metrados, el, dims, unidad)
 
@@ -384,6 +407,75 @@ def clasificar_elementos_manual(model, config):
             codigo_padre=None,
             nombre_partida=nombre_partida,
             unidad=unidad,
+            origen_metrado=resolver_origen_metrado(metrados, unidad),
         ))
 
     return elementos, elementos_sin_clasificacion
+
+
+def probar_clasificacion_manual(model, config, max_ejemplos=15):
+    """"Dry run" de clasificación manual (Fase 4/consolidación punto 5)
+    — mismo config que clasificar_elementos_manual, pero SIN geometría
+    (obtener_dimensiones), SIN metrado (calcular_metrados_final), SIN
+    storey/space y SIN insertar nada en ningún lado. Solo lee
+    propiedades (get_psets + extraer_valor_propiedad, lo barato) para
+    responder rápido "¿esta config matchea algo real en este archivo?"
+    — confirmado con datos reales: sin geometría, el mismo archivo de
+    109MB tarda ~38s en vez de los ~2min del pipeline completo (ver
+    docs/roadmap/consolidacion-y-hardening.md punto 5).
+
+    Devuelve un resumen chico (no la lista completa de elementos) —
+    total escaneado, cuántos tienen código, y hasta `max_ejemplos`
+    filas de ejemplo (código/descripción/unidad + cuántos elementos
+    comparten ese código) para que el usuario vea de un vistazo si el
+    resultado tiene sentido. Si vino property_prefix, también cuenta
+    cuántas propiedades DISTINTAS (en cualquier Pset, de cualquier
+    elemento) empiezan con ese prefijo — mismo criterio que "¿esto
+    encuentra algo?", no una réplica exacta del filtro de captura real
+    (extraer_metrados_revit_completo)."""
+    property_prefix = config.get("property_prefix")
+    total = 0
+    con_codigo = 0
+    ejemplos = {}  # codigo -> {"descripcion", "unidad", "cantidad"}
+    propiedades_con_prefijo = set()
+
+    for el in model.by_type("IfcProduct"):
+        if el.is_a('IfcOpeningElement') or el.is_a('IfcSpace'):
+            continue
+        total += 1
+
+        psets = ifcopenshell.util.element.get_psets(el)
+
+        if property_prefix:
+            for pset_name, props in psets.items():
+                for prop_name in props:
+                    if isinstance(prop_name, str) and prop_name.startswith(property_prefix):
+                        propiedades_con_prefijo.add(f"{pset_name}::{prop_name}")
+
+        codigo = extraer_valor_propiedad(psets, config.get("code_property_set"), config["code_property_name"])
+        if not codigo:
+            continue
+        codigo = str(codigo).strip()
+        con_codigo += 1
+
+        if codigo not in ejemplos and len(ejemplos) < max_ejemplos:
+            descripcion = extraer_valor_propiedad(
+                psets, config.get("description_property_set"), config.get("description_property_name")
+            )
+            unidad_val = extraer_valor_propiedad(psets, config.get("unit_property_set"), config.get("unit_property_name"))
+            ejemplos[codigo] = {
+                "codigo": codigo,
+                "descripcion": str(descripcion).strip() if descripcion else None,
+                "unidad": normalizar_unidad(unidad_val) if unidad_val else None,
+                "cantidad": 0,
+            }
+        if codigo in ejemplos:
+            ejemplos[codigo]["cantidad"] += 1
+
+    return {
+        "elementos_totales": total,
+        "elementos_con_codigo": con_codigo,
+        "elementos_sin_codigo": total - con_codigo,
+        "ejemplos": list(ejemplos.values()),
+        "propiedades_con_prefijo": len(propiedades_con_prefijo) if property_prefix else None,
+    }

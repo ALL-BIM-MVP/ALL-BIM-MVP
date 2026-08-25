@@ -92,6 +92,11 @@ export interface PartidaElementRow {
     area : string | number | null;
     volume : string | number | null;
     weight : string | number | null;
+    // De cuál de los 5 valores de arriba salió el metrado real de esta
+    // partida, según su unidad — ver docs/roadmap/consolidacion-y-hardening.md
+    // punto 6. 'tipado'|'geometrico'|'texto'|'default'|'acero'|
+    // 'acero_diametro'|'acero_seccion'|null.
+    origen_metrado : string | null;
 };
 
 interface PartidaElementItem {
@@ -115,6 +120,7 @@ interface PartidaElementItem {
     area : number | null;
     volume : number | null;
     weight : number | null;
+    origen_metrado : string | null;
     // Una entrada por cada columna "ifc_property" pedida (template_id o
     // columns inline), keyeada por "<property_set>::<property_name>" —
     // ver ResolvedPropertyColumn/resolvePropertyValues en el service.
@@ -153,6 +159,7 @@ export interface PartidaElementGroup {
     area : number | null;
     volume : number | null;
     weight : number | null;
+    origen_metrado : string | null;
     // metrado representativo (el que corresponde a la unidad de la
     // partida) × element_count — el único valor que sí se multiplica
     // por la cantidad de elementos del grupo.
@@ -212,6 +219,7 @@ const toElementItem = (
         area: toNumberOrNull(row.area),
         volume: toNumberOrNull(row.volume),
         weight: toNumberOrNull(row.weight),
+        origen_metrado: row.origen_metrado,
         properties,
     };
 };
@@ -343,6 +351,7 @@ export const groupPartidaElements = (
             area: representativo.area,
             volume: representativo.volume,
             weight: representativo.weight,
+            origen_metrado: representativo.origen_metrado,
             sub_total: (valorMetrado as number) * elementos.length,
             properties: modaProperties(elementos, propertyKeys),
             elements: elementos,

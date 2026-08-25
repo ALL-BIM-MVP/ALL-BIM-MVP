@@ -14,6 +14,7 @@ import routerTemplates from './routes/templates.routes.js';
 import routerModules, { projectModulesRouter } from './routes/modules.routes.js';
 import routerIfcSpecialties, { projectIfcDocumentsRouter } from './routes/ifc-documents.routes.js';
 import routerIfcClassification from './routes/ifc-classification.routes.js';
+import routerElementoConjunto from './routes/elemento-conjunto.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
 import { PUBLIC_UPLOADS_DIR } from './middlewares/upload.midleware.js';
@@ -52,6 +53,7 @@ app.use('/api/projects', projectModulesRouter );
 app.use('/api/ifc-specialties', routerIfcSpecialties );
 app.use('/api/projects', projectIfcDocumentsRouter );
 app.use('/api/projects', routerIfcClassification );
+app.use('/api/projects', routerElementoConjunto );
 
 
 app.use(errorHandler)

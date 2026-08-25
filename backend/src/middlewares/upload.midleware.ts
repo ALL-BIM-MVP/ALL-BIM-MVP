@@ -1,6 +1,7 @@
 import multer from "multer";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import type { Request } from "express";
@@ -80,4 +81,26 @@ const AVATAR_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 export const uploadProfilePicture = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: AVATAR_MAX_UPLOAD_BYTES },
+}).single("file");
+
+// Dry-run de clasificación manual (consolidación punto 5, ver
+// ifc-metrados.service.ts) — el archivo es solo para PROBAR una config
+// antes de subirlo/procesarlo en serio, nunca se guarda de verdad.
+// diskStorage apuntando al tmp del SO (NUNCA UPLOADS_DIR) — así queda
+// clarísimo por la sola ubicación que esto no es un archivo real del
+// proyecto, y evita el riesgo de memoria de bufferear en RAM un IFC de
+// hasta 200MB (memoryStorage) en cada dry-run. El service lo borra en
+// un finally apenas termina de leerlo — nunca queda ahí más que el
+// tiempo de un request.
+const dryRunStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, os.tmpdir()),
+  filename: (_req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `ifc-dry-run-${randomUUID()}-${safeName}`);
+  },
+});
+
+export const uploadDryRunFile = multer({
+  storage: dryRunStorage,
+  limits: { fileSize: MAX_FILE_SIZE_BYTES },
 }).single("file");

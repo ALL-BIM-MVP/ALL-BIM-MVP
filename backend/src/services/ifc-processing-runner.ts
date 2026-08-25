@@ -21,19 +21,23 @@ import type { IfcClassificationSnapshot } from "../models/ifc-classification.mod
 const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// backend/dist/services -> backend/dist -> backend -> raíz del repo
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+// backend/dist/services -> backend/dist -> backend -> raíz del repo.
+// Exportadas junto con PYTHON_BIN/PROCESSING_TIMEOUT_MS/EXEC_MAX_BUFFER
+// — el dry-run de clasificación (ifc-metrados.service.ts, consolidación
+// punto 5) invoca el MISMO intérprete/CLI de Python, no tiene sentido
+// que mantenga su propia copia de estas constantes.
+export const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
-const PYTHON_BIN = process.env.PROCESSING_PYTHON
+export const PYTHON_BIN = process.env.PROCESSING_PYTHON
     || path.join(REPO_ROOT, "processing", ".venv", "bin", "python");
 
 const NORMA_JSON_PATH = process.env.NORMA_JSON_PATH
     || path.join(REPO_ROOT, "processing", "proceso-metrados-base", "norma_completa.json");
 
-const PROCESSING_TIMEOUT_MS = Number(process.env.PROCESSING_TIMEOUT_MS) || 10 * 60 * 1000; // 10 min
+export const PROCESSING_TIMEOUT_MS = Number(process.env.PROCESSING_TIMEOUT_MS) || 10 * 60 * 1000; // 10 min
 const MAX_CONCURRENT_IFC_JOBS = Number(process.env.MAX_CONCURRENT_IFC_JOBS) || 2;
 const MAX_ERROR_MESSAGE_LENGTH = 500;
-const EXEC_MAX_BUFFER = 50 * 1024 * 1024; // stdout/stderr del subprocess, NO el JSON (ese va a --out)
+export const EXEC_MAX_BUFFER = 50 * 1024 * 1024; // stdout/stderr del subprocess, NO el JSON (ese va a --out)
 
 // Guarda rápida en memoria — no reemplaza el lock de BD (ver
 // ifc-metrados.service.ts), es defensa extra barata contra lanzar dos
@@ -46,7 +50,11 @@ export const jobsInFlight = new Set<number>();
 let runningJobs = 0;
 const pendingQueue: Array<() => void> = [];
 
-const acquireSlot = (): Promise<void> => {
+// Exportadas: el dry-run de clasificación (ifc-metrados.service.ts,
+// consolidación punto 5) también lanza un subprocess de Python — pesa
+// menos (sin geometría) pero igual conviene que comparta el mismo
+// límite de concurrencia, no uno aparte.
+export const acquireSlot = (): Promise<void> => {
     if (runningJobs < MAX_CONCURRENT_IFC_JOBS) {
         runningJobs++;
         return Promise.resolve();
@@ -59,20 +67,26 @@ const acquireSlot = (): Promise<void> => {
     });
 };
 
-const releaseSlot = (): void => {
+export const releaseSlot = (): void => {
     runningJobs--;
     const next = pendingQueue.shift();
     if (next) next();
 };
 
-const truncateError = (message: string): string => {
+export const truncateError = (message: string): string => {
     const cleaned = message.trim() || "Error desconocido procesando el IFC.";
     return cleaned.length > MAX_ERROR_MESSAGE_LENGTH
         ? `${cleaned.slice(0, MAX_ERROR_MESSAGE_LENGTH)}…`
         : cleaned;
 };
 
-const assertPathWithinUploads = (filePath: string): string => {
+// Exportada: el dry-run de clasificación (ifc-metrados.service.ts,
+// consolidación punto 5) también recibe un filePath que puede venir
+// de files.file_path (relativo, ver comentario de UPLOADS_DIR) cuando
+// prueba contra un archivo ya subido — necesita la MISMA resolución
+// (y el mismo chequeo de seguridad) antes de pasarlo a execFile con un
+// cwd distinto al de este proceso Node.
+export const assertPathWithinUploads = (filePath: string): string => {
     const resolved = path.resolve(filePath);
     const uploadsResolved = path.resolve(UPLOADS_DIR);
     if (resolved !== uploadsResolved && !resolved.startsWith(uploadsResolved + path.sep)) {
@@ -145,6 +159,10 @@ interface PipelineMetradoElement {
     area: number | null;
     volume: number | null;
     weight: number | null;
+    // De cuál de los 5 valores de arriba salió el metrado real de esta
+    // partida, según su unidad — ver docs/roadmap/consolidacion-y-hardening.md
+    // punto 6 y classify.resolver_origen_metrado() (Python).
+    origen_metrado: string | null;
 }
 
 interface PipelineResult {
@@ -223,6 +241,27 @@ const calcularTotalesPorPartida = (
 // ROLLBACK deja los datos viejos intactos, nunca queda "ni lo viejo ni
 // lo nuevo".
 // ------------------------------------------------------------------
+// INSERT en lote vía UNNEST — reemplaza el patrón "un INSERT por fila"
+// para las 3 tablas donde el volumen real importa (confirmado con
+// datos reales del cliente: ifc_element_property_values sola era
+// 385,728 INSERTs individuales, ~96.5s de los ~110s totales de esta
+// función — ver punto 2 del roadmap). Se batchea en CHUNK_SIZE en vez
+// de un solo UNNEST gigante para acotar memoria/tamaño de query, no
+// por ningún límite real de Postgres (los arrays de un solo UNNEST no
+// tienen el límite de 65535 placeholders que sí tendría un VALUES
+// multi-fila armado a mano). ifc_properties/ifc_property_values/
+// metrado_partidas/metrado_partida_totals NO se tocan a propósito acá
+// — ya son rápidas (<1s combinadas, medido) y metrado_partidas encima
+// tiene dependencia jerárquica (parent_id) que complicaría el batching
+// sin necesidad real.
+const CHUNK_SIZE = 5000;
+
+const chunk = <T>(arr: readonly T[], size: number): T[][] => {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+    return chunks;
+};
+
 const insertarResultado = async (
     ifcFileId: number, resultado: PipelineResult, classificationSnapshot: IfcClassificationSnapshot
 ): Promise<void> => {
@@ -274,14 +313,25 @@ const insertarResultado = async (
         await client.query(`DELETE FROM metrado_partidas WHERE ifc_file_id = $1`, [ifcFileId]);
 
         const expressIdToElementId = new Map<number, number>();
-        for (const el of resultado.elements) {
-            const { rows } = await client.query<{ element_id: string }>(
+        for (const batch of chunk(resultado.elements, CHUNK_SIZE)) {
+            const { rows } = await client.query<{ express_id: string; element_id: string }>(
                 `INSERT INTO ifc_elements (ifc_file_id, express_id, global_id, tag, ifc_type, name, level_name, space_name)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-                RETURNING element_id`,
-                [ifcFileId, el.express_id, el.global_id, el.tag, el.ifc_type, el.name, el.level_name, el.space_name]
+                SELECT $1, u.express_id, u.global_id, u.tag, u.ifc_type, u.name, u.level_name, u.space_name
+                FROM UNNEST($2::bigint[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[])
+                    AS u(express_id, global_id, tag, ifc_type, name, level_name, space_name)
+                RETURNING express_id, element_id`,
+                [
+                    ifcFileId,
+                    batch.map((el) => el.express_id),
+                    batch.map((el) => el.global_id),
+                    batch.map((el) => el.tag),
+                    batch.map((el) => el.ifc_type),
+                    batch.map((el) => el.name),
+                    batch.map((el) => el.level_name),
+                    batch.map((el) => el.space_name),
+                ]
             );
-            expressIdToElementId.set(el.express_id, Number(rows[0]!.element_id));
+            for (const row of rows) expressIdToElementId.set(Number(row.express_id), Number(row.element_id));
         }
 
         const propKeyToId = new Map<string, number>();
@@ -308,17 +358,29 @@ const insertarResultado = async (
             valueKeyToId.set(`${propertyId} ${val.value}`, Number(rows[0]!.value_id));
         }
 
+        // Resuelve los 3 ids de una para cada relación ANTES de armar los
+        // arrays del batch — mismo criterio "continue si falta algo" que
+        // antes, solo que ahora filtra la lista completa primero en vez
+        // de decidirlo INSERT por INSERT.
+        const relacionesResueltas: { elementId: number; propertyId: number; valueId: number }[] = [];
         for (const rel of resultado.properties.relations) {
             const elementId = expressIdToElementId.get(rel.express_id);
             const propertyId = propKeyToId.get(`${rel.property_set} ${rel.property_name}`);
             if (elementId === undefined || propertyId === undefined) continue;
             const valueId = valueKeyToId.get(`${propertyId} ${rel.value}`);
             if (valueId === undefined) continue;
+            relacionesResueltas.push({ elementId, propertyId, valueId });
+        }
+        for (const batch of chunk(relacionesResueltas, CHUNK_SIZE)) {
             await client.query(
                 `INSERT INTO ifc_element_property_values (element_id, property_id, value_id)
-                VALUES ($1,$2,$3)
+                SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::bigint[])
                 ON CONFLICT DO NOTHING`,
-                [elementId, propertyId, valueId]
+                [
+                    batch.map((r) => r.elementId),
+                    batch.map((r) => r.propertyId),
+                    batch.map((r) => r.valueId),
+                ]
             );
         }
 
@@ -340,14 +402,35 @@ const insertarResultado = async (
             codeToPartidaId.set(p.code, Number(rows[0]!.partida_id));
         }
 
+        const metradoElementsResueltos: { partidaId: number; elementId: number; me: PipelineMetradoElement }[] = [];
         for (const me of resultado.metrado_elements) {
             const partidaId = codeToPartidaId.get(me.partida_code);
             const elementId = expressIdToElementId.get(me.express_id);
             if (partidaId === undefined || elementId === undefined) continue;
+            metradoElementsResueltos.push({ partidaId, elementId, me });
+        }
+        for (const batch of chunk(metradoElementsResueltos, CHUNK_SIZE)) {
             await client.query(
-                `INSERT INTO metrado_elements (partida_id, element_id, length, run_length, width, height, diameter, quantity, area, volume, weight)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-                [partidaId, elementId, me.length, me.run_length, me.width, me.height, me.diameter, me.quantity, me.area, me.volume, me.weight]
+                `INSERT INTO metrado_elements
+                    (partida_id, element_id, length, run_length, width, height, diameter, quantity, area, volume, weight, origen_metrado)
+                SELECT * FROM UNNEST(
+                    $1::bigint[], $2::bigint[], $3::numeric[], $4::numeric[], $5::numeric[], $6::numeric[],
+                    $7::numeric[], $8::numeric[], $9::numeric[], $10::numeric[], $11::numeric[], $12::varchar[]
+                )`,
+                [
+                    batch.map((r) => r.partidaId),
+                    batch.map((r) => r.elementId),
+                    batch.map((r) => r.me.length),
+                    batch.map((r) => r.me.run_length),
+                    batch.map((r) => r.me.width),
+                    batch.map((r) => r.me.height),
+                    batch.map((r) => r.me.diameter),
+                    batch.map((r) => r.me.quantity),
+                    batch.map((r) => r.me.area),
+                    batch.map((r) => r.me.volume),
+                    batch.map((r) => r.me.weight),
+                    batch.map((r) => r.me.origen_metrado),
+                ]
             );
         }
 
