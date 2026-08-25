@@ -90,6 +90,22 @@ const CATEGORY_ICON: Record<FileCategory, { icon: React.ReactNode; bg: string }>
   other: { icon: <FolderOpen size={16} className="text-gray-500" />, bg: 'bg-gray-100' },
 };
 
+// Fase 3 — mismo criterio que en Visor3DTab.tsx: badge chico de versión,
+// no es un error ni algo para ocultar cuando no es la vigente.
+const VersionBadge: React.FC<{ file: ProjectFile }> = ({ file }) => {
+  if (file.version_number === null || file.version_number === undefined) return null;
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="text-[10px] font-semibold text-slate-400">v{file.version_number}</span>
+      {file.is_current === false && (
+        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">
+          versión anterior
+        </span>
+      )}
+    </span>
+  );
+};
+
 interface LightboxState {
   file: FileWithThumbnail;
   blobUrl: string | null;
@@ -119,6 +135,9 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
   const [thumbErrorIds, setThumbErrorIds] = useState<Set<string>>(new Set());
   const [lightbox, setLightbox] = useState<LightboxState | null>(null);
   const lightboxBlobUrlRef = useRef<string | null>(null);
+  // Fase 3 — default ON (solo vigentes), igual que en el modal de
+  // Visor3DTab.tsx, para no mostrar tombstones viejos de entrada.
+  const [onlyCurrentVersions, setOnlyCurrentVersions] = useState(true);
 
   const markThumbError = useCallback((fileId: string) => {
     setThumbErrorIds((prev) => {
@@ -133,7 +152,7 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
     setLoading(true);
     setError(null);
     try {
-      const data = await projectService.getProjectFiles(projectId);
+      const data = await projectService.getProjectFiles(projectId, onlyCurrentVersions);
       setFiles(data);
       // Al refrescar la lista, las miniaturas vienen con tokens nuevos:
       // limpiamos los errores viejos para darles otra oportunidad.
@@ -143,7 +162,7 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, onlyCurrentVersions]);
 
   useEffect(() => {
     loadFiles();
@@ -245,15 +264,6 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
     setLightbox(null);
   }, []);
 
-  // Cerrar con Escape mientras el visor está abierto — mismo comportamiento
-  // que el modal de captura del visor 3D.
-  useEffect(() => {
-    if (!lightbox) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeLightbox(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [lightbox, closeLightbox]);
-
   // Cerrar con Escape mientras el visor está abierto.
   useEffect(() => {
     if (!lightbox) return;
@@ -318,29 +328,43 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
           )}
         </div>
 
-        {/* Chips de filtro por tipo */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
-          {CATEGORY_CONFIG.map((cat) => {
-            const isActive = categoryFilter === cat.key;
-            const count = cat.key === 'all' ? files.length : categoryCounts[cat.key as FileCategory];
-            return (
-              <button
-                key={cat.key}
-                onClick={() => setCategoryFilter(cat.key)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0 ${
-                  isActive
-                    ? 'bg-[#0056b3] text-white border-[#0056b3] shadow-sm'
-                    : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'
-                }`}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white/70' : cat.dotColor}`} />
-                {cat.label}
-                <span className={`text-[10px] ${isActive ? 'text-white/70' : 'text-gray-400'}`}>
-                  {count}
-                </span>
-              </button>
-            );
-          })}
+        <div className="flex items-center justify-between gap-3">
+          {/* Chips de filtro por tipo */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 -mx-0.5 px-0.5">
+            {CATEGORY_CONFIG.map((cat) => {
+              const isActive = categoryFilter === cat.key;
+              const count = cat.key === 'all' ? files.length : categoryCounts[cat.key as FileCategory];
+              return (
+                <button
+                  key={cat.key}
+                  onClick={() => setCategoryFilter(cat.key)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold whitespace-nowrap transition-colors flex-shrink-0 ${
+                    isActive
+                      ? 'bg-[#0056b3] text-white border-[#0056b3] shadow-sm'
+                      : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300 hover:text-gray-700'
+                  }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-white/70' : cat.dotColor}`} />
+                  {cat.label}
+                  <span className={`text-[10px] ${isActive ? 'text-white/70' : 'text-gray-400'}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Fase 3: toggle ver todo el historial vs. solo vigentes.
+              Solo afecta a los archivos IFC (el resto no tiene versión). */}
+          <label className="flex items-center gap-1.5 text-[11px] text-gray-500 cursor-pointer select-none flex-shrink-0 whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={!onlyCurrentVersions}
+              onChange={(e) => setOnlyCurrentVersions(!e.target.checked)}
+              className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3]"
+            />
+            Ver todas las versiones
+          </label>
         </div>
       </div>
 
@@ -449,10 +473,14 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
                       </button>
 
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-gray-700 truncate">{file.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-sm font-medium text-gray-700 truncate">{file.name}</p>
+                          <VersionBadge file={file} />
+                        </div>
                         <p className="text-[11px] text-gray-400">
                           {formatSize(parseInt(file.file_size, 10))} · {formatRelativeDate(file.uploaded_at)}
                           {file.uploaded_by?.user_name && <> · Subido por {file.uploaded_by.user_name}</>}
+                          {file.specialty_name && <> · {file.specialty_name}</>}
                         </p>
                       </div>
 
@@ -512,12 +540,18 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
           El Portal se salta ese problema por completo. */}
       {lightbox && createPortal(
         <div
-          className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-6"
+          // z-index por encima de TODO lo demás en la app (el header fijo
+          // del proyecto usa z-[10000] — con el backdrop en 9999 quedaba
+          // por debajo y tapaba/competía con el botón de cerrar, que
+          // vivía justo en esa franja de arriba). Ver también el z-index
+          // más alto usado en otro lado (ClassificationConfigModal,
+          // z-[10400]) para no volver a quedar por debajo de nada.
+          className="fixed inset-0 z-[10450] bg-black/80 flex items-center justify-center p-6"
           onClick={closeLightbox}
         >
           <button
             onClick={closeLightbox}
-            className="absolute top-4 right-4 z-[10000] w-11 h-11 flex items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors shadow-lg"
+            className="absolute top-4 right-4 z-[10460] w-11 h-11 flex items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors shadow-lg"
             title="Cerrar (Esc)"
           >
             <X size={20} />

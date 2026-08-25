@@ -3,7 +3,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import RegisterInvitedForm from '../components/RegisterInvitedForm';
-import fondo from '../assets/fondo.png';
+import fondo from '../assets/fondo.jpg';
+import logo from '../assets/logo3.png';
 
 export default function Register() {
   const [searchParams] = useSearchParams();
@@ -76,12 +77,12 @@ export default function Register() {
       style={{
         backgroundImage: `url(${fondo})`,
         backgroundSize: 'cover',
-        backgroundPosition: 'right center',
+        backgroundPosition: 'left top',
         backgroundRepeat: 'no-repeat',
       }}>
-      <div className="relative z-10 w-full max-w-[440px] bg-white border border-gray-200 shadow-xl p-10 flex flex-col rounded-xl">
-        <div className="mb-5 text-center">
-          <span className="font-sans font-black tracking-tighter text-[41px] text-[#0056b3]">ALL-BIM</span>
+      <div className="relative z-10 w-full max-w-[440px] max-h-[95vh] overflow-y-auto bg-white/90 backdrop-blur-sm border border-gray-200 shadow-xl p-8 flex flex-col rounded-xl">
+        <div className="mb-4 flex justify-center">
+          <img src={logo} alt="Logo ALL-BIM" className="h-14 w-auto object-contain" />
         </div>
         <RegisterInvitedForm invitationData={invitationData} token={token!} />
       </div>

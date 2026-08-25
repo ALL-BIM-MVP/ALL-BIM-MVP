@@ -1,10 +1,11 @@
 // src/components/tabs/ColaboradoresTab.tsx
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
+import { createPortal } from 'react-dom';
 import {
   Plus, Trash2, X, Check, Users, CheckCircle,
   Mail, Send, RefreshCw, Clock, Search, AlertCircle,
-  Crown, Shield, AtSign,
+  Crown, Shield, AtSign, Pencil, Save,
 } from 'lucide-react';
 import { useProjectInvitations } from '../../hooks/useProjectInvitations';
 import { getModules, getModuleRoles } from '../../services/module.service';
@@ -75,6 +76,9 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
     isOwner,
     isAdmin,
     checkingOwner,
+    updateMemberAdmin,
+    updateMemberModuleRole,
+    removeMember,
   } = useProjectInvitations(projectId);
 
   const canManage = (isOwner || isAdmin) && !checkingOwner;
@@ -129,6 +133,21 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchBoxRef = useRef<HTMLDivElement>(null);
+
+  // Edición de rol de un miembro ya existente — ahora vía popover flotante
+  // (portado a document.body) anclado al ícono de lápiz al lado del badge
+  // de Rol, en vez de una fila expandida que empujaba toda la tabla.
+  const [editingMemberId, setEditingMemberId] = useState<number | null>(null);
+  const [editIsAdmin, setEditIsAdmin] = useState(false);
+  const [editModuleRoles, setEditModuleRoles] = useState<Record<string, number>>({});
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [removingMemberId, setRemovingMemberId] = useState<number | null>(null);
+  const [editAnchorRect, setEditAnchorRect] = useState<DOMRect | null>(null);
+  // Posición final ya corregida (puede "voltearse" hacia arriba si no
+  // entra hacia abajo) — se calcula después de medir el alto real del
+  // popover, ver los useLayoutEffect más abajo.
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
+  const editPopoverRef = useRef<HTMLDivElement>(null);
 
   const showMessage = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     if (messageTimeoutRef.current) clearTimeout(messageTimeoutRef.current);
@@ -276,6 +295,142 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
     }
   };
 
+  const handleStartEditRole = (member: ProjectMember, anchorEl: HTMLElement) => {
+    if (member.project_member_id == null) return; // owner: no tiene fila propia editable
+    setEditingMemberId(member.project_member_id);
+    setEditIsAdmin(member.is_admin);
+    setEditModuleRoles(
+      Object.fromEntries(member.module_roles.map((r) => [r.module_code, r.module_role_id]))
+    );
+    setEditAnchorRect(anchorEl.getBoundingClientRect());
+  };
+
+  const handleCancelEditRole = () => {
+    setEditingMemberId(null);
+    setEditIsAdmin(false);
+    setEditModuleRoles({});
+    setEditAnchorRect(null);
+    setPopoverPos(null);
+  };
+
+  const handleToggleEditRole = (member: ProjectMember, anchorEl: HTMLElement) => {
+    if (editingMemberId === member.project_member_id) {
+      handleCancelEditRole();
+    } else {
+      handleStartEditRole(member, anchorEl);
+    }
+  };
+
+  // Cierra el popover al hacer click afuera, con Escape, o al scrollear
+  // (evita que quede flotando en un lugar desactualizado de la pantalla).
+  useEffect(() => {
+    if (editingMemberId === null) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (editPopoverRef.current && !editPopoverRef.current.contains(event.target as Node)) {
+        handleCancelEditRole();
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') handleCancelEditRole();
+    };
+    const handleScroll = () => handleCancelEditRole();
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    window.addEventListener('scroll', handleScroll, true);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+      window.removeEventListener('scroll', handleScroll, true);
+    };
+  }, [editingMemberId]);
+
+  // Paso 1: posición provisional apenas se abre (debajo del ícono), solo
+  // para tener algo pintado que después podamos medir.
+  useLayoutEffect(() => {
+    if (!editAnchorRect) return;
+    setPopoverPos({ top: editAnchorRect.bottom + 8, left: editAnchorRect.left });
+  }, [editAnchorRect]);
+
+  // Paso 2: una vez que el popover ya se pintó con la posición provisional,
+  // medimos su alto REAL (varía según cuántos módulos tenga o si está en
+  // modo Administrador) y decidimos si abrir hacia abajo o "voltearlo"
+  // hacia arriba cuando no entra en el espacio restante de la pantalla.
+  // Corre con useLayoutEffect (antes del paint) para que no se note un salto.
+  useLayoutEffect(() => {
+    if (!editAnchorRect || !popoverPos || !editPopoverRef.current) return;
+
+    const rect = editPopoverRef.current.getBoundingClientRect();
+    const margin = 8;
+    const viewportHeight = window.innerHeight;
+    const viewportWidth = window.innerWidth;
+    const spaceBelow = viewportHeight - editAnchorRect.bottom;
+    const spaceAbove = editAnchorRect.top;
+
+    let top: number;
+    if (rect.height + margin <= spaceBelow || spaceBelow >= spaceAbove) {
+      // Entra hacia abajo (o hay más espacio abajo que arriba de todos
+      // modos) — se abre debajo del ícono, sin pasarse del borde inferior.
+      top = Math.min(editAnchorRect.bottom + margin, viewportHeight - rect.height - margin);
+    } else {
+      // No entra hacia abajo y hay más espacio arriba — se voltea.
+      top = Math.max(margin, editAnchorRect.top - rect.height - margin);
+    }
+    const left = Math.min(editAnchorRect.left, viewportWidth - rect.width - margin);
+
+    if (Math.abs(top - popoverPos.top) > 0.5 || Math.abs(left - popoverPos.left) > 0.5) {
+      setPopoverPos({ top, left });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editAnchorRect, popoverPos, editIsAdmin]);
+
+  const handleEditModuleRoleChange = (moduleCode: string, moduleRoleId: number) => {
+    setEditModuleRoles((prev) => ({ ...prev, [moduleCode]: moduleRoleId }));
+  };
+
+  const handleSaveEditRole = async (member: ProjectMember) => {
+    if (member.project_member_id == null) return;
+    setEditSubmitting(true);
+    try {
+      if (editIsAdmin !== member.is_admin) {
+        await updateMemberAdmin(member.project_member_id, editIsAdmin);
+      }
+      if (!editIsAdmin) {
+        const originalRoles = Object.fromEntries(
+          member.module_roles.map((r) => [r.module_code, r.module_role_id])
+        );
+        for (const m of activeModules) {
+          const nextRoleId = editModuleRoles[m.code] ?? 0;
+          const originalRoleId = originalRoles[m.code] ?? 0;
+          if (nextRoleId > 0 && nextRoleId !== originalRoleId) {
+            await updateMemberModuleRole(member.project_member_id, m.code, nextRoleId);
+          }
+        }
+      }
+      showMessage(' Rol actualizado', 'success');
+      handleCancelEditRole();
+    } catch (err: any) {
+      showMessage(err.message || 'Error al actualizar el rol', 'error');
+    } finally {
+      setEditSubmitting(false);
+    }
+  };
+
+  const handleRemoveMember = async (member: ProjectMember) => {
+    if (!window.confirm(`¿Eliminar a ${fullName(member.user_name, member.user_last_name)} del proyecto?`)) return;
+    setRemovingMemberId(member.user_id);
+    try {
+      await removeMember(member.user_id);
+      showMessage(' Miembro eliminado', 'success');
+      if (editingMemberId === member.project_member_id) handleCancelEditRole();
+    } catch (err: any) {
+      showMessage(err.message || 'Error al eliminar miembro', 'error');
+    } finally {
+      setRemovingMemberId(null);
+    }
+  };
+
   const getStatusBadge = (status: string) => {
     const styles: Record<string, string> = {
       pendiente: 'bg-yellow-100 text-yellow-700',
@@ -320,6 +475,91 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
   const activeModules = modules.filter((m) => m.is_active);
   const inactiveModules = modules.filter((m) => !m.is_active);
 
+  const editingMember = members?.find((m) => m.project_member_id === editingMemberId) ?? null;
+
+  // Popover flotante para cambiar el rol de un miembro — portado a
+  // document.body para no quedar recortado por el overflow-x-auto de la
+  // tabla ni atrapado en algún contexto de apilamiento de un ancestro.
+  const editRolePopover =
+    editingMemberId !== null && editAnchorRect && editingMember && popoverPos
+      ? createPortal(
+          <div
+            ref={editPopoverRef}
+            className="fixed z-[10100] bg-white border border-gray-200 rounded-lg shadow-2xl p-4 w-72"
+            style={{
+              top: popoverPos.top,
+              left: popoverPos.left,
+            }}
+          >
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 truncate">
+              Cambiar rol · {fullName(editingMember.user_name, editingMember.user_last_name)}
+            </p>
+
+            <label className="flex items-center gap-2 px-1 py-1 cursor-pointer select-none mb-3">
+              <input
+                type="checkbox"
+                checked={editIsAdmin}
+                onChange={(e) => setEditIsAdmin(e.target.checked)}
+                className="w-4 h-4 rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3]"
+              />
+              <span className="text-sm font-medium text-gray-700">Administrador</span>
+            </label>
+
+            {!editIsAdmin && (
+              <div className="mb-3 space-y-2 max-h-56 overflow-y-auto pr-1">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+                  Rol por módulo
+                </p>
+                {activeModules.map((m) => {
+                  const currentRole = editingMember.module_roles.find((r) => r.module_code === m.code);
+                  return (
+                    <div
+                      key={m.code}
+                      className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1.5"
+                    >
+                      <span className="text-xs text-gray-700 font-medium truncate">{m.name}</span>
+                      <select
+                        value={editModuleRoles[m.code] ?? 0}
+                        onChange={(e) => handleEditModuleRoleChange(m.code, Number(e.target.value))}
+                        className="px-1.5 py-1 border border-gray-200 rounded text-xs outline-none focus:ring-2 focus:ring-[#0056b3] bg-white flex-shrink-0"
+                      >
+                        <option value={0}>{currentRole ? currentRole.role_name : 'Sin rol'}</option>
+                        {(moduleRolesByCode[m.code] ?? [])
+                          .filter((role) => role.module_role_id !== currentRole?.module_role_id)
+                          .map((role) => (
+                            <option key={role.module_role_id} value={role.module_role_id}>
+                              {role.name}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  );
+                })}
+                
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-100 mt-1">
+              <button
+                onClick={handleCancelEditRole}
+                disabled={editSubmitting}
+                className="px-3 py-1.5 rounded-md text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => handleSaveEditRole(editingMember)}
+                disabled={editSubmitting}
+                className="px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 bg-[#0056b3] text-white shadow-sm hover:bg-[#004494] transition-colors disabled:opacity-50"
+              >
+                <Save size={12} /> {editSubmitting ? 'Guardando...' : 'Guardar'}
+              </button>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
     <div className="relative flex items-center justify-center min-h-[600px] w-full overflow-hidden">
       <div
@@ -346,7 +586,7 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
             from { opacity: 0; max-height: 0; }
             to { opacity: 1; max-height: 300px; }
           }
-          .animate-fadeInUp { animation: fadeInUp 0.3s ease-out; }
+          .animate-fadeInUp { animation: fadeInUp 0.15s ease-out; }
           .animate-spin { animation: spin 1s linear infinite; }
           .animate-slideDown { animation: slideDown 0.3s ease-out; }
         `}</style>
@@ -686,41 +926,88 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-100">
                 <tr>
-                  <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Miembro</th>
+                  <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Nombre</th>
+                  <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Apellido</th>
                   <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Rol</th>
                   <th className="px-6 py-3 text-left text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Email</th>
+                  {canManage && (
+                    <th className="px-6 py-3 text-right text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Acciones</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {!members || members.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="px-6 py-10 text-center text-gray-400 text-sm">
+                    <td colSpan={canManage ? 5 : 4} className="px-6 py-10 text-center text-gray-400 text-sm">
                       No hay miembros registrados
                     </td>
                   </tr>
                 ) : (
-                  members.map((member: ProjectMember) => (
+                  members.map((member: ProjectMember) => {
+                    const isEditing = editingMemberId !== null && editingMemberId === member.project_member_id;
+                    const canEditThisMember = canManage && !member.is_owner && member.project_member_id != null;
+                    return (
                     <tr key={member.project_member_id ?? `owner-${member.user_id}`} className="hover:bg-blue-50/30 transition-colors">
                       <td className="px-6 py-3 font-medium text-gray-700">
                         <div className="flex items-center gap-2.5">
                           <MemberAvatar
                             name={fullName(member.user_name, member.user_last_name)}
-                            email={member.user_email}
+                            email={member.email}
                             photoUrl={member.profile_picture_url}
                             size="md"
                           />
-                          {fullName(member.user_name, member.user_last_name)}
-                          {member.is_me && <span className="text-xs text-gray-400 font-normal">(vos)</span>}
+                          {member.user_name}
+                          {member.is_me && <span className="text-xs text-gray-400 font-normal"></span>}
                         </div>
                       </td>
-                      <td className="px-6 py-3">
-                        <span className={`px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${roleBadgeColor({ isOwner: member.is_owner, isAdmin: member.is_admin })}`}>
-                          {roleLabel({ isOwner: member.is_owner, isAdmin: member.is_admin, moduleRoles: member.module_roles })}
-                        </span>
+                      <td className="px-6 py-3 text-gray-700">
+                        {member.user_last_name || <span className="text-gray-400">—</span>}
                       </td>
-                      <td className="px-6 py-3 text-sm text-gray-600">{member.user_email}</td>
+                      <td className="px-6 py-3">
+                        {/* Badge de rol + ícono de lápiz al lado, que abre el
+                            popover flotante — reemplaza el viejo botón
+                            "Cambiar rol" que vivía en la columna Acciones. */}
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2.5 py-1 rounded-md text-xs font-medium ring-1 ring-inset ring-black/5 ${roleBadgeColor({ isOwner: member.is_owner, isAdmin: member.is_admin })}`}>
+                            {roleLabel({ isOwner: member.is_owner, isAdmin: member.is_admin, moduleRoles: member.module_roles })}
+                          </span>
+                          {canEditThisMember && (
+                            <button
+                              onClick={(e) => handleToggleEditRole(member, e.currentTarget)}
+                              title="Cambiar rol"
+                              className={`w-6 h-6 flex items-center justify-center rounded-md transition-colors flex-shrink-0 ${
+                                isEditing ? 'bg-[#0056b3] text-white' : 'text-gray-400 hover:text-[#0056b3] hover:bg-blue-50'
+                              }`}
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-3 text-sm text-gray-600">{member.email}</td>
+                      {canManage && (
+                        <td className="px-6 py-3">
+                          {canEditThisMember ? (
+                            <div className="flex items-center justify-end">
+                              <button
+                                onClick={() => handleRemoveMember(member)}
+                                disabled={removingMemberId === member.user_id || member.is_me}
+                                title={member.is_me ? 'No podés eliminarte a vos mismo' : undefined}
+                                className="text-red-500 hover:text-red-700 hover:bg-red-50 text-sm font-medium flex items-center gap-1 px-2 py-1 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <Trash2 size={14} /> {removingMemberId === member.user_id ? 'Eliminando...' : 'Eliminar'}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="flex justify-end text-xs text-gray-400 italic pr-2">
+                              {member.is_owner ? 'Dueño del proyecto' : ''}
+                            </span>
+                          )}
+                        </td>
+                      )}
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -728,6 +1015,8 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
         </div>
 
       </div>
+
+      {editRolePopover}
     </div>
   );
 };

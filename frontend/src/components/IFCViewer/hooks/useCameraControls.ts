@@ -129,7 +129,8 @@ export function useCameraControls(params: UseCameraControlsParams) {
       isPanning = false;
       canvas.style.cursor = 'grab';
 
-      if (isWalkModeRef.current) return;
+    
+      if (isWalkModeRef.current && document.pointerLockElement === canvas) return;
 
       if (wasDragging && moved < 4 && renderer.pick) {
         const rect = canvas.getBoundingClientRect();
@@ -151,10 +152,6 @@ export function useCameraControls(params: UseCameraControlsParams) {
     const handleMouseLeave = () => {
       isDragging = false;
       isPanning = false;
-      onCutMouseUp?.();
-      onLaserMouseUp?.();
-      onPaintMouseUp?.();
-      onMeasureMouseUp();
     };
 
     const handleWheel = (e: WheelEvent) => {
@@ -174,30 +171,22 @@ export function useCameraControls(params: UseCameraControlsParams) {
 
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
 
-    const handleClick = () => {
-      if (isWalkModeRef.current && document.pointerLockElement !== canvas) {
-        canvas.requestPointerLock?.();
-      }
-    };
-
     canvas.addEventListener('mousedown', handleMouseDown);
-    canvas.addEventListener('mousemove', handleMouseMove);
-    canvas.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseLeave);
     canvas.addEventListener('wheel', handleWheel, { passive: false });
     canvas.addEventListener('contextmenu', handleContextMenu);
-    canvas.addEventListener('click', handleClick);
     canvas.style.cursor = 'grab';
 
     return () => {
       if (wheelEndTimeout !== null) clearTimeout(wheelEndTimeout);
       canvas.removeEventListener('mousedown', handleMouseDown);
-      canvas.removeEventListener('mousemove', handleMouseMove);
-      canvas.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
       canvas.removeEventListener('mouseleave', handleMouseLeave);
       canvas.removeEventListener('wheel', handleWheel);
       canvas.removeEventListener('contextmenu', handleContextMenu);
-      canvas.removeEventListener('click', handleClick);
     };
   }, [
     ready,

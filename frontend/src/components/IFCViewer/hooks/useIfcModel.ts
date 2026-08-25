@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import type { ModelBounds } from '../types';
 import { useModelLoader } from './useModelLoader';
 import { useEntitySelection } from './useEntitySelection';
@@ -13,7 +13,7 @@ import { useElementCutTool } from './useElementCutTool';
 import { usePaintTool } from './usePaintTool';
 export type { ViewPreset } from '../types';
 
-export function useIfcModel(fileBuffer: ArrayBuffer | null) {
+export function useIfcModel(fileBuffer: ArrayBuffer | null, panelOffsetPx: number = 0) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<any>(null);
@@ -52,7 +52,33 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     }
   );
 
-  const visibility = useEntityVisibility(rendererRef, loader.typeGroups);
+  const visibility = useEntityVisibility(rendererRef, loader.typeGroups, loader.levelGroups, panelOffsetPx);
+
+  useEffect(() => {
+    if (!rendererRef.current) return;
+    const ids = new Set<number>();
+    for (const g of loader.typeGroups) {
+      const t = g.type.toUpperCase();
+      if (
+        t.includes('DOOR') || t.includes('WINDOW') ||
+        t.includes('PUERTA') || t.includes('VENTANA')
+      ) {
+        g.ids.forEach((id) => ids.add(id));
+      }
+    }
+    rendererRef.current.setWalkThroughEntities?.(ids);
+  }, [loader.typeGroups]);
+
+  const toggleWalkPause = useCallback(() => {
+    const wasPaused = walk.isWalkPaused;
+    walk.toggleWalkPause();
+    if (wasPaused) {
+      measure.clearMeasurement();
+      cross.clearCross();
+      paint.clearStrokes();
+      selection.clearSelection();
+    }
+  }, [walk, measure, cross, paint, selection]);
 
   const onPick = useCallback((expressId: number | null, point?: { x: number; y: number; z: number }) => {
     if (expressId !== null) selection.selectEntityById(expressId, point);
@@ -104,6 +130,8 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null) {
     ...visibility,
     isWalkMode: walk.isWalkMode,
     toggleWalkMode: walk.toggleWalkMode,
+    isWalkPaused: walk.isWalkPaused,
+    toggleWalkPause,
     ...background,
     ...measure,
     ...cross,

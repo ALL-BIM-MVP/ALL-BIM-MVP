@@ -48,6 +48,15 @@ export interface ProjectFile {
   uploaded_at: string;
   uploaded_by: ProjectFileUploader;
   processed?: boolean;
+  // Fase 3 (especialidad + versionado de IFC) — todos opcionales porque
+  // no todo archivo del proyecto es un IFC (puede ser una imagen, un
+  // Excel, un PDF, etc.). Vienen null/undefined para esos casos.
+  ifc_document_id?: string | null;
+  ifc_document_name?: string | null;
+  version_number?: number | null;
+  is_current?: boolean | null;
+  specialty_code?: string | null;
+  specialty_name?: string | null;
 }
 
 export interface IFCFile {

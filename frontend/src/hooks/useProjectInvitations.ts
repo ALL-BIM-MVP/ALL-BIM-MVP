@@ -5,6 +5,9 @@ import {
     createProjectInvitation,
     updateInvitationStatus,
     getProjectMembers,
+    setMemberAdmin,
+    setMemberModuleRole,
+    removeProjectMember,
 } from '../services/invitation.service';
 import {
     Invitation,
@@ -138,6 +141,39 @@ export const useProjectInvitations = (projectId: number) => {
 
     const pendingInvitations = invitations.filter(inv => inv.status === 'pendiente');
 
+    // memberId acá es project_member_id (no user_id) — así lo pide el
+    // backend en /members/:memberId/admin y /members/:memberId/modules/...
+    const updateMemberAdmin = useCallback(async (memberId: number, isAdminValue: boolean) => {
+        if (!projectId) throw new Error('Project ID required');
+        if (!isOwner && !isAdmin) {
+            throw new Error('Solo el dueño o un administrador del proyecto puede cambiar roles');
+        }
+        await setMemberAdmin(projectId, memberId, isAdminValue);
+        await loadMembers();
+    }, [projectId, isOwner, isAdmin, loadMembers]);
+
+    const updateMemberModuleRole = useCallback(async (
+        memberId: number, moduleCode: string, moduleRoleId: number
+    ) => {
+        if (!projectId) throw new Error('Project ID required');
+        if (!isOwner && !isAdmin) {
+            throw new Error('Solo el dueño o un administrador del proyecto puede cambiar roles');
+        }
+        await setMemberModuleRole(projectId, memberId, moduleCode, moduleRoleId);
+        await loadMembers();
+    }, [projectId, isOwner, isAdmin, loadMembers]);
+
+    // Acá sí es user_id (no project_member_id) — así lo pide el backend
+    // en DELETE /members/:userId.
+    const removeMember = useCallback(async (userId: number) => {
+        if (!projectId) throw new Error('Project ID required');
+        if (!isOwner && !isAdmin) {
+            throw new Error('Solo el dueño o un administrador del proyecto puede eliminar miembros');
+        }
+        await removeProjectMember(projectId, userId);
+        await loadMembers();
+    }, [projectId, isOwner, isAdmin, loadMembers]);
+
     return {
         invitations,
         pendingInvitations,
@@ -153,5 +189,8 @@ export const useProjectInvitations = (projectId: number) => {
         searchUsers,
         createInvitation,
         cancelInvitation,
+        updateMemberAdmin,
+        updateMemberModuleRole,
+        removeMember,
     };
 };

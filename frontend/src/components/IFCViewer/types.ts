@@ -25,6 +25,9 @@ export interface TypeGroup {
   ids: number[];
 }
 
+
+export type LevelGroup = TypeGroup;
+
 export type ViewPreset = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
 
 export interface MeasurePoint {

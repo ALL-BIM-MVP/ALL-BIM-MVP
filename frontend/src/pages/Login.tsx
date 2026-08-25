@@ -2,7 +2,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import LoginForm from '../components/LoginForm';
-import fondo from '../assets/fondo.png';
+import fondo from '../assets/fondo.jpg';
+import logo from '../assets/logo3.png';
 
 export default function Login() {
   return (
@@ -14,9 +15,9 @@ export default function Login() {
         backgroundRepeat: 'no-repeat',
         backgroundColor: '#0a1a2f',
       }}>
-      <div className="relative z-10 w-full max-w-[440px] bg-white border border-gray-200 shadow-xl p-10 flex flex-col rounded-xl">
-        <div className="mb-5 text-center">
-          <span className="font-sans font-black tracking-tighter text-[41px] text-[#0056b3]">ALL-BIM</span>
+      <div className="relative z-10 w-full max-w-[440px] bg-white/90 backdrop-blur-sm border border-gray-200 shadow-xl p-10 flex flex-col rounded-xl">
+        <div className="mb-5 flex justify-center">
+          <img src={logo} alt="Logo ALL-BIM" className="h-14 w-auto object-contain" />
         </div>
 
         <LoginForm />

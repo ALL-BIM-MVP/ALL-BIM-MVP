@@ -6,6 +6,7 @@ export const useAuth = () => {
   const [formData, setFormData] = useState({
     email: '',
     name: '',
+    last_name: '',
     password: '',
     confirmPassword: ''
   });
@@ -19,10 +20,7 @@ export const useAuth = () => {
     });
   };
 
-  // REGISTRO CON INVITACIÓN
-  // Nota: esto solo registra al usuario invitado. No inicia sesión por sí solo
-  // (si tu flujo requiere loguear automáticamente tras registrarse, hay que
-  // llamar a login() del AuthContext desde el componente que use este hook).
+  
   const handleRegister = async (token: string) => {
     setLoading(true);
     try {
@@ -33,6 +31,8 @@ export const useAuth = () => {
       const response = await registerUser({
         token,
         name: formData.name,
+        
+        last_name: formData.last_name.trim() || undefined,
         password: formData.password
       });
 

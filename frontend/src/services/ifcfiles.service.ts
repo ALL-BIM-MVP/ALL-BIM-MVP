@@ -1,19 +1,68 @@
 // src/services/ifcfiles.service.ts
 //
-// Servicio para el flujo de carga/listado/procesamiento de archivos IFC.
-// Basado 1:1 en la documentación de endpoints (sección 1 y 2):
-//   GET  /api/projects/:projectId/files?file_type=ifc&processed=true|false
-//   GET  /api/files/:fileId/content
-//   POST /api/projects/:projectId/ifc-metrados/process   { file_id }  (o multipart)
-//   GET  /api/ifc-files/:ifcFileId                        (poll de estado)
-//
-// OJO (ver doc): file_id / ifc_file_id vienen como STRING desde el
-// backend (BIGINT de Postgres) — se tratan como opacos, nunca se
-// castean a number ni se usan en aritmética.
+
 
 import { api } from './api';
 
 export type IfcStatus = 'processing' | 'done' | 'error' | null;
+
+
+
+export interface ClassificationSnapshot {
+  mode: 'norma' | 'manual';
+  property_prefix: string | null;
+  code_property_set: string | null;
+  code_property_name: string | null;
+  description_property_set: string | null;
+  description_property_name: string | null;
+  unit_property_set: string | null;
+  unit_property_name: string | null;
+}
+
+export interface ClassificationConfigField {
+  slot: number;
+  code_property_set: string | null;
+  code_property_name: string;
+  description_property_set: string | null;
+  description_property_name: string | null;
+  unit_property_set: string | null;
+  unit_property_name: string | null;
+}
+
+export interface ClassificationConfig {
+  project_id: number;
+  mode: 'norma' | 'manual';
+  mode_locked: boolean;
+  property_prefix: string | null;
+  property_prefix_locked: boolean;
+  updated_at: string;
+  updated_by: number | null;
+  fields: ClassificationConfigField[];
+}
+
+export interface ClassificationConfigInput {
+  mode: 'norma' | 'manual';
+  mode_locked?: boolean;
+  property_prefix?: string;
+  property_prefix_locked?: boolean;
+  code_property_set?: string;
+  code_property_name?: string;
+  description_property_set?: string;
+  description_property_name?: string;
+  unit_property_set?: string;
+  unit_property_name?: string;
+}
+
+export interface ClassificationOverrideInput {
+  mode?: 'manual';
+  code_property_set?: string;
+  code_property_name?: string;
+  description_property_set?: string;
+  description_property_name?: string;
+  unit_property_set?: string;
+  unit_property_name?: string;
+  property_prefix?: string;
+}
 
 export interface IfcFile {
   file_id: string;
@@ -31,6 +80,13 @@ export interface IfcFile {
     user_name: string;
     user_email: string;
   };
+  
+  ifc_document_id: string | null;
+  ifc_document_name: string | null;
+  version_number: number | null;
+  is_current: boolean | null;
+  specialty_code: string | null;
+  specialty_name: string | null;
 }
 
 export interface IfcProcessStatus {
@@ -39,34 +95,32 @@ export interface IfcProcessStatus {
   schema_version: string | null;
   processed_at: string | null;
   error_message: string | null;
+  ifc_document_id?: string;
+  version_number?: number;
+  is_current?: boolean;
+
+  classification_config_used: ClassificationSnapshot;
 }
 
-/**
- * Lista los archivos IFC de un proyecto.
- * processed=true  -> solo terminados (ifc_status === 'done')
- * processed=false -> nunca procesados o con error
- * processed=undefined -> todos los ifc del proyecto, sin filtrar por estado
- */
+
 export const listProjectIfcFiles = async (
   projectId: number,
-  processed?: boolean
+  processed?: boolean,
+  onlyCurrent?: boolean
 ): Promise<IfcFile[]> => {
   const params = new URLSearchParams({ file_type: 'ifc' });
   if (processed !== undefined) {
     params.set('processed', String(processed));
   }
+  if (onlyCurrent) {
+    params.set('only_current', 'true');
+  }
   const response = await api.get(`/api/projects/${projectId}/files?${params.toString()}`);
   return response || [];
 };
 
-/**
- * Trae los bytes crudos de un archivo ya subido (para graficarlo en el
- * visor sin forzar descarga — sin ?download=true, se sirve inline).
- */
+
 export const getFileContentArrayBuffer = async (fileId: string): Promise<ArrayBuffer> => {
-  // NOTA: api.get normalmente parsea JSON — para bytes crudos usamos
-  // fetch directo, pero contra la misma BASE_URL y con la misma key de
-  // localStorage que usa api.ts ('accessToken', ver ese archivo).
   const token = localStorage.getItem('accessToken');
   const res = await fetch(`http://localhost:4000/api/files/${fileId}/content`, {
     headers: {
@@ -79,9 +133,6 @@ export const getFileContentArrayBuffer = async (fileId: string): Promise<ArrayBu
   return res.arrayBuffer();
 };
 
-/**
- * Dispara el procesamiento de un archivo YA subido (variante b del doc).
- */
 export const processExistingIfcFile = async (
   projectId: number,
   fileId: string,
@@ -90,24 +141,37 @@ export const processExistingIfcFile = async (
   const qs = force ? '?force=true' : '';
   const response = await api.post(
     `/api/projects/${projectId}/ifc-metrados/process${qs}`,
-    { file_id: Number(fileId) } // el body pide number acá, según el doc: { "file_id": 1 }
+    { file_id: Number(fileId) }
   );
   return response;
 };
 
-/**
- * Sube + procesa en un solo paso (variante a del doc) — multipart.
- * OJO: usa api.postFormData, NO api.post — api.post siempre hace
- * JSON.stringify(data) sobre lo que le pasás, y JSON.stringify(FormData)
- * da "{}" (body vacío), lo que dispara 400 IFC_FILE_REQUIRED en el
- * backend por más que el archivo sí se haya adjuntado acá.
- */
+
+export type IfcDocumentContext =
+  | { specialtyId: number; documentName?: string }
+  | { replacesIfcDocumentId: string };
+
+
+  
 export const uploadAndProcessIfcFile = async (
   projectId: number,
-  file: File
+  file: File,
+  documentContext: IfcDocumentContext,
+  classificationOverride?: ClassificationOverrideInput
 ): Promise<IfcProcessStatus> => {
   const formData = new FormData();
   formData.append('file', file);
+  if ('specialtyId' in documentContext) {
+    formData.append('specialty_id', String(documentContext.specialtyId));
+    if (documentContext.documentName) {
+      formData.append('document_name', documentContext.documentName);
+    }
+  } else {
+    formData.append('replaces_ifc_document_id', documentContext.replacesIfcDocumentId);
+  }
+  if (classificationOverride) {
+    formData.append('classification_override', JSON.stringify(classificationOverride));
+  }
   const response = await api.postFormData(
     `/api/projects/${projectId}/ifc-metrados/process`,
     formData
@@ -115,10 +179,7 @@ export const uploadAndProcessIfcFile = async (
   return response;
 };
 
-/**
- * Solo sube el archivo, sin procesarlo (POST /projects/:p/files, 1.1 del doc).
- * Útil si en algún flujo se quiere "guardar sin procesar todavía".
- */
+
 export const uploadIfcFileOnly = async (
   projectId: number,
   file: File
@@ -130,19 +191,13 @@ export const uploadIfcFileOnly = async (
   return response;
 };
 
-/**
- * Consulta el estado de procesamiento (para hacer polling cada 2-3s
- * mientras status === 'processing').
- */
+
 export const getIfcProcessStatus = async (ifcFileId: string): Promise<IfcProcessStatus> => {
   const response = await api.get(`/api/ifc-files/${ifcFileId}`);
   return response;
 };
 
-/**
- * Helper de polling: consulta el estado cada `intervalMs` hasta que
- * termine (done o error), o hasta agotar `maxAttempts`.
- */
+
 export const pollIfcProcessStatus = async (
   ifcFileId: string,
   { intervalMs = 2500, maxAttempts = 120 }: { intervalMs?: number; maxAttempts?: number } = {}
@@ -158,6 +213,82 @@ export const pollIfcProcessStatus = async (
 };
 
 // ============================================================
+// ESPECIALIDADES Y DOCUMENTOS IFC — Fase 3
+// ============================================================
+
+export interface IfcSpecialty {
+  ifc_specialty_id: number;
+  code: string;
+  name: string;
+  is_active: boolean;
+}
+
+
+export const listIfcSpecialties = async (): Promise<IfcSpecialty[]> => {
+  const response = await api.get('/api/ifc-specialties');
+  return response || [];
+};
+
+export interface IfcDocumentVersion {
+  ifc_file_id: string;
+  version_number: number;
+  is_current: boolean;
+  status: 'processing' | 'done' | 'error';
+  error_message: string | null;
+  processed_at: string | null;
+  uploaded_at: string;
+  name: string;
+  file_size: string;
+  uploaded_by: number;
+  uploader_name: string;
+  uploader_last_name: string | null;
+
+  classification_config_used: ClassificationSnapshot;
+}
+
+export interface IfcDocument {
+  ifc_document_id: string;
+  project_id: number;
+  name: string;
+
+  specialty_id: number | null;
+  specialty_code: string | null;
+  specialty_name: string | null;
+  created_at: string;
+  created_by: number;
+
+  versions: IfcDocumentVersion[];
+}
+
+
+export const listIfcDocuments = async (projectId: number): Promise<IfcDocument[]> => {
+  const response = await api.get(`/api/projects/${projectId}/ifc-documents`);
+  return response || [];
+};
+
+
+export const getClassificationConfig = async (
+  projectId: number
+): Promise<ClassificationConfig> => {
+  const response = await api.get(
+    `/api/projects/${projectId}/ifc-classification-config`
+  );
+  return response;
+};
+
+
+export const setClassificationConfig = async (
+  projectId: number,
+  config: ClassificationConfigInput
+): Promise<ClassificationConfig> => {
+  const response = await api.put(
+    `/api/projects/${projectId}/ifc-classification-config`,
+    config
+  );
+  return response;
+};
+
+// ============================================================
 // PARTIDAS — doc sección 3
 // ============================================================
 
@@ -166,29 +297,19 @@ export interface PartidaNode {
   parent_id: number | null;
   code: string;
   description: string;
-  unit: string | null; // null = carpeta/categoría, no null = partida real (hoja)
+  unit: string | null;
   sort_order: number;
   element_count: number;
   total: number | null;
   children: PartidaNode[];
 }
 
-/**
- * Árbol liviano de partidas — GET /ifc-files/:id/partidas (doc 3.1).
- * Requiere que el ifc_file ya esté en status "done".
- */
 export const getPartidasTree = async (ifcFileId: string): Promise<PartidaNode[]> => {
   const response = await api.get(`/api/ifc-files/${ifcFileId}/partidas`);
   return response || [];
 };
 
 export interface PartidaElementDetail {
-  // OJO: element_id y express_id llegan como STRING desde el backend
-  // (BIGINT de Postgres) — no castear a number sin querer en otro
-  // lado. Para el visor 3D específicamente sí hace falta convertir
-  // express_id a number antes de usarlo (ver PartidasTree.tsx,
-  // handleContextMenuLeaf) porque ahí se compara contra IDs reales del
-  // modelo Three.js.
   element_id: string;
   express_id: string;
   name: string;
@@ -200,8 +321,6 @@ export interface PartidaElementDetail {
   area: number;
   volume: number;
   weight: number;
-  // key = "<property_set_name>::<property_name>" (sección 3.2 del doc).
-  // {} si la request no pidió columnas ifc_property.
   properties: Record<string, string | null>;
 }
 
@@ -237,26 +356,12 @@ export interface PartidaDetail {
   groups: PartidaGroup[];
 }
 
-// ---- NUEVO: soporte para columnas de propiedad IFC (doc 3.2) ----
-
-// Columna de propiedad IFC a resolver. Mutuamente excluyente con
-// template_id (mandar UNO de los dos, o ninguno).
-//
-// ⚠️ IMPORTANTE: el backend valida "columns" con el MISMO schema que
-// usan las plantillas (TemplateColumnInputSchema, una unión
-// discriminada por source_type) — no con una forma más chica como
-// sugiere el ejemplo de la doc (sección 3.2). Por eso hacen falta acá
-// source_type y column_order, aunque el servicio que resuelve los
-// valores (metrado-partidas.service.ts) después solo lea name/
-// property_set_name/property_name — sin esos dos campos, Zod rechaza
-// la unión ENTERA con 400 INVALID_REQUEST_DATA antes de llegar a leer
-// nada más (ni siquiera evalúa property_set_name).
 export interface PartidaColumnRequest {
   name: string;
   source_type: 'ifc_property';
-  property_set_name: string; // "" es válido (propiedad sin Pset) — confirmado en el schema real, sin .min(1)
+  property_set_name: string;
   property_name: string;
-  column_order: number; // no se usa para nada semánticamente en /elements, pero el schema lo exige — cualquier entero sirve
+  column_order: number;
 }
 
 export interface GetPartidaElementsOptions {
@@ -265,12 +370,6 @@ export interface GetPartidaElementsOptions {
   columns?: PartidaColumnRequest[];
 }
 
-/**
- * Detalle agrupado de una partida hoja (unit !== null) —
- * POST /ifc-files/:id/partidas/:partidaId/elements (doc 3.2).
- * Sin body (o {}) usa el group_by por defecto (level_name, space_name, tag)
- * y no resuelve columnas de propiedad IFC (100% backward-compatible).
- */
 export const getPartidaElements = async (
   ifcFileId: string,
   partidaId: number,
@@ -283,8 +382,6 @@ export const getPartidaElements = async (
   return response;
 };
 
-// El campo del grupo/elemento que corresponde al "metrado real" según
-// la unidad de la partida — ver doc 3.2 ("sub_total SÍ multiplica").
 export function metradoFieldForUnit(unit: string): keyof Pick<
   PartidaGroup,
   'run_length' | 'area' | 'volume' | 'weight' | 'quantity'
@@ -295,3 +392,7 @@ export function metradoFieldForUnit(unit: string): keyof Pick<
   if (unit === 'kg') return 'weight';
   return 'quantity';
 }
+
+export const exportToExcel = async (ifcFileId: string): Promise<IfcFile> => {
+  return await api.post(`/api/ifc-files/${ifcFileId}/export-excel`, {});
+};
