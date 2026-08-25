@@ -28,7 +28,7 @@ import json
 import sys
 from pathlib import Path
 
-from .pipeline import procesar_ifc
+from .pipeline import procesar_ifc, probar_ifc
 
 # Resuelto relativo a ESTE archivo (no al cwd desde donde se invoque)
 # para que el default sea siempre el mismo lugar dentro del repo, sin
@@ -39,7 +39,7 @@ DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent.parent / "output"
 def main():
     parser = argparse.ArgumentParser(description="Procesa un IFC y produce el JSON normalizado de metrados.")
     parser.add_argument("ifc_path", help="Ruta al archivo .ifc")
-    parser.add_argument("--norma", required=True, help="Ruta al norma.json")
+    parser.add_argument("--norma", help="Ruta al norma.json (obligatorio salvo con --dry-run)")
     parser.add_argument(
         "--classification-config",
         help=(
@@ -49,6 +49,18 @@ def main():
             "\"description_property_set\"/\"description_property_name\" (opcionales), "
             "\"unit_property_set\"/\"unit_property_name\" (opcionales)}. "
             "Si se omite, clasifica en modo 'norma' (comportamiento de siempre)."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help=(
+            "Consolidación punto 5 — en vez de procesar el IFC completo "
+            "(geometría + metrado + insertar), solo escanea qué elementos "
+            "matchean la config de clasificación manual (--classification-config, "
+            "obligatorio acá) y devuelve un resumen chico — no un JSON "
+            "normalizado completo. Mucho más rápido (sin geometría), pensado "
+            "para 'probar esta config antes de comprometerse a un reproceso "
+            "de minutos'. No necesita --norma."
         ),
     )
     parser.add_argument(
@@ -70,12 +82,20 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.dry_run and not args.classification_config:
+        parser.error("--dry-run necesita --classification-config (no hay nada que probar sin una config).")
+    if not args.dry_run and not args.norma:
+        parser.error("--norma es obligatorio salvo con --dry-run.")
+
     classification_config = None
     if args.classification_config:
         with open(args.classification_config, "r", encoding="utf-8") as f:
             classification_config = json.load(f)
 
-    resultado = procesar_ifc(args.ifc_path, args.norma, classification_config)
+    if args.dry_run:
+        resultado = probar_ifc(args.ifc_path, classification_config)
+    else:
+        resultado = procesar_ifc(args.ifc_path, args.norma, classification_config)
 
     # Sin --out (uso manual, pensado para que un humano lo abra) ->
     # indentado por defecto. Con --out explícito (el runner de Node

@@ -75,6 +75,55 @@ export type GroupByField = (typeof GROUP_BY_FIELDS)[number];
 // devuelve (ver metrado-partidas.models.ts) — lo único que hay que
 // resolver de verdad son las "ifc_property" (ver
 // metrado-partidas.service.ts, resolvePropertyRefs/resolvePropertyValues).
+// Consolidación punto 5 — "probar" una config de clasificación manual
+// antes de comprometerse a un reproceso de minutos (ver
+// docs/roadmap/consolidacion-y-hardening.md). A diferencia de
+// ClassificationOverrideSchema (ifc-classification.schema.ts),
+// code_property_name es SIEMPRE obligatorio acá — no tiene sentido un
+// dry-run sin nada que buscar, y el modo (manual/norma) no aplica: el
+// dry-run SOLO prueba el mapeo de propiedades, nunca clasifica contra
+// la norma (no hay nada que "probar" ahí, ver
+// pipeline.probar_ifc en Python).
+const ClassificationDryRunConfigSchema = z.object({
+    property_prefix: z.string().trim().max(60).optional(),
+    code_property_set: z.string().trim().max(255).optional(),
+    code_property_name: z.string().trim().min(1).max(255),
+    description_property_set: z.string().trim().max(255).optional(),
+    description_property_name: z.string().trim().max(255).optional(),
+    unit_property_set: z.string().trim().max(255).optional(),
+    unit_property_name: z.string().trim().max(255).optional(),
+});
+
+// Mismo patrón que ClassificationOverrideFieldSchema — multer deja los
+// campos de texto de un multipart como STRING siempre, así que
+// classification_config viaja como JSON.stringify(...) en esa
+// variante, pero como objeto real en la variante JSON (file_id, sin
+// archivo nuevo). Repetido acá a propósito (no importado de
+// ifc-classification.schema.ts) — ese schema exige code_property_name
+// solo condicionalmente (cuando mode='manual'), acá es siempre
+// obligatorio, son reglas distintas.
+export const ClassificationDryRunConfigFieldSchema = z.union([
+    z.string().transform((val, ctx) => {
+        try {
+            return JSON.parse(val) as unknown;
+        } catch {
+            ctx.addIssue({ code: z.ZodIssueCode.custom, message: "classification_config debe ser JSON válido." });
+            return z.NEVER;
+        }
+    }).pipe(ClassificationDryRunConfigSchema),
+    ClassificationDryRunConfigSchema,
+]);
+
+// file_id (JSON, sin archivo nuevo) o multipart con "file" (el
+// controller decide cuál según venga req.file) — igual criterio dual
+// que ProcessIfcMetradosBodySchema.
+export const ClassificationDryRunBodySchema = z.object({
+    file_id: z.coerce.number().optional(),
+    classification_config: ClassificationDryRunConfigFieldSchema,
+});
+
+export type ClassificationDryRunBody = z.infer<typeof ClassificationDryRunBodySchema>;
+
 export const PartidaElementsBodySchema = z.object({
     group_by: z.array(z.enum(GROUP_BY_FIELDS)).optional(),
     template_id: z.coerce.number().optional(),

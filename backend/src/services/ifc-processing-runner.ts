@@ -21,19 +21,23 @@ import type { IfcClassificationSnapshot } from "../models/ifc-classification.mod
 const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// backend/dist/services -> backend/dist -> backend -> raíz del repo
-const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+// backend/dist/services -> backend/dist -> backend -> raíz del repo.
+// Exportadas junto con PYTHON_BIN/PROCESSING_TIMEOUT_MS/EXEC_MAX_BUFFER
+// — el dry-run de clasificación (ifc-metrados.service.ts, consolidación
+// punto 5) invoca el MISMO intérprete/CLI de Python, no tiene sentido
+// que mantenga su propia copia de estas constantes.
+export const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
-const PYTHON_BIN = process.env.PROCESSING_PYTHON
+export const PYTHON_BIN = process.env.PROCESSING_PYTHON
     || path.join(REPO_ROOT, "processing", ".venv", "bin", "python");
 
 const NORMA_JSON_PATH = process.env.NORMA_JSON_PATH
     || path.join(REPO_ROOT, "processing", "proceso-metrados-base", "norma_completa.json");
 
-const PROCESSING_TIMEOUT_MS = Number(process.env.PROCESSING_TIMEOUT_MS) || 10 * 60 * 1000; // 10 min
+export const PROCESSING_TIMEOUT_MS = Number(process.env.PROCESSING_TIMEOUT_MS) || 10 * 60 * 1000; // 10 min
 const MAX_CONCURRENT_IFC_JOBS = Number(process.env.MAX_CONCURRENT_IFC_JOBS) || 2;
 const MAX_ERROR_MESSAGE_LENGTH = 500;
-const EXEC_MAX_BUFFER = 50 * 1024 * 1024; // stdout/stderr del subprocess, NO el JSON (ese va a --out)
+export const EXEC_MAX_BUFFER = 50 * 1024 * 1024; // stdout/stderr del subprocess, NO el JSON (ese va a --out)
 
 // Guarda rápida en memoria — no reemplaza el lock de BD (ver
 // ifc-metrados.service.ts), es defensa extra barata contra lanzar dos
@@ -46,7 +50,11 @@ export const jobsInFlight = new Set<number>();
 let runningJobs = 0;
 const pendingQueue: Array<() => void> = [];
 
-const acquireSlot = (): Promise<void> => {
+// Exportadas: el dry-run de clasificación (ifc-metrados.service.ts,
+// consolidación punto 5) también lanza un subprocess de Python — pesa
+// menos (sin geometría) pero igual conviene que comparta el mismo
+// límite de concurrencia, no uno aparte.
+export const acquireSlot = (): Promise<void> => {
     if (runningJobs < MAX_CONCURRENT_IFC_JOBS) {
         runningJobs++;
         return Promise.resolve();
@@ -59,20 +67,26 @@ const acquireSlot = (): Promise<void> => {
     });
 };
 
-const releaseSlot = (): void => {
+export const releaseSlot = (): void => {
     runningJobs--;
     const next = pendingQueue.shift();
     if (next) next();
 };
 
-const truncateError = (message: string): string => {
+export const truncateError = (message: string): string => {
     const cleaned = message.trim() || "Error desconocido procesando el IFC.";
     return cleaned.length > MAX_ERROR_MESSAGE_LENGTH
         ? `${cleaned.slice(0, MAX_ERROR_MESSAGE_LENGTH)}…`
         : cleaned;
 };
 
-const assertPathWithinUploads = (filePath: string): string => {
+// Exportada: el dry-run de clasificación (ifc-metrados.service.ts,
+// consolidación punto 5) también recibe un filePath que puede venir
+// de files.file_path (relativo, ver comentario de UPLOADS_DIR) cuando
+// prueba contra un archivo ya subido — necesita la MISMA resolución
+// (y el mismo chequeo de seguridad) antes de pasarlo a execFile con un
+// cwd distinto al de este proceso Node.
+export const assertPathWithinUploads = (filePath: string): string => {
     const resolved = path.resolve(filePath);
     const uploadsResolved = path.resolve(UPLOADS_DIR);
     if (resolved !== uploadsResolved && !resolved.startsWith(uploadsResolved + path.sep)) {

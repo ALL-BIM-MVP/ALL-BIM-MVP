@@ -11,7 +11,10 @@ import json
 import ifcopenshell
 
 from .extraction import indexar_norma
-from .classify import clasificar_elementos, clasificar_elementos_manual, reasignar_sin_clasificacion
+from .classify import (
+    clasificar_elementos, clasificar_elementos_manual, reasignar_sin_clasificacion,
+    probar_clasificacion_manual,
+)
 from .normalize import normalizar
 
 
@@ -55,3 +58,14 @@ def procesar_ifc(ifc_path: str, norma_path: str, classification_config: dict | N
         elementos.extend(reasignados)
 
     return normalizar(elementos, norma_index, model.schema)
+
+
+def probar_ifc(ifc_path: str, config: dict) -> dict:
+    """Dry-run de clasificación manual (consolidación punto 5, ver
+    classify.probar_clasificacion_manual para el contrato de salida y
+    el porqué). A diferencia de procesar_ifc, NO necesita norma_path —
+    el modo manual no clasifica contra la norma, y el modo norma no
+    tiene ninguna config de propiedades que valga la pena "probar"
+    (no hay mapeo que el usuario configure ahí)."""
+    model = ifcopenshell.open(ifc_path)
+    return probar_clasificacion_manual(model, config)
