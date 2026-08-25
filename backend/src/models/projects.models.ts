@@ -39,6 +39,31 @@ export interface ProjectFull extends ProjectCreate {
     cover_image : ProjectCoverImage;
 };
 
+// Resumen de "info del proyecto" (GET /projects/:id, no la lista) —
+// dos conteos simples, mismo criterio en los dos: solo lo que hay ALGO
+// (sin filas en 0), sin desglosar versiones/historial. `ifc` cuenta
+// DOCUMENTOS (ifc_documents), no filas de `files` — un documento con 3
+// versiones sigue contando 1, la versión vieja no infla el número (ver
+// projects.service.ts para el porqué). El resto de los tipos son
+// conteo directo de `files` por `file_type` (sin desglose de
+// procesado/pendiente ni de origen — a propósito, ver
+// docs/resumen-proyecto-frontend.txt).
+export interface SpecialtySummary {
+    specialty_code : string;
+    specialty_name : string;
+    count : number;
+};
+
+export interface FileTypeSummary {
+    file_type : string;
+    count : number;
+};
+
+export interface ProjectDetail extends ProjectFull {
+    specialties_summary : SpecialtySummary[];
+    files_summary : FileTypeSummary[];
+};
+
 export const transformProjectFull = (p : ProjectRow) : ProjectFull => {
     return {
         project_id: p.project_id,

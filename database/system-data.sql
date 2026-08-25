@@ -196,6 +196,7 @@ INSERT INTO builtin_field_catalog
     ('volume',         'Vol.',        'numeric', FALSE, 'metrado',        3),
     ('weight',         'Kg.',         'numeric', FALSE, 'metrado',        4),
     ('quantity',       'Und.',        'numeric', FALSE, 'metrado',        5),
+    ('origen_metrado', 'Origen',      'text',    FALSE, 'metrado',        6),
     ('sub_total',      'Sub Total',   'numeric', TRUE,  'totales',        1);
 
 

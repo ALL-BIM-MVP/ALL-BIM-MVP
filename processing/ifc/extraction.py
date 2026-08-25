@@ -15,6 +15,7 @@ import math
 import re
 import ifcopenshell
 import ifcopenshell.geom
+import numpy as np
 from collections import Counter
 
 from .config import DENSIDAD_ACERO_KG_M3
@@ -231,7 +232,25 @@ def extraer_dimensiones_geometria(el, shape=None):
 # PCA / OBB
 # ----------------------------------------------------------------------
 def extraer_dimensiones_orientadas(el, shape=None):
-    """OBB mediante PCA. Retorna Largo, Ancho, Alto y los tres ejes."""
+    """OBB mediante PCA. Retorna Largo, Ancho, Alto y los tres ejes.
+
+    Usa numpy.linalg.eigh (LAPACK) para diagonalizar la matriz de
+    covarianza — ANTES esto era un solver de Jacobi escrito a mano acá
+    mismo, con un bug real confirmado: para algunos elementos devolvía
+    los autovectores del eje 1 y el eje 2 con los componentes X/Y
+    intercambiados entre sí (no un error de precisión, un eje
+    completamente distinto al real) — confirmado con datos reales
+    (docs/roadmap/consolidacion-y-hardening.md, punto 11): una tira de
+    fibra de carbono de 4.85m × 0.05m reales medía 3.50×3.42, un
+    rectángulo que no corresponde a NINGÚN lado real del elemento.
+    Verificado contra numpy que sí da 4.85/0.05 exacto en ese caso.
+
+    También recentra ANTES de proyectar (dims = max-min), no solo para
+    la covarianza — la proyección en sí (`rel @ eje`, antes `eje·p`
+    sobre los puntos crudos) no mostró error medible en las pruebas
+    hechas, pero recentrar acá también es gratis y elimina cualquier
+    margen de pérdida de precisión con coordenadas de mundo reales
+    (UTM, ~10^7) — mismo criterio que calcular_volumen_malla()."""
     if shape is None:
         shape = get_shape(el)
     if shape is None:
@@ -240,67 +259,20 @@ def extraer_dimensiones_orientadas(el, shape=None):
     n = len(verts) // 3
     if n < 3:
         return None
-    puntos = [verts[i*3:(i+1)*3] for i in range(n)]
+    puntos = np.array(verts, dtype=float).reshape(n, 3)
 
-    cx = sum(p[0] for p in puntos) / n
-    cy = sum(p[1] for p in puntos) / n
-    cz = sum(p[2] for p in puntos) / n
+    centro = puntos.mean(axis=0)
+    rel = puntos - centro
+    cov = rel.T @ rel
 
-    cov = [[0.0, 0.0, 0.0],
-           [0.0, 0.0, 0.0],
-           [0.0, 0.0, 0.0]]
-    for p in puntos:
-        dx, dy, dz = p[0]-cx, p[1]-cy, p[2]-cz
-        cov[0][0] += dx*dx
-        cov[0][1] += dx*dy
-        cov[0][2] += dx*dz
-        cov[1][1] += dy*dy
-        cov[1][2] += dy*dz
-        cov[2][2] += dz*dz
-    cov[1][0] = cov[0][1]
-    cov[2][0] = cov[0][2]
-    cov[2][1] = cov[1][2]
-
-    # Jacobi
-    max_iter, tol = 50, 1e-12
-    v = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-    for _ in range(max_iter):
-        p, q = 0, 1
-        max_val = abs(cov[0][1])
-        if abs(cov[0][2]) > max_val:
-            p, q = 0, 2
-            max_val = abs(cov[0][2])
-        if abs(cov[1][2]) > max_val:
-            p, q = 1, 2
-            max_val = abs(cov[1][2])
-        if max_val < tol:
-            break
-        theta = math.pi/4 if cov[p][p] == cov[q][q] else 0.5 * math.atan2(2*cov[p][q], cov[p][p]-cov[q][q])
-        cos, sin = math.cos(theta), math.sin(theta)
-        new_cov = [row[:] for row in cov]
-        for i in range(3):
-            if i != p and i != q:
-                new_cov[i][p] = cos*cov[i][p] - sin*cov[i][q]
-                new_cov[p][i] = new_cov[i][p]
-                new_cov[i][q] = sin*cov[i][p] + cos*cov[i][q]
-                new_cov[q][i] = new_cov[i][q]
-        new_cov[p][p] = cos*cos*cov[p][p] + sin*sin*cov[q][q] - 2*sin*cos*cov[p][q]
-        new_cov[q][q] = sin*sin*cov[p][p] + cos*cos*cov[q][q] + 2*sin*cos*cov[p][q]
-        new_cov[p][q] = new_cov[q][p] = 0.0
-        cov = new_cov
-        for i in range(3):
-            vi_p, vi_q = v[i][p], v[i][q]
-            v[i][p] = cos*vi_p - sin*vi_q
-            v[i][q] = sin*vi_p + cos*vi_q
-
-    evals = [cov[i][i] for i in range(3)]
-    idx = sorted(range(3), key=lambda i: evals[i], reverse=True)
-    ejes = [[v[0][i], v[1][i], v[2][i]] for i in idx]  # normalizados
+    evals, evecs = np.linalg.eigh(cov)
+    orden = np.argsort(evals)[::-1]  # de mayor a menor varianza
+    ejes = [evecs[:, i] for i in orden]
 
     dims = [0.0, 0.0, 0.0]
     for i, eje in enumerate(ejes):
-        vals = [eje[0]*p[0] + eje[1]*p[1] + eje[2]*p[2] for p in puntos]
-        dims[i] = max(vals) - min(vals)
+        vals = rel @ eje
+        dims[i] = float(vals.max() - vals.min())
 
     z_vals = [abs(e[2]) for e in ejes]
     idx_alto = z_vals.index(max(z_vals))
@@ -315,9 +287,9 @@ def extraer_dimensiones_orientadas(el, shape=None):
         "Ancho": ancho,
         "Alto": alto,
         "ejes": {
-            "alto": ejes[idx_alto],
-            "largo": ejes[ejes_resto[0]] if dims_resto[0] >= dims_resto[1] else ejes[ejes_resto[1]],
-            "ancho": ejes[ejes_resto[1]] if dims_resto[0] >= dims_resto[1] else ejes[ejes_resto[0]],
+            "alto": ejes[idx_alto].tolist(),
+            "largo": ejes[ejes_resto[0]].tolist() if dims_resto[0] >= dims_resto[1] else ejes[ejes_resto[1]].tolist(),
+            "ancho": ejes[ejes_resto[1]].tolist() if dims_resto[0] >= dims_resto[1] else ejes[ejes_resto[0]].tolist(),
         }
     }
 
@@ -677,7 +649,25 @@ def obtener_dimensiones(el, psets):
     validada para tubos. area_total_m2 de geometria_proyeccion sigue
     existiendo para ÁREA (esa sí necesita identificar una cara), pero
     ya no calcula ningún volumen — el volumen final SIEMPRE sale de
-    esta integral universal, sin excepción por paso de la cascada."""
+    esta integral universal, sin excepción por paso de la cascada.
+
+    Fierro (acero) se prueba ACÁ, antes de crear ningún shape — es el
+    único paso de la cascada que no necesita geometría en absoluto
+    (confirmado con datos reales: ~76% de los elementos de un archivo
+    real resuelven acá), y `get_shape()` es la parte más cara de toda
+    esta función (~6.7ms/elemento, ver
+    docs/roadmap/consolidacion-y-hardening.md punto 2) — no tiene
+    sentido pagarla para después no usarla. El _vol_geom de respaldo
+    (más abajo) queda sin aplicar para estos elementos, igual que ya
+    pasaba antes con cualquier elemento sin malla geométrica válida
+    (shape=None) — no es un caso nuevo. metrados._metrados_acero ya
+    tiene su propio respaldo de volumen (diámetro nominal o sección
+    transversal); el _vol_geom geométrico solo entraba en juego si
+    NINGUNO de esos dos estaba presente, caso raro en acero real."""
+    dims_bar = extraer_dimensiones_fierro(el)
+    if dims_bar and dims_bar["Largo"] is not None:
+        return dims_bar
+
     shape = get_shape(el)  # una sola vez, se reusa para la cascada Y el volumen
     dims = _resolver_dimensiones_por_cascada(el, psets, shape)
 
@@ -690,10 +680,9 @@ def obtener_dimensiones(el, psets):
 
 
 def _resolver_dimensiones_por_cascada(el, psets, shape):
-    # 0. Fierro
-    dims_bar = extraer_dimensiones_fierro(el)
-    if dims_bar and dims_bar["Largo"] is not None:
-        return dims_bar
+    # 0. Fierro — ya se probó en obtener_dimensiones() ANTES de crear el
+    # shape (ver docstring de arriba); si llegamos acá es porque ya
+    # falló, no hace falta reintentarlo.
 
     # 0.4. Perfil circular (tubos) — Largo/Diametro salen del perfil
     # tipado (radio exacto, no hay que reconstruirlo), pero área/volumen
@@ -902,6 +891,30 @@ def inferir_unidad(dims):
     if largo:
         return "m"
     return "und"
+
+
+# Superíndices unicode -> dígito ASCII. SOLO aplica a clasificación
+# manual (Fase 4): ahí la unidad de una partida sale del texto que el
+# cliente tipeó a mano en una propiedad de Revit (ej. "CSRT-Unidad1")
+# — nunca de norma_completa.json (ya viene en ASCII). Si ese texto
+# llega tal cual ("m²"/"m³") a metrado_partidas.unit, ninguna
+# comparación exacta más abajo lo reconoce (UNIT_TO_METRADO_KEY/
+# METRADO_KEY_POR_UNIDAD en ifc-processing-runner.ts/
+# ifc-excel-export.service.ts deciden qué columna sumar para el total
+# de la partida) y el total cae en silencio al fallback de "quantity"
+# (cuenta elementos) en vez de sumar área/volumen real. Confirmado con
+# datos reales del cliente (CUS ET2): una partida m³ con 12.83 m³
+# reales quedó guardada como "23" (el conteo de elementos) por esto.
+_SUPERINDICES_UNIDAD = str.maketrans({"²": "2", "³": "3"})
+
+
+def normalizar_unidad(valor):
+    """Normaliza el texto crudo de unidad de una propiedad de Revit
+    escrita a mano (clasificación manual, Fase 4) — ver comentario de
+    _SUPERINDICES_UNIDAD arriba."""
+    if valor is None:
+        return None
+    return str(valor).translate(_SUPERINDICES_UNIDAD).strip().lower()
 
 
 # Si el nombre de una propiedad contiene cualquiera de estas palabras,

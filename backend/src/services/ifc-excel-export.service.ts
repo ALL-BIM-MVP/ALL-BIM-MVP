@@ -90,6 +90,13 @@ const colorProfundidad = (profundidad: number): Partial<ExcelJS.Font> => ({
     color: { argb: COLORES_POR_PROFUNDIDAD[profundidad % COLORES_POR_PROFUNDIDAD.length]! },
 });
 
+// Mismo color por profundidad que colorProfundidad(), pero negrita —
+// solo para la columna TOTAL, que se distingue visualmente del resto
+// (pedido explícito: TOTAL en negrita, UND/TOTAL centrados).
+const colorProfundidadBold = (profundidad: number): Partial<ExcelJS.Font> => ({
+    ...colorProfundidad(profundidad), bold: true,
+});
+
 // Encabezado — mismo bloque de campos que el Excel de referencia
 // (Fase 5, "3.0 METRADOS DE ARQUITECTURA.xlsx"), en las mismas
 // posiciones relativas. Los campos que no tenemos en "projects"
@@ -141,7 +148,18 @@ const escribirEncabezado = (ws: ExcelJS.Worksheet, titulo: string, ctx: ExportCo
     ws.getCell("B7").numFmt = "dd/mm/yyyy";
 };
 
-const round2 = (value: number | null): number | null => (value === null ? null : Math.round(value * 100) / 100);
+// Redondea a 6 decimales — la misma precisión real de la BD
+// (NUMERIC(18,6)), NO los 2 decimales que se ven en pantalla. El
+// redondeo visual a 2 decimales lo hace `numFmt = "0.00"` (formato de
+// celda, seteado por columna más abajo) — si acá
+// truncáramos a 2 decimales antes de escribir el valor, se perdería la
+// precisión real: al hacer click en la celda en Excel, la barra de
+// fórmulas mostraría el valor YA truncado, no el real. round6() solo
+// existe para limpiar ruido de punto flotante de sumas hechas en JS
+// (ej. sub_total de un grupo de elementos), no para redondear de
+// verdad — 6 decimales es más que suficiente margen para que ese ruido
+// nunca sea visible ni afecte ningún cálculo real.
+const round6 = (value: number | null): number | null => (value === null ? null : Math.round(value * 1e6) / 1e6);
 
 // ------------------------------------------------------------------
 // Hoja "Resumido" — árbol completo (carpetas + hojas), mismo dato que
@@ -154,6 +172,9 @@ const escribirResumen = (wb: ExcelJS.Workbook, ctx: ExportContext, fecha: Date, 
     ws.getColumn(2).width = 70;
     ws.getColumn(3).width = 14;
     ws.getColumn(4).width = 16;
+    ws.getColumn(4).numFmt = "0.00"; // TOTAL — redondeo VISUAL a 2 decimales (ver round6() más arriba)
+    ws.getColumn(3).alignment = CENTRADO; // UND
+    ws.getColumn(4).alignment = CENTRADO; // TOTAL
 
     escribirEncabezado(ws, "RESUMEN DE METRADOS", ctx, fecha);
 
@@ -163,6 +184,11 @@ const escribirResumen = (wb: ExcelJS.Workbook, ctx: ExportContext, fecha: Date, 
     headerRow.getCell(3).value = "UND";
     headerRow.getCell(4).value = "TOTAL";
     aplicarEstiloEncabezado(headerRow);
+
+    // Fila congelada — el encabezado (filas 1-9) queda siempre visible
+    // al bajar, importa con archivos de miles de filas (el caso real,
+    // 24k+ elementos).
+    ws.views = [{ state: "frozen", ySplit: 9 }];
 
     let fila = 10;
     const escribirNodo = (nodo: PartidaTreeNode, profundidad: number): void => {
@@ -175,8 +201,8 @@ const escribirResumen = (wb: ExcelJS.Workbook, ctx: ExportContext, fecha: Date, 
         if (nodo.unit) {
             row.getCell(3).value = nodo.unit;
             row.getCell(3).font = colorProfundidad(profundidad);
-            row.getCell(4).value = round2(nodo.total);
-            row.getCell(4).font = colorProfundidad(profundidad);
+            row.getCell(4).value = round6(nodo.total);
+            row.getCell(4).font = colorProfundidadBold(profundidad);
         }
         for (const hijo of nodo.children) escribirNodo(hijo, profundidad + 1);
     };
@@ -208,6 +234,18 @@ const escribirDetalle = (
     for (let c = 8; c <= 12; c++) ws.getColumn(c).width = 9; // Lon./Área/Vol./Kg./Und.
     ws.getColumn(13).width = 12; // Sub Total
     ws.getColumn(14).width = 12; // TOTAL
+
+    const COLUMNAS_CENTRADAS : number[]  = [3, 8, 9, 10, 11, 12, 14]
+
+    ws.getColumn(3).alignment = CENTRADO;  // UND
+    ws.getColumn(14).alignment = CENTRADO; // TOTAL
+    // Todas las columnas numéricas (Largo..TOTAL) — redondeo VISUAL a 2
+    // decimales (el valor real guardado en la celda tiene hasta 6, ver
+    // round6() más arriba).
+    for (let c = 4; c <= 14; c++) {
+        ws.getColumn(c).numFmt = "0.00";
+    }
+    COLUMNAS_CENTRADAS.forEach( c => ws.getColumn(c).alignment = CENTRADO);
 
     ws.mergeCells("A1:N1");
     ws.getCell("A1").value = "PLANILLA DE METRADOS";
@@ -251,6 +289,11 @@ const escribirDetalle = (
     aplicarEstiloEncabezado(ws.getRow(3));
     aplicarEstiloEncabezado(ws.getRow(4));
 
+    // Fila congelada — el encabezado (filas 1-4) queda siempre visible
+    // al bajar, importa con archivos de miles de filas (el caso real,
+    // 24k+ elementos).
+    ws.views = [{ state: "frozen", ySplit: 4 }];
+
     let fila = 5;
     const metradoColByField: Record<keyof PartidaElementGroup, number> = {
         run_length: 8, area: 9, volume: 10, weight: 11, quantity: 12,
@@ -265,8 +308,8 @@ const escribirDetalle = (
             row.getCell(2).font = colorProfundidad(profundidad);
             row.getCell(3).value = nodo.unit;
             row.getCell(3).font = colorProfundidad(profundidad);
-            row.getCell(14).value = round2(nodo.total);
-            row.getCell(14).font = colorProfundidad(profundidad);
+            row.getCell(14).value = round6(nodo.total);
+            row.getCell(14).font = colorProfundidadBold(profundidad);
 
             const metradoKey = METRADO_KEY_POR_UNIDAD[nodo.unit] ?? "quantity";
             const grupos = gruposPorPartida.get(nodo.partida_id) ?? [];
@@ -276,13 +319,13 @@ const escribirDetalle = (
                 detalle.getCell(2).value = grupo.tag ?? "";
                 detalle.getCell(3).value = nodo.unit;
                 detalle.getCell(4).value = grupo.element_count;
-                detalle.getCell(5).value = round2(grupo.length);
-                detalle.getCell(6).value = round2(grupo.width);
-                detalle.getCell(7).value = round2(grupo.height);
+                detalle.getCell(5).value = round6(grupo.length);
+                detalle.getCell(6).value = round6(grupo.width);
+                detalle.getCell(7).value = round6(grupo.height);
                 const columna = metradoColByField[metradoKey as keyof PartidaElementGroup];
                 const valor = grupo[metradoKey] as number | null;
-                if (columna) detalle.getCell(columna).value = round2(valor);
-                detalle.getCell(13).value = round2(grupo.sub_total);
+                if (columna) detalle.getCell(columna).value = round6(valor);
+                detalle.getCell(13).value = round6(grupo.sub_total);
             }
         }
         for (const hijo of nodo.children) escribirNodo(hijo, profundidad + 1);

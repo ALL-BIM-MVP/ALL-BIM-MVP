@@ -102,14 +102,33 @@ def calcular_volumen_malla(vertices, triangles):
 
     Requiere una malla cerrada y con normales hacia afuera consistentes
     — lo mismo que ya asume el resto de este módulo (get_shape_soldado
-    con WELD_VERTICES=True)."""
+    con WELD_VERTICES=True).
+
+    Recentra respecto al primer vértice ANTES de sumar — sin esto, con
+    coordenadas de mundo reales (UTM, del orden de 10^6-10^7),
+    p0·(p1×p2) da términos de hasta ~10^21 que se supone cancelan hasta
+    dejar el volumen real (típicamente O(1)) — un `double` solo tiene
+    ~15-16 dígitos de precisión, así que esa cancelación pierde 5-6+
+    dígitos significativos. Confirmado con datos reales
+    (docs/roadmap/consolidacion-y-hardening.md, punto 11): columnas de
+    1.17 m³ reales medían 0.81 (-31%), y en casos peores el error
+    llegaba a ser de un orden de magnitud. El volumen es invariante a
+    traslación (teorema de la divergencia, cualquier punto de
+    referencia sirve) — recentrar no cambia el resultado matemático,
+    solo evita la cancelación."""
+    if not vertices:
+        return 0.0
+    ox, oy, oz = vertices[0]
     vol6 = 0.0
     for a, b, c in triangles:
-        p0, p1, p2 = vertices[a], vertices[b], vertices[c]
-        cross_x = p1[1] * p2[2] - p1[2] * p2[1]
-        cross_y = p1[2] * p2[0] - p1[0] * p2[2]
-        cross_z = p1[0] * p2[1] - p1[1] * p2[0]
-        vol6 += p0[0] * cross_x + p0[1] * cross_y + p0[2] * cross_z
+        pa, pb, pc = vertices[a], vertices[b], vertices[c]
+        p0x, p0y, p0z = pa[0] - ox, pa[1] - oy, pa[2] - oz
+        p1x, p1y, p1z = pb[0] - ox, pb[1] - oy, pb[2] - oz
+        p2x, p2y, p2z = pc[0] - ox, pc[1] - oy, pc[2] - oz
+        cross_x = p1y * p2z - p1z * p2y
+        cross_y = p1z * p2x - p1x * p2z
+        cross_z = p1x * p2y - p1y * p2x
+        vol6 += p0x * cross_x + p0y * cross_y + p0z * cross_z
     return abs(vol6) / 6.0
 
 

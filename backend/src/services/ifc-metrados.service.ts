@@ -1,4 +1,9 @@
 import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import pool from "../db/database.js";
 import { AppError } from "../models/errors/app-error.js";
 import { FILE_ERRORS } from "../models/errors/files.errors.js";
@@ -6,13 +11,20 @@ import { IFC_METRADOS_ERRORS } from "../models/errors/ifc-metrados.errors.js";
 import { IFC_DOCUMENTS_ERRORS } from "../models/errors/ifc-documents.errors.js";
 import type { DecodedToken } from "../models/auth.models.js";
 import type { ProjectIdParam } from "../schemas/projects.schema.js";
-import type { IfcFileIdParam, ProcessIfcMetradosBody, ProcessIfcMetradosQuery } from "../schemas/ifc-metrados.schema.js";
+import type {
+    ClassificationDryRunBody, IfcFileIdParam, ProcessIfcMetradosBody, ProcessIfcMetradosQuery,
+} from "../schemas/ifc-metrados.schema.js";
 import { transformIfcFileStatus, type IfcFileStatusFull, type IfcFileStatusRow } from "../models/ifc-files.models.js";
 import { saveFileService } from "./files.service.js";
 import { assertModulePermission } from "./project-access.service.js";
-import { runIfcProcessing } from "./ifc-processing-runner.js";
+import {
+    acquireSlot, assertPathWithinUploads, EXEC_MAX_BUFFER, PROCESSING_TIMEOUT_MS, PYTHON_BIN, releaseSlot, REPO_ROOT,
+    runIfcProcessing, truncateError,
+} from "./ifc-processing-runner.js";
 import { resolveClassificationForProcessing } from "./ifc-classification.service.js";
 import type { IfcClassificationSnapshot } from "../models/ifc-classification.models.js";
+
+const execFileAsync = promisify(execFile);
 
 // Todo esto es trabajo del módulo METRADOS BIM — único módulo
 // funcional hoy (Fase 2, ver docs/roadmap-modulos-y-permisos.md). El
@@ -171,6 +183,43 @@ const resolveNewFileDocument = async (
     return { ifcDocumentId: Number(newDoc.rows[0]!.ifc_document_id), versionNumber: 1 };
 };
 
+// Todo archivo IFC real (formato STEP/SPF, ISO 10303-21) arranca con
+// este texto literal — un sniff-test barato ANTES de crear cualquier
+// fila en la BD o lanzar el subprocess de Python. Encontrado con datos
+// reales (docs/roadmap/consolidacion-y-hardening.md): una subida
+// masiva mandó como "archivo" el texto literal de una directiva
+// `< ruta` de un .http sin resolver (73 bytes de texto, no un IFC) —
+// el backend lo aceptaba, creaba la fila, lanzaba Python, y recién
+// ahí fallaba con "Unable to parse IFC SPF header", dejando el
+// registro basura permanentemente en estado 'error'. Este chequeo
+// corta eso en el primer paso, sin tocar la BD ni gastar un
+// subprocess — multer ya escribió el archivo en disco (diskStorage)
+// antes de que este código corra, así que si falla el chequeo hay que
+// borrar ese archivo a mano (ver uso más abajo), nadie más lo va a
+// limpiar.
+const IFC_MAGIC_HEADER = "ISO-10303-21";
+const IFC_MAGIC_CHECK_BYTES = 32;
+
+const assertLooksLikeIfc = async (filePath: string): Promise<void> => {
+    let header = "";
+    try {
+        const fd = await fs.open(filePath, "r");
+        try {
+            const buffer = Buffer.alloc(IFC_MAGIC_CHECK_BYTES);
+            const { bytesRead } = await fd.read(buffer, 0, IFC_MAGIC_CHECK_BYTES, 0);
+            header = buffer.subarray(0, bytesRead).toString("latin1");
+        } finally {
+            await fd.close();
+        }
+    } catch {
+        // Si ni siquiera se puede leer, tampoco es un IFC válido —
+        // header queda "" y cae al mismo error de abajo.
+    }
+    if (!header.includes(IFC_MAGIC_HEADER)) {
+        throw new AppError(IFC_METRADOS_ERRORS.INVALID_IFC_CONTENT);
+    }
+};
+
 // Deshace un saveFileService exitoso cuando la creación del documento/
 // versión (Fase 3) falla justo después — sin esto quedaría una fila
 // "files" con bytes en disco que ningún endpoint puede reprocesar
@@ -212,6 +261,12 @@ export const processIfcMetradosService = async (
     let fileName: string;
 
     if (multerFile) {
+        try {
+            await assertLooksLikeIfc(multerFile.path);
+        } catch (error) {
+            await fs.rm(multerFile.path, { force: true }).catch(() => {});
+            throw error;
+        }
         const saved = await saveFileService(user, { projectId }, "ifc", multerFile);
         fileId = saved.file_id;
         filePath = multerFile.path;
@@ -318,4 +373,92 @@ export const assertIfcFileAccess = async (
     if (!row) throw new AppError(IFC_METRADOS_ERRORS.STATUS_NOT_FOUND);
 
     await assertModulePermission(row.project_id, userId, METRADOS_MODULE_CODE, permissionCode);
+};
+
+export interface ClassificationDryRunResult {
+    elementos_totales: number;
+    elementos_con_codigo: number;
+    elementos_sin_codigo: number;
+    ejemplos: { codigo: string; descripcion: string | null; unidad: string | null; cantidad: number }[];
+    propiedades_con_prefijo: number | null;
+}
+
+// Consolidación punto 5 — "probar" una config de clasificación manual
+// contra un archivo real (ya subido, por file_id, o uno nuevo por
+// multipart que NUNCA se guarda) sin correr el pipeline completo. Ver
+// docs/roadmap/consolidacion-y-hardening.md para el porqué y los
+// números medidos (~38s vs. ~2min del pipeline completo, mismo
+// archivo real de 109MB).
+export const classificationDryRunService = async (
+    user: DecodedToken, { projectId }: ProjectIdParam, body: ClassificationDryRunBody,
+    multerFile: Express.Multer.File | undefined
+): Promise<ClassificationDryRunResult> => {
+
+    // Mismo permiso que la config de clasificación en sí (Fase 4) —
+    // "probar" una config es parte de configurarla, no de solo verla.
+    await assertModulePermission(projectId, user.user_id, METRADOS_MODULE_CODE, "configure");
+
+    let filePath: string;
+    let esArchivoTemporal = false;
+
+    if (multerFile) {
+        // Mismo sniff-test que la subida real (ver assertLooksLikeIfc
+        // más arriba) — multer ya escribió esto en el tmp del SO
+        // (uploadDryRunFile, NUNCA UPLOADS_DIR), así que si falla el
+        // chequeo alcanza con borrar el temporal, no hay fila de BD
+        // que limpiar (nunca se creó ninguna).
+        try {
+            await assertLooksLikeIfc(multerFile.path);
+        } catch (error) {
+            await fs.rm(multerFile.path, { force: true }).catch(() => {});
+            throw error;
+        }
+        filePath = multerFile.path;
+        esArchivoTemporal = true;
+    } else if (body.file_id !== undefined) {
+        const { rows } = await pool.query<{ file_path: string; file_type: string }>(
+            `SELECT file_path, file_type FROM files WHERE file_id = $1 AND project_id = $2`,
+            [body.file_id, projectId]
+        );
+        const file = rows[0];
+        if (!file) throw new AppError(FILE_ERRORS.FILE_NOT_FOUND);
+        if (file.file_type !== "ifc") throw new AppError(IFC_METRADOS_ERRORS.FILE_NOT_IFC);
+        // file.file_path puede venir relativo (ver UPLOADS_DIR) — hay
+        // que resolverlo ANTES de pasarlo a execFile, que corre con un
+        // cwd distinto (REPO_ROOT) al de este proceso Node.
+        filePath = assertPathWithinUploads(file.file_path);
+    } else {
+        throw new AppError(IFC_METRADOS_ERRORS.FILE_REQUIRED);
+    }
+
+    await acquireSlot();
+    const tmpConfigPath = path.join(os.tmpdir(), `ifc-dry-run-config-${randomUUID()}.json`);
+    const tmpOutPath = path.join(os.tmpdir(), `ifc-dry-run-out-${randomUUID()}.json`);
+    try {
+        await fs.writeFile(tmpConfigPath, JSON.stringify(body.classification_config), "utf-8");
+
+        try {
+            await execFileAsync(PYTHON_BIN, [
+                "-m", "processing.ifc.cli", filePath,
+                "--classification-config", tmpConfigPath,
+                "--dry-run",
+                "--out", tmpOutPath,
+            ], { cwd: REPO_ROOT, timeout: PROCESSING_TIMEOUT_MS, maxBuffer: EXEC_MAX_BUFFER });
+        } catch (error) {
+            const err = error as { killed?: boolean; stderr?: string; message: string };
+            const detalle = err.killed
+                ? `Tiempo de espera agotado (${PROCESSING_TIMEOUT_MS}ms).`
+                : truncateError(err.stderr || err.message);
+            console.error(`[ifc-metrados] fallo en dry-run (projectId=${projectId}): ${detalle}`);
+            throw new AppError(IFC_METRADOS_ERRORS.DRY_RUN_FAILED);
+        }
+
+        const raw = await fs.readFile(tmpOutPath, "utf-8");
+        return JSON.parse(raw) as ClassificationDryRunResult;
+    } finally {
+        await fs.rm(tmpConfigPath, { force: true }).catch(() => {});
+        await fs.rm(tmpOutPath, { force: true }).catch(() => {});
+        if (esArchivoTemporal) await fs.rm(filePath, { force: true }).catch(() => {});
+        releaseSlot();
+    }
 };
