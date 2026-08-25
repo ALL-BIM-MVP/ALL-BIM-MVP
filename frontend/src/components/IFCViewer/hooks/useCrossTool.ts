@@ -1,18 +1,7 @@
 // Herramienta "cruz de ejes": permite tener VARIAS cruces activas a la vez (una
-// por elemento que quieras medir). Cada cruz tiene dos brazos alineados a los
-// ejes locales de la cara donde se clickeó, extendidos hasta el borde real de
-// esa cara, más un tercer brazo hacia afuera si hay otro elemento ahí.
-//
-// Interacción:
-// - Click cerca del centro de una cruz YA puesta → la agarra para arrastrarla
-//   (se recalcula en vivo mientras la mueves, puede terminar en otra cara).
-// - Click en cualquier otro lugar con geometría debajo → agrega una cruz NUEVA
-//   ahí, sin tocar las que ya existían.
-// - Click en el vacío (sin modelo debajo) → no se consume, la cámara sigue
-//   orbitando/paneando normal.
-// - Botón "×" de cada cruz → la borra individualmente. "Borrar todas" / salir
-//   del modo → borra todas.
+
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
 
 interface Vec3 { x: number; y: number; z: number; }
 interface ScreenPos { x: number; y: number; }
@@ -56,6 +45,7 @@ export function useCrossTool(
   const armedRef = useRef(false);
   const crossesRef = useRef<CrossEntry[]>([]);
   const draggingIdRef = useRef<string | null>(null);
+  const lastCameraSnapshotRef = useRef<CameraSnapshot | null>(null);
 
   useEffect(() => { crossModeRef.current = crossMode; }, [crossMode]);
   useEffect(() => { armedRef.current = armed; }, [armed]);
@@ -113,16 +103,14 @@ export function useCrossTool(
     }
   }, [rendererRef, clientToCanvasCss, withScreen]);
 
-  // Se llama al elegir "Cruz" en el submenú: activa el modo (si no lo estaba)
-  // y arma UNA colocación nueva para el próximo click.
   const enableAndArm = useCallback(() => {
     setCrossMode(true);
     setArmed(true);
   }, []);
 
-  // Se llama al cerrar la herramienta (botón "×" de la barra inferior).
+  
   const exitCrossMode = useCallback(() => {
-    setCrossMode(false); // el useEffect de arriba limpia crosses/draggingId/armed
+    setCrossMode(false); 
   }, []);
 
   const clearCross = useCallback(() => {
@@ -168,11 +156,9 @@ export function useCrossTool(
     // Sin arme activo: no consumimos el click, la cámara orbita/paneé normal.
     if (!armedRef.current) return false;
 
-    // Armado: coloca una cruz nueva en el punto del click y se desarma — el
-    // próximo click (sin volver a apretar el botón) vuelve a mover la cámara.
+    
     const id = nextCrossId();
-    // Durante el arrastre se usa la aproximacion rapida: el calculo exacto
-    // se reserva para la colocacion inicial y evita recorrer todo el modelo.
+
     const next = computeCrossAt(clientX, clientY, id, true);
     setArmed(false);
     if (next) {
@@ -215,6 +201,8 @@ export function useCrossTool(
 
   const reprojectOnFrame = useCallback(() => {
     if (!crossModeRef.current || crossesRef.current.length === 0) return;
+    
+    if (!cameraOrCanvasChanged(rendererRef.current, canvasRef.current, lastCameraSnapshotRef)) return;
     const draggingNow = draggingIdRef.current;
     setCrosses(prev => prev.map(c => {
       if (c.id === draggingNow) return c; // esa se está recalculando por raycast en el mousemove
@@ -228,7 +216,7 @@ export function useCrossTool(
         depthPosScreen: c.depthPos ? projectPoint(c.depthPos) : null,
       };
     }));
-  }, [projectPoint]);
+  }, [projectPoint, rendererRef, canvasRef]);
 
   // Longitudes derivadas de cada cruz, listas para pintar sin recalcular en el JSX.
   const crossesWithLengths = crosses.map(c => ({

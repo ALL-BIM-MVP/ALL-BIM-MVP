@@ -1,19 +1,6 @@
-// Medición simple: dos puntos por medición, con snap magnético nativo del
-// renderer (renderer.raycastSceneMagnetic). Misma lógica de interacción que la
-// cruz de ejes (useCrossTool.ts):
-//
-// - El botón (submenú Regla → Medición) "arma" una colocación: activa el modo
-//   si no estaba y deja el próximo click listo para poner el punto 1.
-// - Point 1 → queda pendiente el punto 2: el SIGUIENTE click (sin volver a
-//   apretar el botón) lo coloca donde sea que hagas click, y ahí se cierra esa
-//   medición — la cámara vuelve a moverse libre.
-// - Click cerca de cualquier punto YA puesto (de cualquier medición) → lo
-//   agarra para arrastrarlo, en cualquier momento, armado o no.
-// - Click en el vacío sin geometría debajo, ni cerca de ningún punto, ni con
-//   una medición pendiente de su 2do punto → no se consume: la cámara sigue
-//   orbitando/paneando normal.
-// - Se pueden tener varias mediciones activas a la vez.
+
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
 
 interface Vec3 { x: number; y: number; z: number; }
 interface ScreenPos { x: number; y: number; }
@@ -47,6 +34,23 @@ interface SnapResult {
 const DRAG_HIT_RADIUS = 10; // px — agarrar un punto ya puesto
 const EMPTY_EDGE_LOCK: EdgeLockState = { edge: null, meshExpressId: null, lockStrength: 0 };
 
+const EDGE_HINT_HALF_LEN = 0.2;
+
+function shortEdgeSegment(v0: Vec3, v1: Vec3, point: Vec3, halfLen: number): { p0: Vec3; p1: Vec3 } {
+  const dx = v1.x - v0.x, dy = v1.y - v0.y, dz = v1.z - v0.z;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 1e-6) return { p0: point, p1: point };
+  const ux = dx / len, uy = dy / len, uz = dz / len;
+  const t = (point.x - v0.x) * ux + (point.y - v0.y) * uy + (point.z - v0.z) * uz;
+  const tClamped = Math.max(0, Math.min(len, t));
+  const t0 = Math.max(0, tClamped - halfLen);
+  const t1 = Math.min(len, tClamped + halfLen);
+  return {
+    p0: { x: v0.x + ux * t0, y: v0.y + uy * t0, z: v0.z + uz * t0 },
+    p1: { x: v0.x + ux * t1, y: v0.y + uy * t1, z: v0.z + uz * t1 },
+  };
+}
+
 let measureIdCounter = 0;
 const nextMeasureId = () => `measure_${++measureIdCounter}`;
 
@@ -68,6 +72,7 @@ export function useMeasureTool(
   const activeIdRef = useRef<string | null>(null);
   const draggingRef = useRef<{ id: string; pointIndex: 0 | 1 } | null>(null);
   const edgeLockRef = useRef<EdgeLockState>(EMPTY_EDGE_LOCK);
+  const lastCameraSnapshotRef = useRef<CameraSnapshot | null>(null);
 
   useEffect(() => { measureModeRef.current = measureMode; }, [measureMode]);
   useEffect(() => { measureArmedRef.current = measureArmed; }, [measureArmed]);
@@ -267,12 +272,24 @@ export function useMeasureTool(
       const points = m.points.map((p, i) => (i === drag.pointIndex ? newPoint : p));
       return { ...m, points, distance: recomputeDistance(points) };
     }));
+
+    // Mismo indicador de arista cortita que el preview de "voy a poner
+    // un punto" — arrastrar un punto YA puesto también lo muestra ahora.
+    if (result.snapType === 'edge' && result.edge) {
+      const { p0, p1 } = shortEdgeSegment(result.edge.v0, result.edge.v1, result.point, EDGE_HINT_HALF_LEN);
+      const screenA = projectPoint(p0);
+      const screenB = projectPoint(p1);
+      setHoverEdge(screenA && screenB ? { a: screenA, b: screenB } : null);
+    } else {
+      setHoverEdge(null);
+    }
     return true;
-  }, [magneticSnapAt, buildPointEntry]);
+  }, [magneticSnapAt, buildPointEntry, projectPoint]);
 
   const handleMeasureMouseUp = useCallback((): boolean => {
     if (draggingRef.current) {
       draggingRef.current = null;
+      setHoverEdge(null);
       return true;
     }
     return false;
@@ -296,8 +313,9 @@ export function useMeasureTool(
     setHoverPoint(buildPointEntry(result));
 
     if (result.snapType === 'edge' && result.edge) {
-      const screenA = projectPoint(result.edge.v0);
-      const screenB = projectPoint(result.edge.v1);
+      const { p0, p1 } = shortEdgeSegment(result.edge.v0, result.edge.v1, result.point, EDGE_HINT_HALF_LEN);
+      const screenA = projectPoint(p0);
+      const screenB = projectPoint(p1);
       setHoverEdge(screenA && screenB ? { a: screenA, b: screenB } : null);
     } else {
       setHoverEdge(null);
@@ -314,13 +332,15 @@ export function useMeasureTool(
 
   const reprojectOnFrame = useCallback(() => {
     if (!measureModeRef.current || measurementsRef.current.length === 0) return;
+
+    if (!cameraOrCanvasChanged(rendererRef.current, canvasRef.current, lastCameraSnapshotRef)) return;
     const dragId = draggingRef.current?.id ?? null;
     setMeasurements(prev => prev.map(m => {
       if (m.id === dragId) return m; // esa se recalcula por raycast en el mousemove
       const points = m.points.map(p => ({ ...p, screen: projectPoint(p) }));
       return { ...m, points };
     }));
-  }, [projectPoint]);
+  }, [projectPoint, rendererRef, canvasRef]);
 
   return {
     measureMode, measureModeRef, measureArmed, enableAndArmMeasure, exitMeasureMode,

@@ -86,7 +86,7 @@ const RESUMEN_ARCHIVOS = [
 
 const StatusPill: React.FC<{ ok: boolean; yes: string; no: string }> = ({ ok, yes, no }) => (
   <span
-    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[4px] text-[11px] font-semibold border ${
+    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold border ${
       ok
         ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
         : 'bg-slate-100 text-slate-500 border-slate-200'
@@ -185,7 +185,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
                     type="text"
                     value={editForm.name}
                     onChange={(e) => onEditChange('name', e.target.value)}
-                    className="text-xl font-bold text-gray-800 border border-gray-300 rounded-[4px] px-2 py-1 outline-none focus:ring-2 focus:ring-[#0056b3]"
+                    className="text-xl font-bold text-gray-800 border border-gray-300 rounded-md px-2 py-1 outline-none focus:ring-2 focus:ring-[#0056b3]"
                   />
                 ) : (
                   <h2 className="text-xl font-bold text-gray-800 leading-tight truncate">{project.name}</h2>
@@ -200,14 +200,14 @@ const InicioTab: React.FC<InicioTabProps> = ({
                   <button
                     onClick={onSaveEditing}
                     disabled={savingInfo}
-                    className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0056b3] rounded-[4px] hover:bg-[#004494] transition-colors disabled:opacity-50"
+                    className="px-3 py-1.5 text-xs font-semibold text-white bg-[#0056b3] rounded-md hover:bg-[#004494] transition-colors disabled:opacity-50"
                   >
                     {savingInfo ? 'Guardando...' : 'Guardar cambios'}
                   </button>
                 )}
                 <button
                   onClick={isEditingInfo ? onCancelEditing : onStartEditing}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-[4px] hover:border-gray-300 hover:text-gray-700 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-gray-500 border border-gray-200 rounded-md hover:border-gray-300 hover:text-gray-700 transition-colors"
                 >
                   <PencilSimple size={14} weight="bold" />
                   {isEditingInfo ? 'Cancelar' : 'Editar'}
@@ -222,7 +222,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
             <div>
               <div
                 onClick={handlePickCover}
-                className={`relative group rounded-[4px] overflow-hidden border border-gray-200 bg-slate-900 w-120 h-60 ${
+                className={`relative group rounded-md overflow-hidden border border-gray-200 bg-slate-900 w-120 h-60 ${
                   canActuallyEdit ? 'cursor-pointer' : ''
                 }`}
               >
@@ -234,7 +234,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
                 />
                 {canActuallyEdit && (
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center">
-                    <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 text-white text-xs font-semibold px-2.5 py-1.5 bg-black/50 rounded-[4px]">
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 text-white text-xs font-semibold px-2.5 py-1.5 bg-black/50 rounded-md">
                       <Camera size={14} weight="bold" />
                       {uploadingCover ? 'Subiendo...' : 'Cambiar imagen'}
                     </span>
@@ -290,7 +290,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
                         value={editForm.location}
                         onChange={(e) => onEditChange('location', e.target.value)}
                         placeholder="Ubicación"
-                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0056b3] outline-none"
                       />
                     ) : (
                       <span>{project.location || '—'}</span>
@@ -305,7 +305,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
                         value={editForm.client}
                         onChange={(e) => onEditChange('client', e.target.value)}
                         placeholder="Cliente"
-                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0056b3] outline-none"
                       />
                     ) : (
                       <span className="text-gray-500">{project.client || '—'}</span>
@@ -320,7 +320,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
                         value={editForm.contractor}
                         onChange={(e) => onEditChange('contractor', e.target.value)}
                         placeholder="Contratista"
-                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                        className="flex-1 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0056b3] outline-none"
                       />
                     ) : (
                       <span className="text-gray-500">{project.contractor || '—'}</span>
@@ -339,7 +339,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
                     value={editForm.description}
                     onChange={(e) => onEditChange('description', e.target.value)}
                     rows={3}
-                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none resize-none"
+                    className="w-full px-3 py-1.5 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0056b3] outline-none resize-none"
                   />
                 ) : (
                   <p className="text-sm text-gray-600 leading-relaxed">
@@ -351,7 +351,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
 
             {/* Columna derecha: Inicio / Fin / Progreso — mismo lugar, editable en el mismo lugar */}
             <div className="flex flex-col gap-3">
-              <div className="border border-gray-200 rounded-[4px] p-3.5 flex items-center gap-3">
+              <div className="border border-gray-200 rounded-md p-3.5 flex items-center gap-3">
                 <CalendarBlank size={16} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Inicio</p>
@@ -360,14 +360,14 @@ const InicioTab: React.FC<InicioTabProps> = ({
                       type="date"
                       value={editForm.start_date}
                       onChange={(e) => onEditChange('start_date', e.target.value)}
-                      className="w-full mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                      className="w-full mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0056b3] outline-none"
                     />
                   ) : (
                     <p className="text-sm font-bold text-gray-800">{formatDate(project.start_date)}</p>
                   )}
                 </div>
               </div>
-              <div className="border border-gray-200 rounded-[4px] p-3.5 flex items-center gap-3">
+              <div className="border border-gray-200 rounded-md p-3.5 flex items-center gap-3">
                 <CalendarBlank size={16} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Fin</p>
@@ -376,14 +376,14 @@ const InicioTab: React.FC<InicioTabProps> = ({
                       type="date"
                       value={editForm.end_date}
                       onChange={(e) => onEditChange('end_date', e.target.value)}
-                      className="w-full mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded-[4px] focus:ring-2 focus:ring-[#0056b3] outline-none"
+                      className="w-full mt-0.5 px-2 py-1 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-[#0056b3] outline-none"
                     />
                   ) : (
                     <p className="text-sm font-bold text-gray-800">{formatDate(project.end_date)}</p>
                   )}
                 </div>
               </div>
-              <div className="border border-gray-200 rounded-[4px] p-3.5">
+              <div className="border border-gray-200 rounded-md p-3.5">
                 <div className="flex items-center gap-3 mb-2">
                   <CheckCircle size={16} className="text-[#0056b3] flex-shrink-0" weight="duotone" />
                   <div>
@@ -406,7 +406,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
           </div>
 
           {/* ---------- Resumen ---------- */}
-          <div className="mx-6 border border-gray-200 rounded-[4px] p-5">
+          <div className="mx-6 border border-gray-200 rounded-md p-5">
             <SectionLabel icon={null}>Resumen</SectionLabel>
             <div className="space-y-3">
               {RESUMEN_ARCHIVOS.map(({ label, icon: Icon, cargado, generado, detalle }) => (
@@ -431,7 +431,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
             {ESPECIALIDADES.map((esp, i) => (
               <button
                 key={esp}
-                className={`px-3.5 py-2 rounded-[4px] text-sm font-semibold border transition-colors ${
+                className={`px-3.5 py-2 rounded-md text-sm font-semibold border transition-colors ${
                   i === 0
                     ? 'bg-[#0056b3] text-white border-[#0056b3]'
                     : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
@@ -440,11 +440,11 @@ const InicioTab: React.FC<InicioTabProps> = ({
                 {esp}
               </button>
             ))}
-            <button className="px-3.5 py-2 rounded-[4px] text-sm font-semibold border border-dashed border-gray-300 text-gray-400 hover:text-[#0056b3] hover:border-[#0056b3] transition-colors flex items-center gap-1.5">
+            <button className="px-3.5 py-2 rounded-md text-sm font-semibold border border-dashed border-gray-300 text-gray-400 hover:text-[#0056b3] hover:border-[#0056b3] transition-colors flex items-center gap-1.5">
               <Plus size={14} weight="bold" />
               Especialidad
             </button>
-            <span className="ml-auto px-3.5 py-2 rounded-[4px] text-sm font-semibold bg-gray-200 text-gray-600 border border-gray-300">
+            <span className="ml-auto px-3.5 py-2 rounded-md text-sm font-semibold bg-gray-200 text-gray-600 border border-gray-300">
               Federado
             </span>
           </div>
@@ -454,7 +454,7 @@ const InicioTab: React.FC<InicioTabProps> = ({
         <div className="mt-4 bg-white rounded-md border border-gray-200 shadow-sm p-5 flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <span className="text-sm text-gray-500">Estás trabajando en:</span>
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[4px] text-sm font-semibold bg-blue-50 text-[#0056b3] border border-blue-100">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-sm font-semibold bg-blue-50 text-[#0056b3] border border-blue-100">
               {MODULOS.find(m => m.id === confirmedModuloId)?.label || 'Metrados BIM'}
             </span>
           </div>

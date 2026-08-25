@@ -35,9 +35,9 @@ export default function RegisterInvitedForm({ invitationData, token }: RegisterI
   return (
     <>
       <h2 className="text-2xl font-bold text-black mb-1 text-center">Completar registro</h2>
-      <p className="text-sm text-gray-600 mb-8 text-center"> Crea tu cuenta para acceder a ALL-BIM como <strong>{invitationData.role_name}</strong></p>
+      <p className="text-sm text-gray-600 mb-5 text-center"> Crea tu cuenta para acceder a ALL-BIM como <strong>{invitationData.role_name}</strong></p>
 
-      <form className="space-y-5" onSubmit={handleSubmit}>
+      <form className="space-y-4" onSubmit={handleSubmit}>
         <div>
           <label className="block text-[18px] font-sans text-gray-700 mb-1.5">
             Correo electrónico
@@ -49,20 +49,39 @@ export default function RegisterInvitedForm({ invitationData, token }: RegisterI
           />
         </div>
 
-        <div>
-          <label className="block text-[18px] font-sans text-gray-700 mb-1.5">
-            Nombre completo
-          </label>
-          <input
-            name="name"
-            type="text"
-            value={formData.name}
-            onChange={handleChange}
-            autoComplete="off"
-            className="w-full bg-white border border-gray-300 p-2 text-sm focus:outline-none focus:border-[#0056b3] transition-colors rounded-lg"
-            required
-            placeholder="Ej: Juan Pérez"
-          />
+        {/* Nombre + Apellido en la misma fila — así el campo nuevo no
+            agrega una fila extra de alto al formulario. */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[18px] font-sans text-gray-700 mb-1.5">
+              Nombre
+            </label>
+            <input
+              name="name"
+              type="text"
+              value={formData.name}
+              onChange={handleChange}
+              autoComplete="off"
+              className="w-full bg-white border border-gray-300 p-2 text-sm focus:outline-none focus:border-[#0056b3] transition-colors rounded-lg"
+              required
+              placeholder="Ej: Juan"
+            />
+          </div>
+
+          <div>
+            <label className="block text-[18px] font-sans text-gray-700 mb-1.5">
+              Apellido
+            </label>
+            <input
+              name="last_name"
+              type="text"
+              value={formData.last_name}
+              onChange={handleChange}
+              autoComplete="off"
+              className="w-full bg-white border border-gray-300 p-2 text-sm focus:outline-none focus:border-[#0056b3] transition-colors rounded-lg"
+              placeholder="Ej: Pérez"
+            />
+          </div>
         </div>
 
         <div>

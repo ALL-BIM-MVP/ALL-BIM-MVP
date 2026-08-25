@@ -7,12 +7,9 @@ interface ViewCube3DProps {
   // Posición en pantalla donde debe aparecer el cubo (ya que al usar portal,
   // ya no se posiciona relativo al visor con "absolute top-3 right-3").
   anchorRef?: React.RefObject<HTMLElement | null>;
-  // Cuánto restarle a la posición horizontal, en píxeles — usado para que
-  // el cubo se corra hacia la izquierda cuando hay un panel superpuesto
-  // (ej. el panel de Metrados) que si no lo taparía. Pasar el ancho actual
-  // del panel (0 si está cerrado) para que el cubo lo siga en vivo mientras
-  // se abre/cierra o se arrastra para cambiar su ancho.
   rightOffset?: number;
+  
+  visible?: boolean;
 }
 
 const SIZE = 44;
@@ -54,7 +51,7 @@ const RIGHT_MARGIN = 8;
 // mueve hacia ABAJO (más lejos del borde).
 const TOP_MARGIN = -4;
 
-const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef, rightOffset = 0 }) => {
+const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef, rightOffset = 0, visible = true }) => {
   const [rotation, setRotation] = useState(DEFAULT_ROTATION);
   const [hoveredFace, setHoveredFace] = useState<ViewPreset | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -143,7 +140,8 @@ const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef, rightOffse
         height: 110,
         perspective: '420px',
         zIndex: 9999, // por encima de todo, ya que vive en document.body
-        pointerEvents: 'auto',
+        pointerEvents: visible ? 'auto' : 'none',
+        display: visible ? 'block' : 'none',
       }}
       title="Arrastrá para rotar la vista · Click en una cara para encuadrar"
     >

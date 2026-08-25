@@ -540,12 +540,18 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
           El Portal se salta ese problema por completo. */}
       {lightbox && createPortal(
         <div
-          className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-6"
+          // z-index por encima de TODO lo demás en la app (el header fijo
+          // del proyecto usa z-[10000] — con el backdrop en 9999 quedaba
+          // por debajo y tapaba/competía con el botón de cerrar, que
+          // vivía justo en esa franja de arriba). Ver también el z-index
+          // más alto usado en otro lado (ClassificationConfigModal,
+          // z-[10400]) para no volver a quedar por debajo de nada.
+          className="fixed inset-0 z-[10450] bg-black/80 flex items-center justify-center p-6"
           onClick={closeLightbox}
         >
           <button
             onClick={closeLightbox}
-            className="absolute top-4 right-4 z-[10000] w-11 h-11 flex items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors shadow-lg"
+            className="absolute top-4 right-4 z-[10460] w-11 h-11 flex items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25 transition-colors shadow-lg"
             title="Cerrar (Esc)"
           >
             <X size={20} />

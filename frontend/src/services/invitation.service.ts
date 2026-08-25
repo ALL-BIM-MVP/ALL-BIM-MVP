@@ -8,7 +8,7 @@ import {
 } from '../types/invitation.types';
 
 export const getProjectInvitations = async (projectId: number): Promise<Invitation[]> => {
-    // ✅ AGREGAR /api
+    
     const response = await api.get(`/api/projects/${projectId}/invitations`);
     return response || [];
 };
@@ -58,6 +58,36 @@ export const getProjectMembers = async (projectId: number): Promise<ProjectMembe
     //AGREGAR /api
     const response = await api.get(`/api/projects/${projectId}/members`);
     return response || [];
+};
+
+// PATCH /api/projects/:projectId/members/:memberId/admin — memberId es
+// project_member_id (no user_id). Solo owner/admin.
+export const setMemberAdmin = async (
+    projectId: number,
+    memberId: number,
+    isAdmin: boolean
+): Promise<void> => {
+    await api.patch(`/api/projects/${projectId}/members/${memberId}/admin`, { is_admin: isAdmin });
+};
+
+// PUT /api/projects/:projectId/members/:memberId/modules/:moduleCode/role
+// Asigna (o reemplaza) el rol de ESE miembro para ESE módulo.
+export const setMemberModuleRole = async (
+    projectId: number,
+    memberId: number,
+    moduleCode: string,
+    moduleRoleId: number
+): Promise<void> => {
+    await api.put(
+        `/api/projects/${projectId}/members/${memberId}/modules/${moduleCode}/role`,
+        { module_role_id: moduleRoleId }
+    );
+};
+
+// DELETE /api/projects/:projectId/members/:userId — userId (no
+// project_member_id). Solo owner/admin.
+export const removeProjectMember = async (projectId: number, userId: number): Promise<void> => {
+    await api.delete(`/api/projects/${projectId}/members/${userId}`);
 };
 
 export const getCurrentUserProjectRole = async (projectId: number): Promise<{ role_id: number; role_name: string; is_owner: boolean }> => {

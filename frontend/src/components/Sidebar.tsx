@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Users, UserPlus, FolderKanban, Mail, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import logo from "../assets/logo3.png";
+import logo from "../assets/logo3.jpg";
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 

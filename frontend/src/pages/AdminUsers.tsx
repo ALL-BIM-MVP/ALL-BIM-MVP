@@ -1,17 +1,14 @@
 // src/pages/AdminUsers.tsx
-import React from "react";
+import React, { useState } from "react";
 import {
-  Users as UsersIcon, ShieldCheck, Eye, Wrench, User, UserCog, RefreshCw, AlertTriangle,
+  Users as UsersIcon, ShieldCheck, Eye, Wrench, User, UserCog, RefreshCw, AlertTriangle, Trash2,
 } from "lucide-react";
 import { useUsers } from "../hooks/useUsers";
+import { useAuth } from "../context/AuthContext";
 import PageHeader from "../components/PageHeader";
 import { resolveMediaUrl } from "../utils/media";
 
-// ============================================================
-// Helpers de presentación — mismo patrón que Invitations.tsx: ícono/color
-// por rol, y avatar con color determinístico según un string (acá el
-// correo, igual que ahí) en vez de aleatorio en cada render.
-// ============================================================
+
 
 const ROLE_STYLE: Record<string, { icon: React.ReactNode; ring: string; text: string; bg: string }> = {
   ADMINISTRADOR: { icon: <ShieldCheck size={15} />, ring: "ring-violet-200", text: "text-violet-700", bg: "bg-violet-50" },
@@ -45,7 +42,40 @@ const RoleBadge: React.FC<{ name: string }> = ({ name }) => {
 };
 
 const AdminUsers: React.FC = () => {
-  const { users, loading: usersLoading } = useUsers();
+  const { users, loading: usersLoading, deleteUser, setUserActive } = useUsers();
+  const { user: currentUser } = useAuth();
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const handleDelete = async (targetId: number, label: string) => {
+    if (!window.confirm(`¿Eliminar a ${label}? Esta acción no se puede deshacer desde acá.`)) return;
+    setActionError(null);
+    setDeletingId(targetId);
+    try {
+      await deleteUser(targetId);
+    } catch (err: any) {
+      setActionError(err.message || "No se pudo eliminar el usuario.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  // Reversible (a diferencia de eliminar) — igual pide confirmación
+  // porque desactivar corta el acceso de la cuenta de una.
+  const handleToggleActive = async (targetId: number, label: string, nextActive: boolean) => {
+    const verb = nextActive ? "activar" : "desactivar";
+    if (!window.confirm(`¿${verb.charAt(0).toUpperCase() + verb.slice(1)} a ${label}?`)) return;
+    setActionError(null);
+    setTogglingId(targetId);
+    try {
+      await setUserActive(targetId, nextActive);
+    } catch (err: any) {
+      setActionError(err.message || `No se pudo ${verb} el usuario.`);
+    } finally {
+      setTogglingId(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -66,6 +96,13 @@ const AdminUsers: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {actionError && (
+            <div className="mx-8 mt-4 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2 text-sm text-red-600">
+              <AlertTriangle size={15} className="flex-shrink-0" />
+              {actionError}
+            </div>
+          )}
 
           {usersLoading ? (
             <div className="py-16 text-center text-gray-400">
@@ -88,6 +125,8 @@ const AdminUsers: React.FC = () => {
                     <th className="px-8 py-2.5 text-left font-semibold text-gray-400 text-[11px] uppercase tracking-wide">Nombre</th>
                     <th className="px-4 py-2.5 text-left font-semibold text-gray-400 text-[11px] uppercase tracking-wide">Correo</th>
                     <th className="px-8 py-2.5 text-left font-semibold text-gray-400 text-[11px] uppercase tracking-wide">Rol</th>
+                    <th className="px-4 py-2.5 text-left font-semibold text-gray-400 text-[11px] uppercase tracking-wide">Estado</th>
+                    <th className="px-8 py-2.5 text-right font-semibold text-gray-400 text-[11px] uppercase tracking-wide">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -121,6 +160,50 @@ const AdminUsers: React.FC = () => {
                       <td className="px-4 py-3.5 text-gray-500 text-xs">{u.email}</td>
                       <td className="px-8 py-3.5">
                         <RoleBadge name={u.role_name} />
+                      </td>
+                      <td className="px-4 py-3.5">
+                        {u.user_id === currentUser?.id ? (
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${
+                            u.active ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-gray-100 text-gray-500 ring-1 ring-gray-200"
+                          }`}>
+                            {u.active ? "Activo" : "Inactivo"}
+                          </span>
+                        ) : (
+                          <button
+                            role="switch"
+                            aria-checked={u.active}
+                            title={u.active ? "Desactivar" : "Activar"}
+                            onClick={() => handleToggleActive(
+                              u.user_id,
+                              `${u.name}${u.last_name ? ` ${u.last_name}` : ''}`,
+                              !u.active
+                            )}
+                            disabled={togglingId === u.user_id}
+                            className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                              u.active ? "bg-emerald-500" : "bg-gray-300"
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
+                                u.active ? "translate-x-4" : "translate-x-1"
+                              }`}
+                            />
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-8 py-3.5 text-right">
+                        {u.user_id === currentUser?.id ? (
+                          <span className="text-[11px] text-gray-300 italic">Tu cuenta</span>
+                        ) : (
+                          <button
+                            onClick={() => handleDelete(u.user_id, `${u.name}${u.last_name ? ` ${u.last_name}` : ''}`)}
+                            disabled={deletingId === u.user_id}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-50 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 size={13} />
+                            {deletingId === u.user_id ? "Eliminando..." : "Eliminar"}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}

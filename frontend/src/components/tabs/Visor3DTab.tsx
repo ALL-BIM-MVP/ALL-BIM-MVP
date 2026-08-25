@@ -4,7 +4,7 @@ import {
   Upload, FileText, X, Maximize2, Minimize2, FileSearch, Box,
   ChevronLeft, ChevronRight, Search, RefreshCw, FileDown,
   HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2, Info,
-  FileStack, Layers, Settings, FileSpreadsheet,
+  FileStack, Layers, Settings, FileSpreadsheet, Building2
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
@@ -27,13 +27,17 @@ import {
   listIfcDocuments,
   getClassificationConfig,
   exportToExcel,
+  getPartidasTree,
 } from '../../services/ifcfiles.service';
+import type { PartidaNode } from '../../services/ifcfiles.service';
+import { projectService } from '../../services/project.service';
 import { getMyModuleAccess } from '../../services/module.service';
 import type { ModuleAccess } from '../../services/module.service';
 import { useAuth } from '../../context/AuthContext';
 
 interface Visor3DTabProps {
   projectId: number;
+  isActive?: boolean; 
 }
 
 type PanelStatus = 'unprocessed' | 'processing' | 'done' | 'error';
@@ -49,6 +53,25 @@ function formatBytes(bytesStr: string): string {
   const bytes = Number(bytesStr);
   if (!Number.isFinite(bytes)) return '—';
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+// Aplana el árbol de partidas para la vista previa del Excel — mismos
+// datos que arma la hoja "Resumido" del backend (escribirResumen en
+// ifc-excel-export.service.ts: ITEM/DESCRIPCIÓN/UND/TOTAL, indentado
+// por profundidad), solo que acá se renderiza como tabla HTML en vez
+// de escribirse a un .xlsx.
+function flattenPartidaTree(nodes: PartidaNode[], depth = 0): { node: PartidaNode; depth: number }[] {
+  const out: { node: PartidaNode; depth: number }[] = [];
+  for (const node of nodes) {
+    out.push({ node, depth });
+    out.push(...flattenPartidaTree(node.children, depth + 1));
+  }
+  return out;
+}
+
+function formatTotal(value: number | null): string {
+  if (value === null || value === undefined) return '';
+  return value.toLocaleString('es-PE', { maximumFractionDigits: 2 });
 }
 
 function ifcStatusToPanelStatus(status: IfcStatus): PanelStatus {
@@ -101,7 +124,7 @@ const VersionBadge: React.FC<{ versionNumber: number | null; isCurrent: boolean 
   );
 };
 
-const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
+const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) => {
   const { user } = useAuth();
 
   const [metradosAccess, setMetradosAccess] = useState<ModuleAccess | null>(null);
@@ -117,8 +140,21 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const canConfigure = metradosAccess?.permissions.configure ?? false;
   const canExport = metradosAccess?.permissions.export ?? false;
 
-  // Fase 5 — exportación a Excel
+  // Fase 5 — exportación a Excel: en vez de descargar directo, se genera
+  // (el backend ya lo guarda como archivo del proyecto de una, no hay
+  // endpoint separado para "generar sin guardar") y se muestra una vista
+  // previa con los mismos datos de la hoja "Resumido" del Excel (mismo
+  // árbol que ya usa PartidasTree), con 3 opciones: Guardar (dejarlo
+  // como está — ya está guardado), Descargar, o Cancelar (borra el
+  // archivo recién creado, usando el mismo endpoint de eliminar archivo
+  // que ya usa ArchivosTab — no hace falta nada nuevo del backend).
   const [exportingExcel, setExportingExcel] = useState(false);
+  const [excelPreview, setExcelPreview] = useState<{
+    fileId: string;
+    fileName: string;
+    tree: PartidaNode[];
+  } | null>(null);
+  const [cancelingExcelPreview, setCancelingExcelPreview] = useState(false);
 
   const [ifcFile, setIfcFile] = useState<File | null>(null);
   const [ifcArrayBuffer, setIfcArrayBuffer] = useState<ArrayBuffer | null>(null);
@@ -137,6 +173,22 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
   const [currentFileId, setCurrentFileId] = useState<string | null>(null);
   const [panelStatus, setPanelStatus] = useState<PanelStatus>('unprocessed');
   const [panelErrorMessage, setPanelErrorMessage] = useState<string | null>(null);
+
+  // "Reanudar": recuerda (por proyecto, en este navegador) cuál fue el
+  // último archivo que quedó cargado, y lo vuelve a cargar solo la
+  // próxima vez que se entra a esta pestaña — sin esto, cada vez había
+  // que ir a buscarlo de nuevo aunque fuera el mismo de siempre. Se
+  // guarda recién cuando terminó bien (panelStatus 'done'), no en
+  // cualquier estado intermedio.
+  useEffect(() => {
+    if (!currentFileId || panelStatus !== 'done') return;
+    try {
+      localStorage.setItem(`lastIfcFile:${projectId}`, currentFileId);
+    } catch {
+      // localStorage puede fallar (modo privado, cuota llena) — no es
+      // crítico, simplemente no se podrá reanudar la próxima vez.
+    }
+  }, [currentFileId, panelStatus, projectId]);
 
   const [showEntryPopover, setShowEntryPopover] = useState<'center' | 'floating' | null>(null);
   const entryPopoverRef = useRef<HTMLDivElement>(null);
@@ -254,6 +306,9 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     document.body.style.cursor = 'col-resize';
     document.body.style.userSelect = 'none';
   };
+ const handleClearSelectionInViewer = useCallback(() => {
+  viewerRef.current?.clearSelection?.();
+}, []);
 
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
@@ -296,6 +351,46 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     setIfcInfo(parseIfcHeader(buffer));
     setIfcFile(sourceFile);
   };
+
+  // Intenta reanudar el último archivo recordado para este proyecto —
+  // corre una sola vez por proyecto (esta pestaña se monta una sola vez
+  // y queda montada, ver el comentario en DashboardProjects.tsx). Si el
+  // archivo recordado ya no existe, no es la versión vigente, o
+  // cualquier otra cosa falla, simplemente no reanuda nada — se cae al
+  // selector de siempre, sin mostrar ningún error (reanudar es una
+  // comodidad, no algo de lo que dependa poder usar el visor).
+  const resumedForProjectRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (resumedForProjectRef.current === projectId) return;
+    resumedForProjectRef.current = projectId;
+
+    let lastId: string | null;
+    try {
+      lastId = localStorage.getItem(`lastIfcFile:${projectId}`);
+    } catch {
+      return;
+    }
+    if (!lastId) return;
+
+    (async () => {
+      try {
+        const files = await listProjectIfcFiles(projectId, true, true);
+        const match = files.find((f) => f.file_id === lastId);
+        if (!match) {
+          localStorage.removeItem(`lastIfcFile:${projectId}`);
+          return;
+        }
+
+        const buffer = await getFileContentArrayBuffer(match.file_id);
+        loadBufferIntoViewer(buffer, new File([buffer], match.name, { type: match.mime_type }));
+        setCurrentFileId(match.file_id);
+        setPanelStatus(ifcStatusToPanelStatus(match.ifc_status));
+        setPanelErrorMessage(match.ifc_error_message ?? null);
+      } catch {
+        // ver comentario de arriba: fallar acá no es un error visible.
+      }
+    })();
+  }, [projectId]);
 
   const runProcessing = useCallback(
     async ({
@@ -364,17 +459,44 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
     }
   };
 
-  // Fase 5 — exportar a Excel y descargar automáticamente
+  // Fase 5 — generar el Excel (el backend lo guarda como archivo del
+  // proyecto, igual que siempre) y mostrar una vista previa en vez de
+  // descargarlo automático — la descarga queda como acción explícita
+  // desde el modal de vista previa (ver excelPreview).
   const handleExportExcel = async () => {
     if (!currentFileId) return;
     setExportingExcel(true);
     try {
       const result = await exportToExcel(currentFileId);
-      await handleDownloadFile(result.file_id, result.name);
+      const tree = await getPartidasTree(currentFileId);
+      setExcelPreview({ fileId: result.file_id, fileName: result.name, tree });
     } catch (err: any) {
       alert(err.message || 'Error al generar el Excel');
     } finally {
       setExportingExcel(false);
+    }
+  };
+
+  // "Guardar": no hay nada que hacer — el backend ya lo guardó al
+  // generarlo — así que solo cierra la vista previa.
+  const handleSaveExcelPreview = () => {
+    setExcelPreview(null);
+  };
+
+  // "Cancelar" (y también la X / click afuera): como el backend no tiene
+  // un modo "generar sin guardar", cancelar significa borrar el archivo
+  // que se acaba de crear — mismo endpoint que ya usa ArchivosTab para
+  // eliminar cualquier archivo del proyecto.
+  const handleCancelExcelPreview = async () => {
+    if (!excelPreview) return;
+    setCancelingExcelPreview(true);
+    try {
+      await projectService.deleteProjectFile(projectId, excelPreview.fileId);
+      setExcelPreview(null);
+    } catch (err: any) {
+      alert(err.message || 'No se pudo cancelar/eliminar el Excel generado.');
+    } finally {
+      setCancelingExcelPreview(false);
     }
   };
 
@@ -635,6 +757,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                 fileBuffer={ifcArrayBuffer}
                 projectId={projectId}
                 viewCubeRightOffset={panelOpen ? panelWidth : 0}
+                viewCubeVisible={isActive}
               />
             ) : (
               <div className="relative z-10 text-center flex flex-col items-center gap-4 px-6">
@@ -689,21 +812,23 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
             )}
 
             <div className="flex-shrink-0">
-              <div className="flex items-center gap-2.5 mb-3">
-                <h2 className="text-lg font-bold text-[#0056b3] tracking-tight">Metrados</h2>
+              <div className="flex items-center flex-wrap gap-2.5 mb-3">
+                <h2 className="text-lg font-bold text-[#0056b3] tracking-tight flex-shrink-0">Metrados</h2>
                 {panelStatus === 'done' && (
-                  <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200">
-                    <CheckCircle2 size={10} className="text-emerald-600 flex-shrink-0" />
-                    <p className="text-[9px] font-semibold text-emerald-700 whitespace-nowrap">Metrados listos</p>
+                  <div
+                    className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-50 border border-emerald-200 flex-shrink-0"
+                    title="Metrados listos"
+                  >
+                    <CheckCircle2 size={10} className="text-emerald-600" />
                   </div>
                 )}
-                <div className="ml-auto flex items-center gap-1.5">
+                <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
                   {/* BOTÓN EXPORTAR EXCEL */}
                   {panelStatus === 'done' && canExport && (
                     <button
                       onClick={handleExportExcel}
                       disabled={exportingExcel}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 whitespace-nowrap"
                       title="Exportar a Excel"
                     >
                       {exportingExcel ? (
@@ -711,26 +836,32 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                       ) : (
                         <FileSpreadsheet size={13} />
                       )}
-                      Excel
+                      Generar Excel 
                     </button>
                   )}
-                  {/* BOTÓN CONFIGURACIÓN */}
-                  {canConfigure && (
-                    <button
-                      onClick={() => setShowConfigModal(true)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-[#0056b3] hover:bg-blue-50 transition-colors"
-                      title="Configuración de clasificación"
-                    >
-                      <Settings size={16} />
-                    </button>
-                  )}
+                  {/* BOTÓN CONFIGURACIÓN — antes solo lo veía quien tenía
+                      permiso de "configure" (quedaba escondido del resto).
+                      Ahora es visible para cualquiera con acceso al módulo;
+                      quien no sea admin/owner del proyecto (ni tenga rol de
+                      Administrador en Metrados) igual puede abrirlo, solo
+                      que el modal se abre en modo lectura (ver
+                      ClassificationConfigModal readOnly). */}
+                  <button
+                    onClick={() => setShowConfigModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 text-xs font-semibold hover:border-[#0056b3] hover:text-[#0056b3] hover:bg-blue-50 transition-colors flex-shrink-0 whitespace-nowrap"
+                    title={canConfigure ? 'Configuración de clasificación' : 'Ver configuración de clasificación (solo lectura)'}
+                  >
+                    <Settings size={13} />
+                    Configuración
+                    {!canConfigure && <Eye size={12} className="text-slate-400" />}
+                  </button>
                 </div>
               </div>
 
               <div className="relative flex items-center gap-2 bg-slate-100/60 border border-slate-300/60 rounded px-2 py-1.5 mb-2.5">
-                <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${ifcFile ? 'bg-green-100' : 'bg-slate-200'}`}>
-                  <FileText size={11} className={ifcFile ? 'text-green-600' : 'text-slate-400'} />
-                </div>
+                <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 ${ifcFile ? 'bg-blue-100' : 'bg-slate-200'}`}>
+  <Building2 size={11} className={ifcFile ? 'text-blue-600' : 'text-slate-400'} />
+</div>
                 <div className="min-w-0 flex-1">
                   {ifcFile ? (
                     <>
@@ -761,7 +892,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                 {infoPopoverOpen && ifcInfo && (
                   <div className="absolute top-full right-0 mt-1.5 z-50 w-72 bg-white rounded shadow-2xl border border-slate-200 p-3.5">
                     <div className="flex items-center justify-between mb-2.5">
-                      <p className="text-xs font-bold text-slate-700">Información del proyecto</p>
+                      <p className="text-xs font-bold text-slate-700">Información del IFC</p>
                       <button
                         onClick={() => setInfoPopoverOpen(false)}
                         className="text-slate-400 hover:text-slate-600"
@@ -842,6 +973,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
                       currentUserId={user?.id ?? undefined}
                       onSelectAllInViewer={handleSelectAllInViewer}
                       onSelectGroupInViewer={handleSelectGroupInViewer}
+                      onClearSelectionInViewer={handleClearSelectionInViewer}
                     />
                   )}
                 </div>
@@ -944,12 +1076,114 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId }) => {
       {showConfigModal && (
         <ClassificationConfigModal
           projectId={projectId}
+          readOnly={!canConfigure}
           onClose={() => setShowConfigModal(false)}
           onSaved={() => {
             setShowConfigModal(false);
             setPartidasRefreshKey(prev => prev + 1);
           }}
         />
+      )}
+
+      {/* Vista previa del Excel recién generado — el archivo ya quedó
+          guardado en Archivos del proyecto apenas se generó (el backend
+          no tiene un modo "generar sin guardar"), así que la X y el click
+          afuera se comportan igual que "Cancelar": si no elegiste
+          explícitamente Guardar, se borra el archivo recién creado en vez
+          de dejarlo huérfano guardado sin que el usuario lo haya pedido. */}
+      {excelPreview && createPortal(
+        <div
+          className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[10300] p-6"
+          onClick={handleCancelExcelPreview}
+        >
+          <div
+            className="bg-white rounded-lg w-full max-w-2xl max-h-[85vh] shadow-2xl border border-gray-200 flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-3 flex-shrink-0">
+              <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center flex-shrink-0">
+                <FileSpreadsheet size={18} className="text-emerald-600" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-800 truncate">{excelPreview.fileName}</p>
+                <p className="text-xs text-slate-400 mt-0.5">Vista previa · hoja "Resumido"</p>
+              </div>
+              <button
+                onClick={handleCancelExcelPreview}
+                disabled={cancelingExcelPreview}
+                aria-label="Cancelar (descarta el Excel generado)"
+                title="Cancelar"
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors flex-shrink-0 disabled:opacity-50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-auto">
+              {excelPreview.tree.length === 0 ? (
+                <div className="flex flex-col items-center justify-center text-center py-16 px-4">
+                  <div className="w-10 h-10 rounded-lg bg-gray-50 flex items-center justify-center mb-2">
+                    <FileSpreadsheet size={16} className="text-gray-300" />
+                  </div>
+                  <p className="text-sm text-slate-400">No hay partidas para mostrar.</p>
+                </div>
+              ) : (
+                <table className="w-full text-xs border-collapse">
+                  <thead className="sticky top-0 z-10">
+                    <tr className="divide-x divide-white/15 shadow-sm">
+                      <th className="text-left font-semibold text-white bg-[#C00000] px-3 py-2.5 rounded-tl-lg">ITEM</th>
+                      <th className="text-left font-semibold text-white bg-[#C00000] px-3 py-2.5">DESCRIPCIÓN</th>
+                      <th className="text-left font-semibold text-white bg-[#C00000] px-3 py-2.5 w-16">UND</th>
+                      <th className="text-right font-semibold text-white bg-[#C00000] px-3 py-2.5 w-24 rounded-tr-lg">TOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {flattenPartidaTree(excelPreview.tree).map(({ node, depth }, i) => (
+                      <tr
+                        key={node.partida_id}
+                        className={`border-b border-slate-100 last:border-0 transition-colors hover:bg-blue-50/40 ${
+                          i % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'
+                        }`}
+                      >
+                        <td className="px-3 py-1.5 text-slate-500 font-mono whitespace-nowrap">{node.code}</td>
+                        <td
+                          className={`px-3 py-1.5 text-slate-700 ${depth === 0 ? 'font-semibold' : ''}`}
+                          style={{ paddingLeft: `${12 + depth * 16}px` }}
+                        >
+                          {node.description}
+                        </td>
+                        <td className="px-3 py-1.5 text-slate-400">{node.unit ?? '—'}</td>
+                        <td className="px-3 py-1.5 text-slate-700 text-right font-medium tabular-nums">
+                          {formatTotal(node.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-gray-100 flex items-center justify-end gap-2 flex-shrink-0 bg-slate-50">
+              <button
+                onClick={() => handleDownloadFile(excelPreview.fileId, excelPreview.fileName)}
+                disabled={cancelingExcelPreview}
+                className="whitespace-nowrap flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-200 bg-white text-sm font-medium text-slate-600 hover:bg-[#0056b3] hover:text-white hover:border-[#0056b3] transition-colors disabled:opacity-50"
+              >
+                <FileDown size={14} />
+                Descargar
+              </button>
+              <button
+                onClick={handleSaveExcelPreview}
+                disabled={cancelingExcelPreview}
+                className="whitespace-nowrap flex items-center gap-1.5 px-4 py-2 rounded-lg border border-gray-200 bg-white text-xs font-semibold text-slate-600 hover:bg-[#0056b3] hover:text-white hover:border-[#0056b3] transition-colors disabled:opacity-50"
+              >
+                <CheckCircle2 size={14} />
+                Guardar en el proyecto
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {pendingLocalFile && createPortal(

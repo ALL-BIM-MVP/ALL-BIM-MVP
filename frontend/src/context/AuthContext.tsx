@@ -1,6 +1,6 @@
 // frontend/src/context/AuthContext.tsx
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { loginUser, getCurrentUser } from '../services/auth.service';
+import { loginUser, getCurrentUser, logoutUser } from '../services/auth.service';
 import { getRoleName, getRoleIdFromName } from '../utils/roles';
 import { resolveMediaUrl } from '../utils/media';
 
@@ -131,6 +131,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Única función de logout — reemplaza la de useAuth.ts Y la duplicada en Sidebar.tsx
   const logout = () => {
+    // Revoca el refresh token del lado del backend (best-effort: si falla
+    // por red, no bloqueamos el logout — total, el token igual va a dejar
+    // de servir localmente porque lo borramos abajo, y expira solo en 7
+    // días si el backend nunca se entera). Se dispara ANTES de borrar el
+    // localStorage porque necesita leer el refresh token de ahí.
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (refreshToken) {
+      logoutUser(refreshToken).catch((err) => {
+        console.error('No se pudo revocar el refresh token en el backend:', err);
+      });
+    }
+
     localStorage.removeItem('accessToken');
     localStorage.removeItem('refreshToken');
     localStorage.removeItem('userRole');

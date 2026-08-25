@@ -1,7 +1,7 @@
 // src/components/tabs/ClassificationConfigModal.tsx
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Loader2, Lock, Unlock, AlertTriangle } from 'lucide-react';
+import { X, Loader2, Lock, Unlock, AlertTriangle, Eye } from 'lucide-react';
 import {
   getClassificationConfig,
   setClassificationConfig,
@@ -13,12 +13,18 @@ interface ClassificationConfigModalProps {
   projectId: number;
   onClose: () => void;
   onSaved?: () => void;
+  // Quien no es admin/owner del proyecto (ni tiene el rol de
+  // Administrador en el módulo Metrados) puede abrir esto para VER cómo
+  // está configurado, pero no para cambiarlo — todos los controles
+  // quedan deshabilitados y no hay botón de Guardar.
+  readOnly?: boolean;
 }
 
 const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
   projectId,
   onClose,
   onSaved,
+  readOnly = false,
 }) => {
   const [config, setConfig] = useState<ClassificationConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -159,7 +165,15 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
       <div className="bg-white rounded-lg w-[640px] max-h-[90vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
         {/* Header */}
         <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-          <h3 className="text-sm font-bold text-slate-800">Configuración de clasificación</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-bold text-slate-800">Configuración de clasificación</h3>
+            {readOnly && (
+              <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-semibold">
+                <Eye size={11} />
+                Solo lectura
+              </span>
+            )}
+          </div>
           <button
             onClick={onClose}
             className="w-7 h-7 flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition-colors"
@@ -180,7 +194,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                   type="radio"
                   checked={config.mode === 'norma'}
                   onChange={() => updateConfig({ mode: 'norma' })}
-                  disabled={config.mode_locked}
+                  disabled={readOnly || config.mode_locked}
                   className="mt-0.5 text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
                 />
                 <div>
@@ -194,7 +208,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                   type="radio"
                   checked={config.mode === 'manual'}
                   onChange={() => updateConfig({ mode: 'manual' })}
-                  disabled={config.mode_locked}
+                  disabled={readOnly || config.mode_locked}
                   className="mt-0.5 text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
                 />
                 <div>
@@ -218,6 +232,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                       type="text"
                       value={field.code_property_set || ''}
                       onChange={(e) => updateField(0, { code_property_set: e.target.value || null })}
+                      disabled={readOnly}
                       placeholder="Grupo (opcional)"
                       className="w-1/3 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
                     />
@@ -225,6 +240,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                       type="text"
                       value={field.code_property_name}
                       onChange={(e) => updateField(0, { code_property_name: e.target.value })}
+                      disabled={readOnly}
                       placeholder="Nombre de la propiedad"
                       className="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
                     />
@@ -240,6 +256,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                       type="text"
                       value={field.description_property_set || ''}
                       onChange={(e) => updateField(0, { description_property_set: e.target.value || null })}
+                      disabled={readOnly}
                       placeholder="Grupo (opcional)"
                       className="w-1/3 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
                     />
@@ -247,6 +264,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                       type="text"
                       value={field.description_property_name || ''}
                       onChange={(e) => updateField(0, { description_property_name: e.target.value || null })}
+                      disabled={readOnly}
                       placeholder="Nombre de la propiedad"
                       className="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
                     />
@@ -262,6 +280,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                       type="text"
                       value={field.unit_property_set || ''}
                       onChange={(e) => updateField(0, { unit_property_set: e.target.value || null })}
+                      disabled={readOnly}
                       placeholder="Grupo (opcional)"
                       className="w-1/3 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
                     />
@@ -269,6 +288,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                       type="text"
                       value={field.unit_property_name || ''}
                       onChange={(e) => updateField(0, { unit_property_name: e.target.value || null })}
+                      disabled={readOnly}
                       placeholder="Nombre de la propiedad"
                       className="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
                     />
@@ -283,7 +303,8 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                 type="checkbox"
                 checked={config.mode_locked}
                 onChange={(e) => updateConfig({ mode_locked: e.target.checked })}
-                className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3]"
+                disabled={readOnly}
+                className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
               />
               <span className="text-xs text-slate-600 flex items-center gap-1">
                 {config.mode_locked ? <Lock size={12} /> : <Unlock size={12} />}
@@ -307,6 +328,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                 type="text"
                 value={config.property_prefix || ''}
                 onChange={(e) => updateConfig({ property_prefix: e.target.value || null })}
+                disabled={readOnly}
                 placeholder="p.ej. CSRT-"
                 className="w-full px-3 py-2 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
               />
@@ -322,7 +344,8 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                 type="checkbox"
                 checked={config.property_prefix_locked}
                 onChange={(e) => updateConfig({ property_prefix_locked: e.target.checked })}
-                className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3]"
+                disabled={readOnly}
+                className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
               />
               <span className="text-xs text-slate-600 flex items-center gap-1">
                 {config.property_prefix_locked ? <Lock size={12} /> : <Unlock size={12} />}
@@ -346,8 +369,9 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
             onClick={onClose}
             className="px-4 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors"
           >
-            Cancelar
+            {readOnly ? 'Cerrar' : 'Cancelar'}
           </button>
+          {!readOnly && (
           <button
             onClick={handleSave}
             disabled={saving || (config.mode === 'manual' && !field.code_property_name)}
@@ -360,6 +384,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
             {saving && <Loader2 size={14} className="animate-spin" />}
             {saving ? 'Guardando...' : 'Guardar'}
           </button>
+          )}
         </div>
       </div>
     </div>,

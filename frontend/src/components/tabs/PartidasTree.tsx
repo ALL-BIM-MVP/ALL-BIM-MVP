@@ -24,6 +24,7 @@ interface PartidasTreeProps {
   currentUserId?: number;
   onSelectAllInViewer?: (expressIds: number[]) => void;
   onSelectGroupInViewer?: (expressIds: number[]) => void;
+  onClearSelectionInViewer?: () => void; 
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -296,29 +297,40 @@ const PartidaDetailScreen: React.FC<{
 };
 
 // Fila del árbol: carpetas se expanden inline; hojas navegan al detalle.
+// El "abierto/cerrado" de cada carpeta ya NO es estado local de la fila
+// (antes se perdía al volver del detalle, porque React recreaba las
+// filas desde cero) — ahora vive en el componente padre (expandedIds)
+// y sobrevive a entrar/salir de una partida.
 const PartidaTableRow: React.FC<{
   node: PartidaNode;
   depth: number;
   onSelectLeaf: (node: PartidaNode) => void;
   isolatingPartidaId: number | null;
-}> = ({ node, depth, onSelectLeaf, isolatingPartidaId }) => {
-  const [expanded, setExpanded] = useState(depth === 0);
-
+  expandedIds: Set<number>;
+  onToggleExpand: (partidaId: number) => void;
+  lastSelectedPartidaId: number | null;
+}> = ({ node, depth, onSelectLeaf, isolatingPartidaId, expandedIds, onToggleExpand, lastSelectedPartidaId }) => {
   const isLeaf = node.unit !== null;
   const hasChildren = node.children && node.children.length > 0;
   const isIsolating = isolatingPartidaId === node.partida_id;
+  const expanded = expandedIds.has(node.partida_id);
+  const isLastSelected = isLeaf && lastSelectedPartidaId === node.partida_id;
 
   const handleClick = () => {
     if (isLeaf) {
       onSelectLeaf(node);
     } else if (hasChildren) {
-      setExpanded((prev) => !prev);
+      onToggleExpand(node.partida_id);
     }
   };
 
   return (
     <>
-      <tr className={isLeaf ? 'bg-white hover:bg-gray-50' : 'bg-gray-100/70 hover:bg-gray-200/60'}>
+      <tr className={
+        isLastSelected
+          ? 'bg-blue-50 hover:bg-blue-50 ring-1 ring-inset ring-[#0056b3]/30'
+          : isLeaf ? 'bg-white hover:bg-gray-50' : 'bg-gray-100/70 hover:bg-gray-200/60'
+      }>
         <td className="px-2.5 py-2 align-top border border-gray-200" style={{ paddingLeft: 12 + depth * 18 }}>
           <button
             onClick={handleClick}
@@ -365,6 +377,9 @@ const PartidaTableRow: React.FC<{
               depth={depth + 1}
               onSelectLeaf={onSelectLeaf}
               isolatingPartidaId={isolatingPartidaId}
+              expandedIds={expandedIds}
+              onToggleExpand={onToggleExpand}
+              lastSelectedPartidaId={lastSelectedPartidaId}
             />
           ))}
         </>
@@ -379,6 +394,7 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   currentUserId = -1,
   onSelectAllInViewer,
   onSelectGroupInViewer,
+  onClearSelectionInViewer,
 }) => {
   const [tree, setTree] = useState<PartidaNode[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -386,13 +402,34 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   const [selectedNode, setSelectedNode] = useState<PartidaNode | null>(null);
   const [isolatingPartidaId, setIsolatingPartidaId] = useState<number | null>(null);
 
+  // Qué carpetas están abiertas — vive ACÁ (no en cada fila) para que no
+  // se pierda al volver del detalle de una partida. Se inicializa con las
+  // carpetas de nivel 0 abiertas, igual que el comportamiento de antes.
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const toggleExpand = useCallback((partidaId: number) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(partidaId)) next.delete(partidaId);
+      else next.add(partidaId);
+      return next;
+    });
+  }, []);
+
+  // Última partida (hoja) que se seleccionó — se usa para resaltarla al
+  // volver del detalle. A diferencia de selectedNode, esta NO se limpia
+  // en handleBack, para que el resaltado sobreviva.
+  const [lastSelectedPartidaId, setLastSelectedPartidaId] = useState<number | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
     getPartidasTree(ifcFileId)
       .then((data) => {
-        if (!cancelled) setTree(data);
+        if (!cancelled) {
+          setTree(data);
+          setExpandedIds(new Set(data.map((n) => n.partida_id)));
+        }
       })
       .catch((err: any) => {
         if (!cancelled) setError(err.message || 'Error al cargar las partidas.');
@@ -408,6 +445,7 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   const isolatePartidaInViewer = useCallback(
     async (node: PartidaNode) => {
       if (!onSelectAllInViewer) return;
+      onClearSelectionInViewer?.();
       setIsolatingPartidaId(node.partida_id);
       try {
         const detail = await getPartidaElements(ifcFileId, node.partida_id);
@@ -427,6 +465,7 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   const handleSelectLeaf = useCallback(
     (node: PartidaNode) => {
       setSelectedNode(node);
+      setLastSelectedPartidaId(node.partida_id);
       isolatePartidaInViewer(node);
     },
     [isolatePartidaInViewer]
@@ -495,6 +534,9 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
                 depth={0}
                 onSelectLeaf={handleSelectLeaf}
                 isolatingPartidaId={isolatingPartidaId}
+                expandedIds={expandedIds}
+                onToggleExpand={toggleExpand}
+                lastSelectedPartidaId={lastSelectedPartidaId}
               />
             ))}
           </tbody>
