@@ -1,4 +1,7 @@
-export const BASE_URL = 'http://localhost:4000';
+// VITE_API_URL (.env del frontend) — mismo criterio que media.ts, que
+// ya lo leía así. Sin la env var seteada (dev local de siempre), cae
+// al mismo default de siempre.
+export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 // AppError del backend siempre manda { code, message } — antes acá se
 // tiraba el "code" y solo quedaba el mensaje, así que ningún lado del

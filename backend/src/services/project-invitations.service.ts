@@ -352,10 +352,21 @@ export const getUsersSuggestionForInvitationToProjectService = async (
                 WHERE pm.project_id = $2 AND pm.user_id = u.user_id
             )
             AND NOT EXISTS (
+                -- "AND expires_at > NOW()" a propósito, mismo criterio
+                -- que createInvitationToProjectService — una invitación
+                -- 'pendiente' que ya venció (nunca se respondió, pasaron
+                -- los 3 días de expires_at) no debe seguir bloqueando a
+                -- esa persona de las sugerencias para siempre; sin esto,
+                -- alguien invitado una vez y nunca respondió quedaba
+                -- invisible en el buscador para reintentar, aunque
+                -- crear la invitación de nuevo sí funcionaba (bug real
+                -- encontrado con datos reales, las dos queries decían
+                -- cosas distintas).
                 SELECT 1 FROM project_invitations pi
                 WHERE pi.project_id = $2
                     AND pi.email = u.email
                     AND pi.status = 'pendiente'
+                    AND pi.expires_at > NOW()
            )
         ORDER BY u.${column} ASC
         LIMIT 8`,

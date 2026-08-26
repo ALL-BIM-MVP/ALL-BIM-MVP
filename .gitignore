@@ -86,6 +86,21 @@ coverage/
 .pnp.*
 
 # project (ALL-BIM)
-uploads/
+# uploads/ es contenido subido por usuarios (archivos IFC, portadas,
+# etc.) — no se trackea. EXCEPCIÓN: uploads/public/default/ no es dato
+# de usuario, es el asset de portada por defecto que el código
+# referencia directo (DEFAULT_COVER_IMAGE_PATH, project-images.models.ts)
+# — sin él, un clone fresco (ej. para instalar en otra máquina) no
+# tiene con qué mostrar la portada default. Los 4 patrones de abajo son
+# necesarios juntos: en gitignore no se puede "reincluir" algo si un
+# directorio padre ya está excluido, así que hay que desanidar nivel
+# por nivel hasta el que sí interesa trackear. Path explícito
+# (backend/uploads/, no "uploads/" a secas) a propósito: un patrón con
+# "/" en el medio (no solo al final) queda anclado a la raíz del repo,
+# no matchea a cualquier profundidad — hace falta el path completo.
+backend/uploads/*
+!backend/uploads/public/
+backend/uploads/public/*
+!backend/uploads/public/default/
 backend/dist/
 frontend/dist/

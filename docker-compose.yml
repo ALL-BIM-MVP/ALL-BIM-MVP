@@ -1,0 +1,79 @@
+# Preparación para pruebas en red — instalación de todo el stack en
+# una máquina (ver docs/instalacion-cliente.md para la guía completa
+# paso a paso). Dockeriza backend (Node) + processing (Python) + BD
+# (Postgres) — el frontend NO está acá, corre nativo
+# (frontend/.env.example + "npm run dev -- --host").
+#
+# .env real en la RAÍZ del repo (junto a este archivo), copiado desde
+# .env.example — docker-compose lo usa para sustituir ${DB_USER} etc.
+# acá abajo Y para inyectárselo entero al contenedor "backend"
+# (env_file).
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      # /var/lib/postgresql (SIN /data al final) — a propósito. Desde
+      # postgres:18, la imagen oficial pasó a un layout compatible con
+      # pg_ctlcluster y un mount en el punto viejo (.../data) hace que
+      # el contenedor quede en loop de reinicio, "unhealthy" (visto en
+      # la primera instalación real, ver
+      # docs/diagnostico-primera-instalacion.md punto 2 — el propio log
+      # de arranque de la imagen lo explica, y
+      # https://github.com/docker-library/postgres/pull/1259 confirma
+      # el cambio). Si alguna vez se vuelve a romper acá: primero mirar
+      # si cambió otra vez el layout de la imagen antes de asumir que
+      # es config nuestra.
+      - db_data:/var/lib/postgresql
+      # Prefijos numéricos a propósito: postgres corre los scripts de
+      # /docker-entrypoint-initdb.d/ en orden alfabético, UNA sola vez
+      # (solo si el volumen de datos está vacío) — schema.sql tiene
+      # que ir antes que system-data.sql (crea las tablas que la
+      # segunda llena). seed-test.sql NO se monta acá a propósito —
+      # es dato de prueba de Ismael, no debe entrar en la máquina del
+      # cliente.
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./database/system-data.sql:/docker-entrypoint-initdb.d/02-system-data.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        # No alcanza con "esperar a que el contenedor arranque" — la
+        # primera vez que postgres corre los scripts de init, se
+        # reinicia solo internamente después. Sin el healthcheck, el
+        # backend podría conectarse en esa ventana y fallar.
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      # Puerto del HOST configurable (BACKEND_HOST_PORT en el .env,
+      # default 4000) — el puerto de ADENTRO del contenedor siempre es
+      # 4000, eso no cambia. Por si en la máquina de destino el 4000 ya
+      # lo usa otra cosa (ej. un backend nativo corriendo aparte).
+      - "${BACKEND_HOST_PORT:-4000}:4000"
+    volumes:
+      # Volumen NOMBRADO (no bind-mount) a propósito: la primera vez
+      # que se crea vacío, Docker copia automáticamente lo que ya
+      # tenía la imagen en esa ruta — incluido
+      # uploads/public/default/project-deafault.jpg (trackeado en git
+      # desde este cambio, ver .gitignore), así la portada por defecto
+      # aparece sola sin ningún script de arranque a medida.
+      - uploads_data:/app/backend/uploads
+
+volumes:
+  db_data:
+  uploads_data:

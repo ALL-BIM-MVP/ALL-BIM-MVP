@@ -1,0 +1,47 @@
+# Build context es la raíz del repo (docker-compose.yml usa
+# "context: ."), así que TODO lo que no se excluya acá se manda al
+# daemon de Docker al buildear — más allá de lo que el Dockerfile
+# copie o no con COPY, esto es sobre no mandar basura de entrada.
+
+# Todo el repo por defecto, después se abren solo las carpetas que el
+# Dockerfile realmente necesita (backend/ y processing/, ver comentario
+# en backend/Dockerfile) — frontend/, docs/, database/, .git/, etc. no
+# hacen falta para esta imagen.
+*
+!backend/
+!processing/
+
+# node_modules/dist se reinstalan/rebuildean DENTRO de la imagen
+# (npm ci / npm run build) — copiar los de acá afuera solo pesa y
+# puede traer binarios nativos (sharp) de otra plataforma.
+backend/node_modules/
+backend/dist/
+
+# venv/__pycache__ locales de Ismael — la imagen instala sus propias
+# dependencias de Python limpias vía requirements.txt.
+processing/.venv/
+processing/**/__pycache__/
+processing/output/
+
+# proceso-metrados-base/ es scaffolding de desarrollo (.ifc de prueba
+# de hasta 45MB c/u, va a desaparecer del repo por completo en algún
+# momento) — norma_completa.json (el único dato real de negocio que
+# vivía ahí) se movió a processing/ifc/data/, que SÍ entra a la imagen
+# (es parte de la carpeta processing/ incluida arriba).
+processing/proceso-metrados-base/
+
+# Datos reales de pruebas de Ismael en su propia máquina — NUNCA
+# deben terminar horneados en la imagen. uploads/public/default/ es la
+# única excepción real (el asset de portada por defecto, necesario
+# para que el volumen nombrado de uploads se auto-siembre la primera
+# vez — ver docker-compose.yml) — mismo patrón de desanidado que
+# .gitignore, por la misma razón (un directorio excluido bloquea
+# reincluir algo adentro).
+backend/uploads/*
+!backend/uploads/public/
+backend/uploads/public/*
+!backend/uploads/public/default/
+
+# Secretos reales — nunca al build context.
+backend/.env
+.env

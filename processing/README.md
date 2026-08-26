@@ -50,7 +50,7 @@ PROCESSING_PYTHON=/ruta/a/otro/python
 ```bash
 processing/.venv/bin/python -m processing.ifc.cli \
   processing/proceso-metrados-base/archives/desenlazado.ifc \
-  --norma processing/proceso-metrados-base/norma_completa.json
+  --norma processing/ifc/data/norma_completa.json
 ```
 
 Sin `--out`, el JSON queda guardado solo en `processing/output/<nombre_del_ifc>.json`

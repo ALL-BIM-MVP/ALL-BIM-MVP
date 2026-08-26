@@ -1,5 +1,7 @@
 // src/utils/media.ts
-// Ajustá VITE_API_URL al nombre real de tu variable de entorno si es distinto.
+// VITE_API_URL — mismo nombre que usan services/api.ts y utils/constants.ts,
+// unificado al preparar la app para pruebas en red (antes eran 3 valores
+// hardcodeados a localhost:4000 inconsistentes entre sí).
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
 /**
