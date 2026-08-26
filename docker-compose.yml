@@ -18,7 +18,18 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_NAME}
     volumes:
-      - db_data:/var/lib/postgresql/data
+      # /var/lib/postgresql (SIN /data al final) — a propósito. Desde
+      # postgres:18, la imagen oficial pasó a un layout compatible con
+      # pg_ctlcluster y un mount en el punto viejo (.../data) hace que
+      # el contenedor quede en loop de reinicio, "unhealthy" (visto en
+      # la primera instalación real, ver
+      # docs/diagnostico-primera-instalacion.md punto 2 — el propio log
+      # de arranque de la imagen lo explica, y
+      # https://github.com/docker-library/postgres/pull/1259 confirma
+      # el cambio). Si alguna vez se vuelve a romper acá: primero mirar
+      # si cambió otra vez el layout de la imagen antes de asumir que
+      # es config nuestra.
+      - db_data:/var/lib/postgresql
       # Prefijos numéricos a propósito: postgres corre los scripts de
       # /docker-entrypoint-initdb.d/ en orden alfabético, UNA sola vez
       # (solo si el volumen de datos está vacío) — schema.sql tiene
@@ -49,7 +60,11 @@ services:
     env_file:
       - .env
     ports:
-      - "4000:4000"
+      # Puerto del HOST configurable (BACKEND_HOST_PORT en el .env,
+      # default 4000) — el puerto de ADENTRO del contenedor siempre es
+      # 4000, eso no cambia. Por si en la máquina de destino el 4000 ya
+      # lo usa otra cosa (ej. un backend nativo corriendo aparte).
+      - "${BACKEND_HOST_PORT:-4000}:4000"
     volumes:
       # Volumen NOMBRADO (no bind-mount) a propósito: la primera vez
       # que se crea vacío, Docker copia automáticamente lo que ya

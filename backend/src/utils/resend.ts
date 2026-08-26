@@ -2,10 +2,23 @@ import { Resend } from "resend";
 
 const emailMain = process.env.RESEND_EMAIL as string;
 
-export const resend = new Resend(process.env.RESEND_API_KEY);
+// Instanciación LAZY (recién adentro de sendInvitation, no acá arriba
+// a nivel de módulo) — el SDK de Resend tira una excepción inmediata
+// si la API key viene vacía/undefined al construir el cliente, y una
+// excepción a nivel de módulo tumba el proceso ENTERO apenas algo
+// importa este archivo (confirmado en la primera instalación real vía
+// Docker, ver docs/diagnostico-primera-instalacion.md punto 3) — no
+// solo la función de invitaciones. Con esto, un RESEND_API_KEY
+// faltante recién falla cuando de verdad se intenta mandar un email
+// (con un mensaje claro de por qué), no al arrancar el servidor.
+let resendClient: Resend | null = null;
+const getResendClient = (): Resend => {
+    if (!resendClient) resendClient = new Resend(process.env.RESEND_API_KEY);
+    return resendClient;
+};
 
 export const sendInvitation = async (recipientEmail : string, inviteUrl : string, rolName : string) => {
-    await resend.emails.send({
+    await getResendClient().emails.send({
         from: emailMain,
         to: recipientEmail,
         subject: "Invitación a ALL-BIM",

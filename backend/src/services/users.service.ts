@@ -15,6 +15,41 @@ import { COMMON_ERRORS } from "../models/errors/common.errors.js";
 import { AppError } from "../models/errors/app-error.js";
 import { saveProfilePicture, deleteProfilePicture } from "../utils/avatar.js";
 
+// Bootstrap del primer usuario ADMINISTRADOR — hace falta porque
+// role_id=1 (ADMINISTRADOR) tiene is_assignable=false A PROPÓSITO
+// (nunca se puede otorgar por el flujo normal de invitación/registro
+// — ver createInvitationService, que exige is_assignable=true). En
+// una BD recién creada (instalación nueva, solo schema.sql +
+// system-data.sql, sin seed-test.sql — ver docker-compose.yml) no
+// existe NINGÚN usuario, y sin usuario no hay quien invite al primero:
+// huevo y gallina real, no teórico (encontrado preparando la
+// instalación en la máquina del cliente).
+//
+// Se llama una vez al arrancar el server (ver index.ts), después de
+// recoverStaleProcessingRows. Solo actúa si la tabla users está
+// COMPLETAMENTE VACÍA (nunca en un entorno que ya tiene usuarios, como
+// el de desarrollo de todos los días — ahí este chequeo siempre
+// corta acá y no hace nada) Y si las dos env vars vienen seteadas — si
+// no, no hace nada. A propósito NO hay ninguna contraseña por defecto
+// hardcodeada en ningún lado del código: sin las env vars, simplemente
+// no se crea nadie, en vez de dejar una credencial conocida dando
+// vueltas en el repo.
+export const ensureBootstrapAdminService = async () : Promise<void> => {
+    const email = process.env.BOOTSTRAP_ADMIN_EMAIL;
+    const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
+    if (!email || !password) return;
+
+    const { rows } = await pool.query(`SELECT 1 FROM users LIMIT 1`);
+    if (rows.length > 0) return; // ya hay al menos un usuario, no es una instalación nueva
+
+    const passwordHash = await bcrypt.hash(password, 10);
+    await pool.query(
+        `INSERT INTO users (name, email, password_hash, role_id) VALUES ($1, $2, $3, $4)`,
+        ["Admin", email, passwordHash, ROLES.ADMINISTRADOR]
+    );
+    console.log(`🔑 Usuario administrador inicial creado (${email}) — cambiá la contraseña cuanto antes.`);
+};
+
 export const registerService = async ({name, last_name, password, token} : RegisterRequest) : Promise< AuthResponse >=> {
 
     const client : PoolClient = await pool.connect();

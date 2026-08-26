@@ -17,6 +17,7 @@ import routerIfcClassification from './routes/ifc-classification.routes.js';
 import routerElementoConjunto from './routes/elemento-conjunto.routes.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
+import { ensureBootstrapAdminService } from './services/users.service.js';
 import { PUBLIC_UPLOADS_DIR } from './middlewares/upload.midleware.js';
 const app = express();
 
@@ -73,6 +74,11 @@ const PORT = Number(process.env.PORT) || 4000;
 // (ningún proceso Node vivo lo está corriendo todavía) — se marca error
 // antes de aceptar tráfico nuevo, así queda reintentable.
 await recoverStaleProcessingRows();
+
+// Ver el comentario completo en users.service.ts — en una instalación
+// nueva (BD vacía) no hay forma de crear el primer usuario por el
+// flujo normal de la app, hace falta este bootstrap puntual.
+await ensureBootstrapAdminService();
 
 app.listen(PORT, () => {
   console.log(`\nServidor corriendo en http://localhost:${PORT}\n`);
