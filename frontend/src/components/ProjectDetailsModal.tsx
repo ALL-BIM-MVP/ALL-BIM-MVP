@@ -23,13 +23,10 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  // Portada mostrada localmente: arranca con la del proyecto, y se
-  // actualiza al toque después de subir una nueva, sin esperar a
-  // recargar la lista completa de proyectos.
+  
   const [localCoverImage, setLocalCoverImage] = useState(project?.cover_image ?? null);
 
-  // Si cambia el proyecto que se está mostrando (se abre el modal con
-  // otro), sincronizamos la portada local con la de ese proyecto.
+ 
   React.useEffect(() => {
     setLocalCoverImage(project?.cover_image ?? null);
     setUploadError(null);
@@ -191,16 +188,7 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
             <p className="text-sm text-gray-800">{project.description || 'Sin descripción'}</p>
           </div>
 
-          <div>
-            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Archivos IFC</p>
-            {project.hasIFC ? (
-              <div className="mt-1.5 bg-green-50 text-green-700 p-2 rounded-lg text-xs font-semibold">
-                 Archivo IFC cargado
-              </div>
-            ) : (
-              <p className="text-sm text-gray-400">Sin archivos IFC</p>
-            )}
-          </div>
+          
 
           <div className="pt-3 mt-1 border-t border-gray-200">
             <button

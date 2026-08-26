@@ -46,7 +46,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
   return (
     <header className="sticky -top-8 -mt-8 -mx-8 z-40 w-[calc(100%+4rem)] bg-white border-b border-gray-200 px-8 py-2.5 flex justify-between items-center">
       <div>
-        <h1 className="font-raleway text-lg font-bold tracking-tight leading-tight text-slate-600">{title}</h1>
+        <h1 className="font-sans text-lg font-bold tracking-tight leading-tight text-slate-600">{title}</h1>
         {subtitle && <p className="text-xs text-gray-500 leading-tight">{subtitle}</p>}
       </div>
 
@@ -185,7 +185,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
                 {user?.name?.charAt(0).toUpperCase() || "U"}
               </div>
             )}
-            <span className="text-sm font-medium text-gray-700">{user?.name || "Usuario"}</span>
+            <span className="text-sm font-medium text-gray-700">{fullName}</span>
             <svg
               className={`w-3.5 h-3.5 text-gray-500 transition-transform ${isMenuOpen ? "rotate-180" : ""}`}
               fill="none"

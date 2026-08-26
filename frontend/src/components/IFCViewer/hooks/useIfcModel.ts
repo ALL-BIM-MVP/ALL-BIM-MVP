@@ -13,7 +13,7 @@ import { useElementCutTool } from './useElementCutTool';
 import { usePaintTool } from './usePaintTool';
 export type { ViewPreset } from '../types';
 
-export function useIfcModel(fileBuffer: ArrayBuffer | null, panelOffsetPx: number = 0) {
+export function useIfcModel(fileBuffer: ArrayBuffer | null, panelOffsetPx: number = 0, isActive: boolean = true) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<any>(null);
@@ -49,6 +49,7 @@ export function useIfcModel(fileBuffer: ArrayBuffer | null, panelOffsetPx: numbe
       onFrame,
       getClearColor: background.getClearColor,
       getSectionPlane: getCombinedSectionPlane,
+      isActive,
     }
   );
 

@@ -12,8 +12,14 @@ interface IFCViewerProps {
   projectId?: number;
   viewCubeVisible?: boolean;
   onFileUploaded?: () => void;
- 
+
   viewCubeRightOffset?: number;
+  // Cuando es false (el tab del visor no es el que se está mirando, ej.
+  // estás en Inicio/Archivos/Colaboradores), el loop de renderizado 3D
+  // se pausa — sin esto quedaba corriendo para siempre de fondo aunque
+  // el canvas estuviera oculto (display:none no lo frena solo), gastando
+  // CPU/GPU en cada frame y frenando el scroll de las demás pestañas.
+  isActive?: boolean;
 }
 
 export interface IFCViewerHandle {
@@ -155,7 +161,7 @@ const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, 
 };
 
 const PAINT_COLORS = ['#ff3b30', '#34c759', '#0056b3', '#ffcc00', '#ffffff'];
-const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, projectId, onFileUploaded, viewCubeRightOffset = 0, viewCubeVisible = true }, ref) => {
+const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, projectId, onFileUploaded, viewCubeRightOffset = 0, viewCubeVisible = true, isActive = true }, ref) => {
   const {
     canvasRef,
     containerRef,
@@ -246,7 +252,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     exitCut,
     dismissPopup,
     handleCutMouseDown,
-} = useIfcModel(fileBuffer, viewCubeRightOffset);
+} = useIfcModel(fileBuffer, viewCubeRightOffset, isActive);
   useImperativeHandle(ref, () => ({
     selectEntityById: (expressId: number) => selectEntityById(expressId),
     selectByIdOrGuid: (value: string) => selectByIdOrGuid(value),
