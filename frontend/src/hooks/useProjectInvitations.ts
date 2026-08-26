@@ -56,11 +56,7 @@ export const useProjectInvitations = (projectId: number) => {
         loadMembers();
     }, [loadInvitations, loadMembers]);
 
-    // Antes esto se pedía a GET /:projectId/user-role (endpoint
-    // eliminado en el backend). Ahora sale directo de tu propia fila en
-    // el listado de miembros — que YA incluye al owner como fila
-    // sintética (project_member_id: null) y marca is_me — así que no
-    // hace falta ningún pedido extra.
+    
     const myMembership = useMemo(
         () => members.find((m) => m.is_me) ?? null,
         [members]
@@ -69,14 +65,10 @@ export const useProjectInvitations = (projectId: number) => {
     const isAdmin = myMembership?.is_admin ?? false;
     const checkingOwner = membersLoading;
 
-    // Compatibilidad: DashboardProjects.tsx muestra un badge simple con
-    // "el rol del usuario en este proyecto" (userRole.role_name). Ya no
-    // existe un único rol de proyecto, así que se arma una etiqueta
-    // representativa: Owner/Administrador, o el primer rol de módulo que
-    // tenga asignado.
+  
     const userRole = useMemo(() => {
         if (!myMembership) return null;
-        if (myMembership.is_owner) return { role_name: 'Owner' };
+        if (myMembership.is_owner) return { role_name: 'Propietario' };
         if (myMembership.is_admin) return { role_name: 'Administrador' };
         const first = myMembership.module_roles[0];
         return { role_name: first ? first.role_name : 'Miembro' };
@@ -95,9 +87,7 @@ export const useProjectInvitations = (projectId: number) => {
         }
     }, [projectId]);
 
-    // Invitar: ahora manda is_admin + module_roles en vez de un único
-    // project_role_id (ese modelo ya no existe en el backend). Si
-    // isAdminInvite es true, module_roles va vacío (400 si no).
+
     const createInvitation = useCallback(async (
         email: string,
         isAdminInvite: boolean,

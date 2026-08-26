@@ -9,6 +9,18 @@ export interface CoverImage {
   url: string;
 }
 
+
+export interface ProjectSpecialtySummary {
+  specialty_code: string;
+  specialty_name: string;
+  count: number;
+}
+
+export interface ProjectFilesSummary {
+  file_type: string;
+  count: number;
+}
+
 export interface Project {
   project_id: number;
   name: string;
@@ -28,6 +40,8 @@ export interface Project {
   client: string | null;
   contractor: string | null;
   cover_image: CoverImage;
+  specialties_summary?: ProjectSpecialtySummary[];
+  files_summary?: ProjectFilesSummary[];
 }
 
 export interface ProjectFileUploader {
@@ -48,9 +62,6 @@ export interface ProjectFile {
   uploaded_at: string;
   uploaded_by: ProjectFileUploader;
   processed?: boolean;
-  // Fase 3 (especialidad + versionado de IFC) — todos opcionales porque
-  // no todo archivo del proyecto es un IFC (puede ser una imagen, un
-  // Excel, un PDF, etc.). Vienen null/undefined para esos casos.
   ifc_document_id?: string | null;
   ifc_document_name?: string | null;
   version_number?: number | null;

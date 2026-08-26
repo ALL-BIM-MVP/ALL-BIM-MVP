@@ -513,7 +513,7 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({
             // guardar de verdad hay que usar "+ Nueva" (forceEditable),
             // que sí muestra este footer completo.
             <p className="text-[11px] text-gray-400">
-              Esto es solo vista temporal. Para guardar, usá "+ Nueva" arriba.
+              
             </p>
           ) : (
             <div className="flex items-center gap-2 flex-1 min-w-0">

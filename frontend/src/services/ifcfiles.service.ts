@@ -309,6 +309,14 @@ export const getPartidasTree = async (ifcFileId: string): Promise<PartidaNode[]>
   return response || [];
 };
 
+// "origen_metrado" — de dónde salió el valor que la unidad de la
+// partida realmente usa: dimensión IFC/calculada, propiedad de texto
+// tal cual, o casos puntuales de armadura (diámetro/sección de acero).
+// null cuando no aplica (ej. la unidad es "und", no hay de dónde sacar
+// un "origen"). Sirve para mostrar de dónde salió un número "raro" sin
+// tener que ir a revisar el IFC a mano.
+export type OrigenMetrado = 'tipado' | 'geometrico' | 'texto' | 'acero_diametro' | 'acero_seccion' | null;
+
 export interface PartidaElementDetail {
   element_id: string;
   express_id: string;
@@ -322,6 +330,7 @@ export interface PartidaElementDetail {
   volume: number;
   weight: number;
   properties: Record<string, string | null>;
+  origen_metrado?: OrigenMetrado;
 }
 
 export interface PartidaGroup {
@@ -340,6 +349,7 @@ export interface PartidaGroup {
   sub_total: number;
   properties: Record<string, string | null>;
   elements: PartidaElementDetail[];
+  origen_metrado?: OrigenMetrado;
 }
 
 export interface PartidaDetail {
@@ -395,4 +405,146 @@ export function metradoFieldForUnit(unit: string): keyof Pick<
 
 export const exportToExcel = async (ifcFileId: string): Promise<IfcFile> => {
   return await api.post(`/api/ifc-files/${ifcFileId}/export-excel`, {});
+};
+
+// ============================================================
+// "Probar" config de clasificación manual (dry-run) — Consolidación
+// punto 5. Corre solo el mapeo de propiedades contra el archivo IFC que
+// el usuario tiene elegido para subir EN ESE MOMENTO (todavía no existe
+// en el servidor, así que va como multipart — ver uploadDryRunFile en
+// el backend, que lo escribe en un temporal y lo borra después, nunca
+// lo guarda como archivo del proyecto ni crea ninguna fila). Sin
+// guardar nada ni correr el pipeline completo: mucho más rápido que
+// reprocesar (~38s vs. ~2min en un IFC de 109MB, según el backend).
+export interface ClassificationDryRunConfig {
+  property_prefix?: string;
+  code_property_set?: string;
+  code_property_name: string;
+  description_property_set?: string;
+  description_property_name?: string;
+  unit_property_set?: string;
+  unit_property_name?: string;
+}
+
+export interface ClassificationDryRunResult {
+  elementos_totales: number;
+  elementos_con_codigo: number;
+  elementos_sin_codigo: number;
+  ejemplos: Array<{
+    codigo: string;
+    descripcion: string | null;
+    unidad: string | null;
+    cantidad: number;
+  }>;
+  propiedades_con_prefijo: number | null;
+}
+
+export const classificationDryRun = async (
+  projectId: number,
+  file: File,
+  config: ClassificationDryRunConfig
+): Promise<ClassificationDryRunResult> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('classification_config', JSON.stringify(config));
+  const response = await api.postFormData(
+    `/api/projects/${projectId}/ifc-metrados/classification-dry-run`,
+    formData
+  );
+  return response;
+};
+
+// ============================================================
+// "Estado de elementos" — Consolidación punto 1.a. Detecta, a nivel
+// de PROYECTO, "elemento conjunto" repetidos o incompletos (ver
+// metrados-estado.models.ts en el backend para la definición
+// completa). Shape espejado 1:1 del backend — OJO, "resultados" viene
+// YA deduplicado (una fila por "elemento conjunto" DISTINTO con algún
+// problema, no una fila por elemento crudo): "repetidos" dice cuántas
+// veces apareció ese grupo (null si apareció 1 sola vez), y
+// "faltantes" viene AUSENTE (no array vacío) cuando no falta ningún
+// campo — nunca asumir que siempre está presente.
+export interface ElementoConjuntoProblema {
+  elemento_conjunto: string;
+  repetidos: number | null;
+  faltantes?: string[];
+}
+
+export interface EstadoElementosResult {
+  project_id: number;
+  campos_clave: string[];
+  total_elementos_evaluados: number;
+  elementos_conjunto_unicos: number;
+  con_problemas: number;
+  resultados: ElementoConjuntoProblema[];
+}
+
+// Requiere permiso 'view' del módulo Metrados en este proyecto — si el
+// usuario no lo tiene (o el proyecto no tiene el módulo activo), el
+// backend devuelve 403 y el llamador debe tratarlo como "no hay datos
+// para mostrar", no como un error visible (ver uso en
+// DashboardProjects.tsx).
+export const getEstadoElementos = async (projectId: number): Promise<EstadoElementosResult> => {
+  const response = await api.get(`/api/projects/${projectId}/metrados/estado-elementos`);
+  return response;
+};
+
+// ============================================================
+// Configuración de "elemento conjunto" — Consolidación punto 1.a.
+// Qué campos componen la clave que usa GET .../estado-elementos de
+// arriba. Antes eran 4 campos fijos (archivo+guid+tag+código); ahora
+// es configurable por proyecto, mínimo 2 campos, builtin y/o
+// propiedades del IFC. Requiere permiso 'configure' del módulo
+// Metrados para el PUT, 'view' para los dos GET — ver
+// elemento-conjunto.service.ts en el backend.
+export type ElementoConjuntoBuiltinField = 'file_name' | 'global_id' | 'tag' | 'partida_code';
+
+export interface ElementoConjuntoFieldRow {
+  position: number;
+  field_type: 'builtin' | 'property';
+  builtin_field: ElementoConjuntoBuiltinField | null;
+  property_set: string | null;
+  property_name: string | null;
+}
+
+export interface ElementoConjuntoConfigFull {
+  project_id: number;
+  updated_at: string;
+  updated_by: number | null;
+  fields: ElementoConjuntoFieldRow[];
+}
+
+export interface AvailableElementoConjuntoFields {
+  builtin: { builtin_field: ElementoConjuntoBuiltinField; label: string }[];
+  ifc_properties: { property_set: string; property_name: string }[];
+}
+
+// Input para el PUT — mismo shape que ElementoConjuntoFieldRow pero
+// sin "position" (el orden lo da la posición dentro del array) y sin
+// los campos que no aplican a cada variante (el backend usa un
+// discriminated union por field_type, ver elemento-conjunto.schema.ts).
+export type ElementoConjuntoFieldInput =
+  | { field_type: 'builtin'; builtin_field: ElementoConjuntoBuiltinField }
+  | { field_type: 'property'; property_set?: string; property_name: string };
+
+export const getAvailableElementoConjuntoFields = async (
+  projectId: number
+): Promise<AvailableElementoConjuntoFields> => {
+  const response = await api.get(`/api/projects/${projectId}/elemento-conjunto-config/available-fields`);
+  return response;
+};
+
+export const getElementoConjuntoConfig = async (projectId: number): Promise<ElementoConjuntoConfigFull> => {
+  const response = await api.get(`/api/projects/${projectId}/elemento-conjunto-config`);
+  return response;
+};
+
+// Reemplaza TODA la lista de campos (no es un PATCH parcial) — mínimo
+// 2, sin repetidos, mismo criterio que setClassificationConfig.
+export const setElementoConjuntoConfig = async (
+  projectId: number,
+  fields: ElementoConjuntoFieldInput[]
+): Promise<ElementoConjuntoConfigFull> => {
+  const response = await api.put(`/api/projects/${projectId}/elemento-conjunto-config`, { fields });
+  return response;
 };

@@ -53,6 +53,29 @@ const NUMERIC_BUILTIN_FIELDS = new Set([
   'weight', 'sub_total', 'total',
 ]);
 
+// De dónde salió el número que el grupo usa como metrado (ver
+// "origen_metrado" en ifcfiles.service.ts) — se muestra como un
+// puntito con tooltip pegado al "sub_total" del grupo, para poder
+// distinguir a simple vista un valor "raro" sin ir a revisar el IFC.
+const ORIGEN_METRADO_LABEL: Record<string, string> = {
+  tipado: 'Dimensión tipada del elemento IFC',
+  geometrico: 'Calculado a partir de la geometría',
+  texto: 'Tomado tal cual de una propiedad de texto',
+  acero_diametro: 'Diámetro de acero (armadura)',
+  acero_seccion: 'Sección de acero (armadura)',
+};
+
+function OrigenMetradoBadge({ origen }: { origen: string | null | undefined }) {
+  if (!origen) return null;
+  const label = ORIGEN_METRADO_LABEL[origen] ?? origen;
+  return (
+    <span
+      title={`Origen del metrado: ${label}`}
+      className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-amber-400 align-middle cursor-help"
+    />
+  );
+}
+
 function cellValue(
   column: TemplateColumn,
   group: PartidaGroup,
@@ -216,6 +239,9 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
                   }`}
                 >
                   {cellValue(fc.col, group, { code, description, unit, total: detail.total })}
+                  {fc.col.builtin_field === 'sub_total' && (
+                    <OrigenMetradoBadge origen={group.origen_metrado} />
+                  )}
                 </td>
               ))}
             </tr>

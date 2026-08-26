@@ -4,7 +4,7 @@ import {
   Upload, FileText, X, Maximize2, Minimize2, FileSearch, Box,
   ChevronLeft, ChevronRight, Search, RefreshCw, FileDown,
   HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2, Info,
-  FileStack, Layers, Settings, FileSpreadsheet, Building2
+  FileStack, Layers, Settings, FileSpreadsheet, Building2, FlaskConical
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
@@ -28,8 +28,9 @@ import {
   getClassificationConfig,
   exportToExcel,
   getPartidasTree,
+  classificationDryRun,
 } from '../../services/ifcfiles.service';
-import type { PartidaNode } from '../../services/ifcfiles.service';
+import type { PartidaNode, ClassificationDryRunResult } from '../../services/ifcfiles.service';
 import { projectService } from '../../services/project.service';
 import { getMyModuleAccess } from '../../services/module.service';
 import type { ModuleAccess } from '../../services/module.service';
@@ -53,6 +54,18 @@ function formatBytes(bytesStr: string): string {
   const bytes = Number(bytesStr);
   if (!Number.isFinite(bytes)) return '—';
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+// Mensaje más claro para códigos de error puntuales del backend — sin
+// esto, IFC_INVALID_CONTENT (subiste algo que no es un IFC de verdad)
+// se mostraba con el mensaje genérico de un 500/422 cualquiera. Para
+// cualquier otro código (o si no vino ninguno), se cae al mensaje que
+// mandó el backend, como siempre.
+function friendlyIfcErrorMessage(err: any): string {
+  if (err?.code === 'IFC_INVALID_CONTENT') {
+    return 'El archivo subido no es un IFC válido (no tiene el encabezado ISO-10303-21 esperado). Verificá que sea el archivo correcto.';
+  }
+  return err?.message || 'Error al subir/procesar el archivo.';
 }
 
 // Aplana el árbol de partidas para la vista previa del Excel — mismos
@@ -223,6 +236,45 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   const [overridePrefixMode, setOverridePrefixMode] = useState<'project' | 'custom'>('project');
   const [overridePrefix, setOverridePrefix] = useState('');
 
+  // Consolidación punto 5 — "Probar" (dry-run) el override manual antes
+  // de confirmar la subida. Corre contra fileAwaitingContext (el File
+  // local, todavía NO subido al servidor) — por eso classificationDryRun
+  // lo manda como multipart, no por file_id. Se resetea cada vez que se
+  // cambia algún campo del override para no mostrar un resultado viejo.
+  const [dryRunRunning, setDryRunRunning] = useState(false);
+  const [dryRunResult, setDryRunResult] = useState<ClassificationDryRunResult | null>(null);
+  const [dryRunError, setDryRunError] = useState<string | null>(null);
+
+  const handleDryRun = async () => {
+    if (!fileAwaitingContext || !overrideManualFields.code_property_name) return;
+    setDryRunRunning(true);
+    setDryRunError(null);
+    setDryRunResult(null);
+    try {
+      const result = await classificationDryRun(projectId, fileAwaitingContext, {
+        property_prefix: overridePrefixMode === 'custom' ? (overridePrefix || undefined) : (projectConfig?.property_prefix ?? undefined),
+        code_property_set: overrideManualFields.code_property_set || undefined,
+        code_property_name: overrideManualFields.code_property_name,
+        description_property_set: overrideManualFields.description_property_set || undefined,
+        description_property_name: overrideManualFields.description_property_name || undefined,
+        unit_property_set: overrideManualFields.unit_property_set || undefined,
+        unit_property_name: overrideManualFields.unit_property_name || undefined,
+      });
+      setDryRunResult(result);
+    } catch (err: any) {
+      setDryRunError(err.message || 'Error al probar la configuración.');
+    } finally {
+      setDryRunRunning(false);
+    }
+  };
+
+  // Cualquier cambio en los campos manuales o el prefijo deja el último
+  // resultado de "Probar" desactualizado.
+  useEffect(() => {
+    setDryRunResult(null);
+    setDryRunError(null);
+  }, [overrideManualFields, overridePrefixMode, overridePrefix]);
+
   // Fase 4 — modal de configuración
   const [showConfigModal, setShowConfigModal] = useState(false);
   const [partidasRefreshKey, setPartidasRefreshKey] = useState(0);
@@ -270,6 +322,8 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
     setOverridePrefixMode('project');
     setOverridePrefix('');
     setProjectConfig(null);
+    setDryRunResult(null);
+    setDryRunError(null);
   };
 
   const isDocumentContextReady =
@@ -427,7 +481,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
       } catch (err: any) {
         console.error('Error al procesar el archivo IFC:', err);
         setPanelStatus('error');
-        setPanelErrorMessage(err.message || 'Error al subir/procesar el archivo.');
+        setPanelErrorMessage(friendlyIfcErrorMessage(err));
       }
     },
     [projectId]
@@ -708,14 +762,14 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
         className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors text-left"
       >
         <HardDrive size={16} className="text-[#0056b3]" />
-        Local
+        nuevo archivo
       </button>
       <button
         onClick={openLoadedModal}
         className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded text-sm font-medium text-slate-700 hover:bg-slate-100 transition-colors text-left"
       >
         <CloudDownload size={16} className="text-[#0056b3]" />
-        Ya está cargado
+        mis archivos
       </button>
     </div>
   );
@@ -758,6 +812,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                 projectId={projectId}
                 viewCubeRightOffset={panelOpen ? panelWidth : 0}
                 viewCubeVisible={isActive}
+                isActive={isActive}
               />
             ) : (
               <div className="relative z-10 text-center flex flex-col items-center gap-4 px-6">
@@ -982,7 +1037,21 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
 
           </div>
 
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[9700] flex items-center bg-white/95 backdrop-blur-md border border-gray-200 rounded shadow-xl px-0.5 py-0.5">
+          {/* Centrada en el área VISIBLE del visor, no en el ancho total del
+              contenedor: el panel de metrados es absolute con right:0 y no
+              achica el visor por flex, así que sin este cálculo la barra
+              queda corrida hacia la derecha cuando el panel está abierto o
+              se agranda. Mismo criterio que viewCubeRightOffset (línea de
+              arriba, IFCViewer) para el ViewCube. */}
+          <div
+            className={`absolute bottom-6 z-[9700] flex items-center bg-white/95 backdrop-blur-md border border-gray-200 rounded shadow-xl px-0.5 py-0.5 ${
+              isResizing ? '' : 'transition-[left] duration-300 ease-in-out'
+            }`}
+            style={{
+              left: panelOpen ? `calc(50% - ${panelWidth / 2}px)` : '50%',
+              transform: 'translateX(-50%)',
+            }}
+          >
 
             <div className="relative">
               <button
@@ -1273,7 +1342,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                     onChange={() => setDocumentMode('new')}
                     className="text-[#0056b3] focus:ring-[#0056b3]"
                   />
-                  <span className="text-sm font-semibold text-slate-800">Documento nuevo</span>
+                  <span className="text-sm font-semibold text-slate-800">Archivo nuevo</span>
                 </div>
 
                 {documentMode === 'new' && (
@@ -1322,7 +1391,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                     onChange={() => setDocumentMode('version')}
                     className="text-[#0056b3] focus:ring-[#0056b3]"
                   />
-                  <span className="text-sm font-semibold text-slate-800">Nueva versión de un documento existente</span>
+                  <span className="text-sm font-semibold text-slate-800">Nueva versión de un archivo existente</span>
                 </div>
 
                 {documentMode === 'version' && (
@@ -1454,6 +1523,68 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                           placeholder="Propiedad de unidad"
                           className="flex-1 px-3 py-1.5 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
                         />
+                      </div>
+
+                      {/* "Probar" (dry-run) — corre el mapeo contra ESTE
+                          mismo archivo que se está por subir, sin
+                          guardarlo ni comprometerse a procesarlo. */}
+                      <div className="pt-1">
+                        <button
+                          type="button"
+                          onClick={handleDryRun}
+                          disabled={dryRunRunning || !overrideManualFields.code_property_name || !fileAwaitingContext}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-colors ${
+                            dryRunRunning || !overrideManualFields.code_property_name || !fileAwaitingContext
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                              : 'bg-white text-[#0056b3] border border-[#0056b3]/40 hover:bg-blue-50'
+                          }`}
+                        >
+                          {dryRunRunning ? (
+                            <Loader2 size={13} className="animate-spin" />
+                          ) : (
+                            <FlaskConical size={13} />
+                          )}
+                          {dryRunRunning ? 'Probando...' : 'Probar'}
+                        </button>
+
+                        {dryRunError && (
+                          <p className="mt-2 text-xs text-red-600">{dryRunError}</p>
+                        )}
+
+                        {dryRunResult && (
+                          <div className="mt-2.5 bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                            <p className="text-xs text-slate-700">
+                              <span className="font-semibold text-slate-800">
+                                {dryRunResult.elementos_con_codigo}
+                              </span>{' '}
+                              de <span className="font-semibold text-slate-800">{dryRunResult.elementos_totales}</span>{' '}
+                              elementos encontraron código con esta configuración
+                              {dryRunResult.elementos_sin_codigo > 0 && (
+                                <span className="text-amber-600">
+                                  {' '}
+                                  ({dryRunResult.elementos_sin_codigo} sin código)
+                                </span>
+                              )}
+                              .
+                            </p>
+                            {dryRunResult.ejemplos.length > 0 && (
+                              <div className="space-y-1">
+                                <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
+                                  Ejemplos
+                                </p>
+                                <ul className="text-[11px] text-slate-600 space-y-0.5">
+                                  {dryRunResult.ejemplos.slice(0, 5).map((ej, i) => (
+                                    <li key={i} className="truncate">
+                                      <span className="font-mono text-slate-700">{ej.codigo}</span>
+                                      {ej.descripcion ? ` — ${ej.descripcion}` : ''}
+                                      {ej.unidad ? ` (${ej.unidad})` : ''}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}

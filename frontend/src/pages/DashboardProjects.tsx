@@ -1,5 +1,5 @@
 // .. pages/DashboardProjects.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Upload, FileText, AlertCircle, 
@@ -24,6 +24,7 @@ import InicioTab from '../components/tabs/InicioTab';
 import ColaboradoresTab from "../components/tabs/ColaboradoresTab";
 import ArchivosTab from "../components/tabs/ArchivosTab";
 import Visor3DTab from "../components/tabs/Visor3DTab";
+import { getEstadoElementos, EstadoElementosResult } from '../services/ifcfiles.service';
 
 const DashboardProjects: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +33,13 @@ const DashboardProjects: React.FC = () => {
   const { fetchProjectById, uploadIFC, updateProject, loading, error } = useProjects();
 
   const [project, setProject] = useState<Project | null>(null);
+  // "Verificación de elementos" (Inicio) — Consolidación punto 1.a.
+  // null = todavía no cargó, o el usuario no tiene acceso 'view' al
+  // módulo Metrados en este proyecto (403 esperado, ej. el módulo no
+  // está activo acá), o el proyecto no tiene ningún elemento cargado
+  // todavía. Ninguno de esos casos es un error visible — InicioTab ya
+  // oculta la sección entera cuando esto es null.
+  const [estadoElementos, setEstadoElementos] = useState<EstadoElementosResult | null>(null);
   const [ifcFiles, setIfcFiles] = useState<IFCFile[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('modulos');
   const [showModulos, setShowModulos] = useState(false);
@@ -111,6 +119,27 @@ const DashboardProjects: React.FC = () => {
     loadProject();
   }, [id, fetchProjectById]);
 
+  // Independiente de loadProject de arriba a propósito: si esto falla
+  // (403 por no tener acceso al módulo Metrados, proyecto sin ese
+  // módulo activo, etc.) no debe tumbar la carga del proyecto en sí —
+  // solo la sección "Verificación de elementos" de Inicio queda
+  // oculta.
+  const refreshEstadoElementos = useCallback(() => {
+    if (!id) {
+      setEstadoElementos(null);
+      return;
+    }
+    const projectId = parseInt(id);
+    getEstadoElementos(projectId)
+      .then((data) => setEstadoElementos(data))
+      .catch(() => setEstadoElementos(null));
+  }, [id]);
+
+  useEffect(() => {
+    refreshEstadoElementos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   const handleModuloToggle = (moduloId: string) => {
     setSelectedModulos(prev =>
       prev.includes(moduloId) ? [] : [moduloId]
@@ -161,6 +190,13 @@ const DashboardProjects: React.FC = () => {
       setSavingInfo(false);
     }
   };
+
+  // NOTA: todavía no existe un endpoint en el backend para activar/
+  // desactivar especialidades del proyecto. Mientras tanto, InicioTab
+  // no recibe onToggleSpecialty y muestra los chips de especialidad en
+  // modo solo lectura. Cuando exista el endpoint, agregar acá un
+  // handler que llame a projectService y pasarlo como
+  // onToggleSpecialty={handleToggleSpecialty} más abajo.
 
   // El tab de Colaboradores es visible para TODOS los miembros del
   // proyecto (owner e invitados) — quién puede invitar/gestionar vs. solo
@@ -347,8 +383,6 @@ const DashboardProjects: React.FC = () => {
         {activeTab === 'inicio' && (
   <InicioTab
     project={project}
-    
-
     canActuallyEdit={canActuallyEdit}
     isEditingInfo={isEditingInfo}
     savingInfo={savingInfo}
@@ -362,6 +396,8 @@ const DashboardProjects: React.FC = () => {
       setConfirmedModuloId(null);
       setActiveTab('modulos');
     }}
+    estadoElementos={estadoElementos}
+    onConfigSaved={refreshEstadoElementos}
   />
 )}
    {activeTab === 'archivos' && (

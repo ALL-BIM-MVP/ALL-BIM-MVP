@@ -30,6 +30,8 @@ interface UseModelLoaderOptions {
   onFrame?: (dt: number) => void;
   getClearColor?: () => [number, number, number, number];
   getSectionPlane?: () => any;
+
+  isActive?: boolean;
 }
 
 export function useModelLoader(
@@ -38,7 +40,10 @@ export function useModelLoader(
   options: UseModelLoaderOptions = {}
 ) {
   const { canvasRef, containerRef, rendererRef, storeRef, modelBoundsRef } = refs;
-  const { onFrame, getClearColor, getSectionPlane } = options;
+  const { onFrame, getClearColor, getSectionPlane, isActive = true } = options;
+
+  const isActiveRef = useRef(isActive);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,6 +145,14 @@ export function useModelLoader(
               let lastTime = performance.now();
               const renderLoop = () => {
                 if (!isMounted || !controller) return;
+
+                
+                if (!isActiveRef.current) {
+                  lastTime = performance.now();
+                  rafId = requestAnimationFrame(renderLoop);
+                  return;
+                }
+
                 const now = performance.now();
                 const dt = Math.min((now - lastTime) / 1000, 0.1);
                 lastTime = now;

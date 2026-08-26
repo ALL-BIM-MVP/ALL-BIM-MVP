@@ -13,10 +13,7 @@ interface ClassificationConfigModalProps {
   projectId: number;
   onClose: () => void;
   onSaved?: () => void;
-  // Quien no es admin/owner del proyecto (ni tiene el rol de
-  // Administrador en el módulo Metrados) puede abrir esto para VER cómo
-  // está configurado, pero no para cambiarlo — todos los controles
-  // quedan deshabilitados y no hay botón de Guardar.
+ 
   readOnly?: boolean;
 }
 
@@ -187,7 +184,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
           {/* Sección 1: Cómo agrupar */}
           <div className="space-y-3">
             <h4 className="text-sm font-semibold text-slate-800">Cómo agrupar los elementos</h4>
-            
+
             <div className="space-y-2">
               <label className="flex items-start gap-2.5 cursor-pointer">
                 <input
@@ -319,7 +316,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
           {/* Sección 2: Prefijo de propiedades */}
           <div className="space-y-3">
             <h4 className="text-sm font-semibold text-slate-800">Qué propiedades capturar</h4>
-            
+
             <div>
               <label className="block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1">
                 Prefijo de propiedades (opcional)

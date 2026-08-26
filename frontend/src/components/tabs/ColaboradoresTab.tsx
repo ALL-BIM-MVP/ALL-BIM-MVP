@@ -754,7 +754,14 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
                             onChange={(e) => handleModuleRoleChange(m.code, Number(e.target.value))}
                             className="px-2 py-1.5 border border-gray-200 rounded-md text-sm outline-none focus:ring-2 focus:ring-[#0056b3] bg-white"
                           >
-                            <option value={0}>Solo ver (defecto)</option>
+                            {/* No es un 4to rol: "Visualizador" ya ES el
+                                mínimo "solo ver" (mismo permiso view-only
+                                que el default implícito del backend cuando
+                                no se asigna ningún rol, ver
+                                project-access.service.ts). Placeholder no
+                                elegible, solo para que el select no
+                                arranque en "Administrador" por accidente. */}
+                            <option value={0} disabled hidden>Seleccionar rol...</option>
                             {(moduleRolesByCode[m.code] ?? []).map((role) => (
                               <option key={role.module_role_id} value={role.module_role_id}>
                                 {role.name}
