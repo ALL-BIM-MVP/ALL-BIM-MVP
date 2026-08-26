@@ -46,7 +46,9 @@ export interface ProjectMember {
   user_id: number;
   user_name: string;
   user_last_name: string | null;
-  user_email: string;
+  // OJO: el backend devuelve este campo como "email" (no "user_email"),
+  // ver ProjectMemberListItem en project-members.models.ts.
+  email: string;
   profile_picture_url: string | null;
   is_owner: boolean;
   is_admin: boolean;

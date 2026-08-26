@@ -160,6 +160,81 @@ function classifyElements() {
   return { shellIds, detailIds, typeGroups, expressIdToType };
 }
 
+function refId(ref: any): number | null {
+  const id = ref?.value ?? ref;
+  return typeof id === 'number' ? id : null;
+}
+
+
+async function classifyLevels(expressIdToType: Map<number, string>): Promise<{ type: string; ids: number[] }[]> {
+  const byLevel = new Map<string, number[]>();
+  const assigned = new Set<number>();
+
+  try {
+    // 1) Nombre de cada piso del modelo.
+    const storeyNameById = new Map<number, string>();
+    for (const storeyId of api!.GetLineIDsWithType(modelID, WebIFC.IFCBUILDINGSTOREY)) {
+      let name = `Nivel #${storeyId}`;
+      try {
+        const line = api!.GetLine(modelID, storeyId);
+        name = line?.Name?.value || name;
+      } catch { /* nombre por defecto */ }
+      storeyNameById.set(storeyId, name);
+    }
+
+    // 2) A qué piso pertenece cada IfcSpace (piso -> espacios, vía
+    //    IfcRelAggregates) — para resolver el salto del punto 3.
+    const storeyOfSpace = new Map<number, number>();
+    if (storeyNameById.size > 0) {
+      for (const relId of api!.GetLineIDsWithType(modelID, WebIFC.IFCRELAGGREGATES)) {
+        try {
+          const rel = api!.GetLine(modelID, relId);
+          const relatingId = refId(rel?.RelatingObject);
+          if (relatingId === null || !storeyNameById.has(relatingId)) continue;
+          for (const relatedRef of rel?.RelatedObjects || []) {
+            const relatedId = refId(relatedRef);
+            if (relatedId !== null) storeyOfSpace.set(relatedId, relatingId);
+          }
+        } catch { /* sigue */ }
+      }
+    }
+
+    // 3) La relación que realmente importa: qué elementos están
+    //    contenidos en cada estructura espacial.
+    for (const relId of api!.GetLineIDsWithType(modelID, WebIFC.IFCRELCONTAINEDINSPATIALSTRUCTURE)) {
+      try {
+        const rel = api!.GetLine(modelID, relId);
+        const structureId = refId(rel?.RelatingStructure);
+        if (structureId === null) continue;
+
+        const storeyId = storeyNameById.has(structureId) ? structureId : storeyOfSpace.get(structureId);
+        if (storeyId === undefined || storeyId === null) continue;
+        const name = storeyNameById.get(storeyId)!;
+
+        for (const relatedRef of rel?.RelatedElements || []) {
+          const id = refId(relatedRef);
+          if (id === null || !expressIdToType.has(id)) continue;
+          byLevel.set(name, (byLevel.get(name) ?? []).concat(id));
+          assigned.add(id);
+        }
+      } catch { /* sigue */ }
+    }
+  } catch (err) {
+    console.warn('[worker] No se pudo leer la estructura espacial (niveles):', err);
+  }
+
+  
+  const unassigned: number[] = [];
+  expressIdToType.forEach((_type, id) => {
+    if (!assigned.has(id)) unassigned.push(id);
+  });
+  if (unassigned.length > 0) {
+    byLevel.set('Sin nivel', (byLevel.get('Sin nivel') ?? []).concat(unassigned));
+  }
+
+  return Array.from(byLevel.entries()).map(([type, ids]) => ({ type, ids }));
+}
+
 function post(msg: any, transfer: Transferable[] = []) {
   (self as any).postMessage(msg, transfer);
 }
@@ -179,6 +254,7 @@ async function handleOpenModel(buffer: ArrayBuffer, reqId: string) {
   post({ type: 'progress', reqId, percent: 45, label: 'Generando geometría (estructura principal)...' });
 
   const { shellIds, detailIds, typeGroups, expressIdToType } = classifyElements();
+  const levelGroups = await classifyLevels(expressIdToType);
 
   const supportsTargetedStream = typeof (api as any).StreamMeshes === 'function';
   const shellColorGroups = new Map<string, ColorGroup>();
@@ -201,6 +277,7 @@ async function handleOpenModel(buffer: ArrayBuffer, reqId: string) {
     type: 'shellReady', reqId,
     shellMeshes: shellPayloads,
     typeGroups,
+    levelGroups,
     expressIdToTypeEntries: Array.from(expressIdToType.entries()),
   }, allTransfers);
 

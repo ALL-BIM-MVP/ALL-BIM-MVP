@@ -1,5 +1,5 @@
 // .. pages/DashboardProjects.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   Upload, FileText, AlertCircle, 
@@ -11,7 +11,7 @@ import {
   MapPin, CalendarBlank, PencilSimple, CheckCircle, WarningCircle, ClipboardText
 } from '@phosphor-icons/react';
 import fondoImage from '../assets/inicio.jpg';
-import logo from '../assets/logo3.png';
+import logo from '../assets/logo3.jpg';
 import IFCViewer from '../components/IFCViewer/IFCViewer';
 import { MODULOS } from '../constants/modulos';
 import { Project, IFCFile, TabType } from '../types/project.types';
@@ -24,6 +24,7 @@ import InicioTab from '../components/tabs/InicioTab';
 import ColaboradoresTab from "../components/tabs/ColaboradoresTab";
 import ArchivosTab from "../components/tabs/ArchivosTab";
 import Visor3DTab from "../components/tabs/Visor3DTab";
+import { getEstadoElementos, EstadoElementosResult } from '../services/ifcfiles.service';
 
 const DashboardProjects: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +33,13 @@ const DashboardProjects: React.FC = () => {
   const { fetchProjectById, uploadIFC, updateProject, loading, error } = useProjects();
 
   const [project, setProject] = useState<Project | null>(null);
+  // "Verificación de elementos" (Inicio) — Consolidación punto 1.a.
+  // null = todavía no cargó, o el usuario no tiene acceso 'view' al
+  // módulo Metrados en este proyecto (403 esperado, ej. el módulo no
+  // está activo acá), o el proyecto no tiene ningún elemento cargado
+  // todavía. Ninguno de esos casos es un error visible — InicioTab ya
+  // oculta la sección entera cuando esto es null.
+  const [estadoElementos, setEstadoElementos] = useState<EstadoElementosResult | null>(null);
   const [ifcFiles, setIfcFiles] = useState<IFCFile[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('modulos');
   const [showModulos, setShowModulos] = useState(false);
@@ -111,6 +119,27 @@ const DashboardProjects: React.FC = () => {
     loadProject();
   }, [id, fetchProjectById]);
 
+  // Independiente de loadProject de arriba a propósito: si esto falla
+  // (403 por no tener acceso al módulo Metrados, proyecto sin ese
+  // módulo activo, etc.) no debe tumbar la carga del proyecto en sí —
+  // solo la sección "Verificación de elementos" de Inicio queda
+  // oculta.
+  const refreshEstadoElementos = useCallback(() => {
+    if (!id) {
+      setEstadoElementos(null);
+      return;
+    }
+    const projectId = parseInt(id);
+    getEstadoElementos(projectId)
+      .then((data) => setEstadoElementos(data))
+      .catch(() => setEstadoElementos(null));
+  }, [id]);
+
+  useEffect(() => {
+    refreshEstadoElementos();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
   const handleModuloToggle = (moduloId: string) => {
     setSelectedModulos(prev =>
       prev.includes(moduloId) ? [] : [moduloId]
@@ -161,6 +190,13 @@ const DashboardProjects: React.FC = () => {
       setSavingInfo(false);
     }
   };
+
+  // NOTA: todavía no existe un endpoint en el backend para activar/
+  // desactivar especialidades del proyecto. Mientras tanto, InicioTab
+  // no recibe onToggleSpecialty y muestra los chips de especialidad en
+  // modo solo lectura. Cuando exista el endpoint, agregar acá un
+  // handler que llame a projectService y pasarlo como
+  // onToggleSpecialty={handleToggleSpecialty} más abajo.
 
   // El tab de Colaboradores es visible para TODOS los miembros del
   // proyecto (owner e invitados) — quién puede invitar/gestionar vs. solo
@@ -217,18 +253,18 @@ const DashboardProjects: React.FC = () => {
     <div className="min-h-screen bg-gray-50">
 
       {/* HEADER */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-[10000]">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between h-14">
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => navigate('/dashboard/projects')}
-                  className="-ml-2 w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#0056b3] hover:bg-blue-50 transition-colors flex-shrink-0"
+                  className="-ml-9 w-10 h-10 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#0056b3] hover:bg-blue-50 transition-colors flex-shrink-0"
                   title="Volver a Proyectos"
                   aria-label="Volver a Proyectos"
                 >
-                  <ArrowLeft size={18} />
+                  <ArrowLeft size={22} />
                 </button>
                 <img src={logo} alt="Logo ALL-BIM" className="h-11 w-auto" />
                 <span className="text-2xl font-black text-[#0056b3]"></span>
@@ -330,19 +366,13 @@ const DashboardProjects: React.FC = () => {
         </div>
       </header>
 
-      {/* CONTENIDO */}
-      {/* Visor3DTab se monta la primera vez que se visita el tab, y a
-          partir de ahí NUNCA se desmonta al cambiar de tab — solo se
-          oculta con display:none. Antes esto vivía en un ternario
-          (activeTab === 'visor3d' ? <Visor3DTab/> : <otros tabs/>), que
-          desmontaba el componente por completo cada vez que se salía del
-          tab, perdiendo el IFC cargado, la escena 3D y la cámara. */}
+    
       {hasEnteredVisor3D && (
         <div
           className="fixed left-0 right-0 bottom-0 top-14 z-0"
           style={{ display: activeTab === 'visor3d' ? 'block' : 'none' }}
         >
-          <Visor3DTab projectId={project?.project_id || 0} />
+          <Visor3DTab projectId={project?.project_id || 0} isActive={activeTab === 'visor3d'} />
         </div>
       )}
 
@@ -353,8 +383,6 @@ const DashboardProjects: React.FC = () => {
         {activeTab === 'inicio' && (
   <InicioTab
     project={project}
-    
-
     canActuallyEdit={canActuallyEdit}
     isEditingInfo={isEditingInfo}
     savingInfo={savingInfo}
@@ -368,6 +396,8 @@ const DashboardProjects: React.FC = () => {
       setConfirmedModuloId(null);
       setActiveTab('modulos');
     }}
+    estadoElementos={estadoElementos}
+    onConfigSaved={refreshEstadoElementos}
   />
 )}
    {activeTab === 'archivos' && (
@@ -377,10 +407,7 @@ const DashboardProjects: React.FC = () => {
     currentUserId={user?.id}
   />
 )}
-        {/* Visible para cualquier miembro del proyecto (owner o invitado).
-            ColaboradoresTab decide internamente qué mostrar según isOwner
-            (el owner ve invitar/gestionar; el resto solo ve la lista de
-            miembros) — por eso ya NO se filtra acá con "&& isOwner". */}
+        
         {activeTab === 'colaboradores' && (
           <ColaboradoresTab onClose={() => setActiveTab('inicio')} 
           projectId={project?.project_id || 0} 

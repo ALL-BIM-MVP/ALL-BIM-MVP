@@ -81,11 +81,25 @@ class OrbitCameraController {
     this.animT = 0;
   }
 
-  flyToPoint(point: { x: number; y: number; z: number }, radius = 5) {
+  flyToPoint(point: { x: number; y: number; z: number }, radius = 5, instant = false) {
+    const targetVec = new THREE.Vector3(point.x, point.y, point.z);
+
+    if (instant) {
+      // Salto directo, sin animación — se corta cualquier vuelo en curso
+      // y se posiciona la cámara ya mismo, en el mismo frame.
+      this.animStart = null;
+      this.animEnd = null;
+      this.animT = 1;
+      this.target.copy(targetVec);
+      this.spherical.radius = Math.max(radius, 1);
+      this.syncFromSpherical();
+      return;
+    }
+
     this.animStart = { target: this.target.clone(), spherical: this.spherical.clone() };
     const endSpherical = this.spherical.clone();
     endSpherical.radius = Math.max(radius, 1);
-    this.animEnd = { target: new THREE.Vector3(point.x, point.y, point.z), spherical: endSpherical };
+    this.animEnd = { target: targetVec, spherical: endSpherical };
     this.animT = 0;
   }
 
@@ -108,6 +122,27 @@ class OrbitCameraController {
 
   setPosition(x: number, y: number, z: number) { this.camera.position.set(x, y, z); }
   setTarget(x: number, y: number, z: number) { this.camera.lookAt(x, y, z); }
+
+  getDistance() { return this.spherical.radius; }
+
+  // Reposiciona el target sin animación y sin tocar radius/theta/phi —
+  // usado por la compensación exacta del panel (applyPanelCompensation),
+  // que necesita mover el punto de mira sin cambiar el nivel de zoom.
+  recenter(x: number, y: number, z: number) {
+    this.target.set(x, y, z);
+    this.syncFromSpherical();
+  }
+
+  setFromWalkState(position: { x: number; y: number; z: number }, yaw: number, pitch: number, lookDist = 5) {
+    const targetX = position.x + Math.sin(yaw) * Math.cos(pitch) * lookDist;
+    const targetY = position.y + Math.sin(pitch) * lookDist;
+    const targetZ = position.z - Math.cos(yaw) * Math.cos(pitch) * lookDist;
+    this.target.set(targetX, targetY, targetZ);
+    this.spherical.setFromVector3(
+      new THREE.Vector3(position.x - targetX, position.y - targetY, position.z - targetZ)
+    );
+    this.syncFromSpherical();
+  }
 
   projectToScreen(point: { x: number; y: number; z: number }, canvasWidth: number, canvasHeight: number) {
     const v = new THREE.Vector3(point.x, point.y, point.z).project(this.camera);
@@ -191,13 +226,31 @@ export class ThreeSceneController {
   private applyGhostFlags() {
     for (const mesh of this.meshes) {
       const geom = mesh.geometry;
-      const expressIdAttr = geom.getAttribute('expressId') as THREE.BufferAttribute;
-      const ghostedAttr = geom.getAttribute('ghosted') as THREE.BufferAttribute;
-      for (let i = 0; i < expressIdAttr.count; i++) {
-        const id = expressIdAttr.getX(i);
-        ghostedAttr.setX(i, this.ghostedIds.has(id) ? 1 : 0);
+      const expressIdAttr = geom.getAttribute('expressId') as THREE.BufferAttribute | undefined;
+      const ghostedAttr = geom.getAttribute('ghosted') as THREE.BufferAttribute | undefined;
+    
+      if (expressIdAttr && ghostedAttr) {
+        for (let i = 0; i < expressIdAttr.count; i++) {
+          const id = expressIdAttr.getX(i);
+          ghostedAttr.setX(i, this.ghostedIds.has(id) ? 1 : 0);
+        }
+        ghostedAttr.needsUpdate = true;
       }
-      ghostedAttr.needsUpdate = true;
+
+      
+      const edges = mesh.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
+      if (edges) {
+        const edgeGhostedAttr = edges.geometry.getAttribute('ghosted') as THREE.BufferAttribute | undefined;
+        if (edgeGhostedAttr) {
+          const candidatesPerVertex = (edges.userData.candidateIdsPerVertex as number[][] | undefined) ?? [];
+          for (let i = 0; i < edgeGhostedAttr.count; i++) {
+            const candidates = candidatesPerVertex[i];
+            const isGhosted = !!candidates && candidates.length > 0 && candidates.every((id) => this.ghostedIds.has(id));
+            edgeGhostedAttr.setX(i, isGhosted ? 1 : 0);
+          }
+          edgeGhostedAttr.needsUpdate = true;
+        }
+      }
     }
   }
 
@@ -274,7 +327,13 @@ export class ThreeSceneController {
   setModelBounds(bounds: ModelBounds | null) { this.modelBounds = bounds; }
   getModelBounds() { return this.modelBounds; }
 
-  fitToView() { if (this.modelBounds) this.cameraController.fitToBounds(this.modelBounds); }
+  fitToView() {
+    if (this.modelBounds) {
+      this.cameraController.fitToBounds(this.modelBounds);
+
+      this.panelCompensationBaseTarget = this.cameraController.target.clone();
+    }
+  }
 
   resize(width: number, height: number) {
     this.renderer.setSize(width, height, false);
@@ -353,6 +412,27 @@ export class ThreeSceneController {
         selectedAttr.needsUpdate = true;
       }
     }
+  }
+
+  
+  setGroupSelectionWithDimming(ids: number[]) {
+    this.setSelection(ids);
+    // Con un solo elemento, es una selección normal — no se atenúa nada.
+    // La atenuación es exclusiva de GRUPOS de 2 o más.
+    if (ids.length < 2) {
+      this.clearGroupDimming();
+      return;
+    }
+    const groupSet = new Set(ids);
+    const allIds = Array.from(this.idToLocation.keys());
+    const ghosted = new Set(allIds.filter((id) => !groupSet.has(id)));
+    this.setGhostedEntities(ghosted);
+  }
+
+  
+  clearGroupDimming() {
+    if (this.ghostedIds.size === 0) return;
+    this.setGhostedEntities(new Set());
   }
 
   private ndcFromCanvasPixels(x: number, y: number) {
@@ -446,6 +526,82 @@ export class ThreeSceneController {
     );
   }
 
+
+  computeFlyToElementsTarget(expressIds: number[]): { center: THREE.Vector3; radius: number } | null {
+    if (expressIds.length === 0) return null;
+    const box = new THREE.Box3();
+    const tmp = new THREE.Vector3();
+    let found = false;
+
+    for (const expressId of expressIds) {
+      const locations = this.idToLocation.get(expressId);
+      if (!locations) continue;
+      for (const { mesh, start, end } of locations) {
+        const posAttr = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const matrixWorld = mesh.matrixWorld;
+        for (let i = start; i < end; i++) {
+          tmp.fromBufferAttribute(posAttr, i).applyMatrix4(matrixWorld);
+          box.expandByPoint(tmp);
+          found = true;
+        }
+      }
+    }
+    if (!found || box.isEmpty()) return null;
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const radius = Math.max(size.length() * 0.75, 1.5);
+    return { center, radius };
+  }
+
+  flyToElements(expressIds: number[], panelOffsetPx = 0) {
+    const result = this.computeFlyToElementsTarget(expressIds);
+    if (!result) return;
+
+    
+    const EXTRA_MARGIN_FACTOR = 1.2;
+    const radius = result.radius * EXTRA_MARGIN_FACTOR;
+
+    this.cameraController.flyToPoint(
+      { x: result.center.x, y: result.center.y, z: result.center.z },
+      radius,
+      true
+    );
+
+
+    this.panelCompensationBaseTarget = new THREE.Vector3(result.center.x, result.center.y, result.center.z);
+    this.applyPanelCompensation(panelOffsetPx);
+  }
+
+  private panelCompensationBaseTarget: THREE.Vector3 | null = null;
+
+  applyPanelCompensation(panelOffsetPx: number) {
+    if (!this.panelCompensationBaseTarget) return;
+
+    if (panelOffsetPx <= 0) {
+      const t = this.panelCompensationBaseTarget;
+      this.cameraController.recenter(t.x, t.y, t.z);
+      return;
+    }
+
+    const camera = this.cameraController.camera;
+    const distance = this.cameraController.getDistance();
+    const vFovRad = THREE.MathUtils.degToRad(camera.fov);
+    const visibleHeight = 2 * distance * Math.tan(vFovRad / 2);
+    const visibleWidth = visibleHeight * camera.aspect;
+    const canvasWidthPx = this.canvas.width || 1;
+    const worldPerPixel = visibleWidth / canvasWidthPx;
+    const shiftAmount = worldPerPixel * (panelOffsetPx / 2);
+
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    const forward = new THREE.Vector3();
+    camera.matrix.extractBasis(right, up, forward);
+
+    const shiftedTarget = this.panelCompensationBaseTarget.clone().addScaledVector(right, shiftAmount);
+    this.cameraController.recenter(shiftedTarget.x, shiftedTarget.y, shiftedTarget.z);
+  }
+
   getElementsBlockingView(cameraPosition: THREE.Vector3, targetCenter: THREE.Vector3, excludeExpressId: number): number[] {
     const direction = targetCenter.clone().sub(cameraPosition);
     const distanceToTarget = direction.length();
@@ -467,6 +623,105 @@ export class ThreeSceneController {
       if (id !== null && id !== excludeExpressId) blockingIds.add(id);
     }
     return Array.from(blockingIds);
+  }
+
+  
+  private walkThroughBoxes: THREE.Box3[] = [];
+
+  setWalkThroughEntities(ids: Set<number>) {
+    const boxes: THREE.Box3[] = [];
+    const tmp = new THREE.Vector3();
+    for (const id of ids) {
+      const locations = this.idToLocation.get(id);
+      if (!locations) continue;
+      const box = new THREE.Box3();
+      for (const { mesh, start, end } of locations) {
+        const posAttr = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+        const matrixWorld = mesh.matrixWorld;
+        for (let i = start; i < end; i++) {
+          tmp.fromBufferAttribute(posAttr, i).applyMatrix4(matrixWorld);
+          box.expandByPoint(tmp);
+        }
+      }
+      if (!box.isEmpty()) {
+        box.expandByScalar(0.15);
+        boxes.push(box);
+      }
+    }
+    this.walkThroughBoxes = boxes;
+  }
+
+  private isPointWalkThrough(point: THREE.Vector3): boolean {
+    for (const box of this.walkThroughBoxes) {
+      if (box.containsPoint(point)) return true;
+    }
+    return false;
+  }
+
+  checkWalkCollision(
+    from: { x: number; y: number; z: number },
+    dirX: number,
+    dirZ: number,
+    distance: number,
+    radius = 0.35
+  ): number {
+    if (distance <= 0) return 0;
+    const direction = new THREE.Vector3(dirX, 0, dirZ);
+    if (direction.lengthSq() < 1e-10) return distance;
+    direction.normalize();
+
+    const origin = new THREE.Vector3(from.x, from.y, from.z);
+    this.raycaster.set(origin, direction);
+    this.raycaster.far = distance + radius;
+    const hits = this.raycaster.intersectObjects(this.meshes, false);
+    this.raycaster.far = Infinity;
+
+    const hit = hits.find((h) => {
+      if (!h.object.visible || h.faceIndex === undefined) return false;
+      if (this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)) return false;
+      if (this.walkThroughBoxes.length > 0 && this.isPointWalkThrough(h.point)) return false;
+      return true;
+    });
+    if (!hit) return distance;
+
+    const safeDistance = Math.max(0, hit.distance - radius);
+    return Math.min(distance, safeDistance);
+  }
+
+  
+  findFloorHeight(x: number, z: number, referenceY?: number, maxDelta = 2.5): number | null {
+    if (!this.modelBounds) return null;
+    const fromY = this.modelBounds.max.y + 5; // bien arriba de todo, con margen
+    const origin = new THREE.Vector3(x, fromY, z);
+    const direction = new THREE.Vector3(0, -1, 0);
+
+    this.raycaster.set(origin, direction);
+    this.raycaster.far = Infinity;
+    const hits = this.raycaster.intersectObjects(this.meshes, false);
+
+    const validHits = hits.filter(
+      (h) =>
+        h.object.visible &&
+        h.faceIndex !== undefined &&
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+    );
+    if (validHits.length === 0) return null;
+
+    if (referenceY === undefined) {
+
+      return validHits[0].point.y;
+    }
+
+    let best = validHits[0];
+    let bestDiff = Math.abs(best.point.y - referenceY);
+    for (const h of validHits) {
+      const diff = Math.abs(h.point.y - referenceY);
+      if (diff < bestDiff) {
+        best = h;
+        bestDiff = diff;
+      }
+    }
+    return bestDiff <= maxDelta ? best.point.y : null;
   }
 
   async pick(x: number, y: number) {
@@ -598,19 +853,6 @@ export class ThreeSceneController {
     return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null };
   }
 
-  // Cruz de ejes de la cara golpeada: dos brazos tangentes a la cara (u, v) que
-  // llegan hasta su borde real, más un tercer brazo perpendicular que sale hacia
-  // el lado VISIBLE (el que mira la cámara) y busca si hay otro elemento ahí
-  // adelante — como un láser de profundidad. Si no hay nada, ese brazo es null.
-  //
-  // fast=true (usado durante el ARRASTRE en vivo, una vez por frame) hace
-  // DOS recortes para que sea barato en elementos con muchos triángulos:
-  // 1) salta el recorrido de todos los triángulos del elemento para armar
-  //    el contorno exacto de la cara — usa directo el triángulo golpeado
-  //    como aproximación (igual de liviano que el snap de la medición).
-  // 2) salta el raycast extra de profundidad (recorre TODO el modelo).
-  // Al soltar el mouse se llama una vez más con fast=false para el
-  // resultado final, exacto en ambos aspectos.
   raycastFaceCross(cssX: number, cssY: number, fast = false): {
     center: { x: number; y: number; z: number };
     normal: { x: number; y: number; z: number };
@@ -677,14 +919,6 @@ export class ThreeSceneController {
     type Tri = { a: number; b: number; c: number };
     const coplanarTris: Tri[] = [];
 
-    // fast=true (durante el arrastre en vivo): saltea el recorrido de
-    // TODOS los triángulos del elemento — en un elemento con miles de
-    // triángulos (ej. una losa grande) ese loop es el costo real por
-    // frame, no el raycast de profundidad. Se usa directo el triángulo
-    // que golpeó el rayo como aproximación de la cara (igual de rápido
-    // que la medición simple, que también trabaja solo cerca del punto).
-    // Al soltar el mouse se recalcula completo (fast=false) para que el
-    // contorno de la cara quede exacto, no aproximado.
     if (fast) {
       coplanarTris.push({ a: va0, b: vb0, c: vc0 });
     } else {
@@ -779,9 +1013,6 @@ export class ThreeSceneController {
       return { x: p.x, y: p.y, z: p.z };
     };
 
-    // 3er eje (profundidad): el raycast más caro de toda la función,
-    // porque vuelve a intersectar TODO el modelo (this.meshes) desde
-    // cero. Se saltea completo cuando fast=true.
     let depthPos: { x: number; y: number; z: number } | null = null;
     if (!fast) {
       const DEPTH_EPS = 1e-4;
@@ -893,7 +1124,7 @@ export class ThreeSceneController {
     }
 
     const sp = opts.sectionPlane;
-    const kind = sp?.kind ?? 'axis'; // compat: llamadas viejas sin 'kind' siguen siendo por ejes
+    const kind = sp?.kind ?? 'axis';
 
     if (sp?.enabled && kind === 'axis' && this.modelBounds) {
       const newPlane = this.buildAxisClipPlane(sp);
@@ -944,10 +1175,6 @@ export class ThreeSceneController {
     return new THREE.Plane().setFromNormalAndCoplanarPoint(normal, pointOnPlane);
   }
 
-  // Corte orientado al elemento (tipo Dalux): en vez de un eje fijo global,
-  // la normal viene de la cara del elemento donde se agarró la tijera.
-  // 'offset' es cuánto se desplazó esa tijera a lo largo de esa normal
-  // (arrastre del usuario), en unidades del modelo.
   private buildElementClipPlane(section: {
     origin: { x: number; y: number; z: number };
     normal: { x: number; y: number; z: number };

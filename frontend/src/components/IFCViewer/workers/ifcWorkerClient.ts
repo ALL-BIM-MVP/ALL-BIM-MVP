@@ -12,7 +12,7 @@ export class IfcWorkerClient {
     buffer: ArrayBuffer,
     callbacks: {
       onProgress?: (percent: number, label: string) => void;
-      onShellReady: (data: { shellMeshes: any[]; typeGroups: any[]; expressIdToTypeEntries: [number, string][] }) => void;
+      onShellReady: (data: { shellMeshes: any[]; typeGroups: any[]; levelGroups: any[]; expressIdToTypeEntries: [number, string][] }) => void;
       onDetailMesh?: (mesh: any) => void;
       onDetailDone?: () => void;
     }

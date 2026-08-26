@@ -38,7 +38,9 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl w-[500px] max-h-[90vh] overflow-y-auto p-8 shadow-2xl animate-floatIn">
+
+      <div className="bg-white rounded-2xl w-[500px] max-h-[90vh] overflow-hidden shadow-2xl animate-floatIn flex flex-col">
+        <div className="overflow-y-auto p-8">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-2xl font-bold text-gray-800">Nuevo Proyecto</h3>
           <button 
@@ -158,6 +160,7 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({
             </button>
           </div>
         </form>
+        </div>
       </div>
     </div>
   );

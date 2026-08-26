@@ -9,6 +9,18 @@ export interface CoverImage {
   url: string;
 }
 
+
+export interface ProjectSpecialtySummary {
+  specialty_code: string;
+  specialty_name: string;
+  count: number;
+}
+
+export interface ProjectFilesSummary {
+  file_type: string;
+  count: number;
+}
+
 export interface Project {
   project_id: number;
   name: string;
@@ -28,6 +40,8 @@ export interface Project {
   client: string | null;
   contractor: string | null;
   cover_image: CoverImage;
+  specialties_summary?: ProjectSpecialtySummary[];
+  files_summary?: ProjectFilesSummary[];
 }
 
 export interface ProjectFileUploader {
@@ -48,6 +62,12 @@ export interface ProjectFile {
   uploaded_at: string;
   uploaded_by: ProjectFileUploader;
   processed?: boolean;
+  ifc_document_id?: string | null;
+  ifc_document_name?: string | null;
+  version_number?: number | null;
+  is_current?: boolean | null;
+  specialty_code?: string | null;
+  specialty_name?: string | null;
 }
 
 export interface IFCFile {

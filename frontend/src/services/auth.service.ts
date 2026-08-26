@@ -10,21 +10,43 @@ export const getCurrentUser = async (): Promise<User> => {
 export const userService = {
   async getUsers(): Promise<User[]> {
     return await api.get("/api/users");
-  }
+  },
+  // DELETE /api/users/:userId — solo ADMINISTRADOR, nunca sobre uno
+  // mismo (el backend lo rechaza igual, ver CANNOT_TARGET_SELF). Baja
+  // directa (is_deleted=true), no reversible desde acá.
+  async deleteUser(userId: number): Promise<void> {
+    await api.delete(`/api/users/${userId}`);
+  },
+  // PATCH /api/users/:userId/active — solo ADMINISTRADOR, nunca sobre
+  // uno mismo. A diferencia de deleteUser, es reversible: se puede
+  // volver a togglear en cualquier sentido.
+  async setUserActive(userId: number, active: boolean): Promise<void> {
+    await api.patch(`/api/users/${userId}/active`, { active });
+  },
 };
 // 1. Login
-export const loginUser = async (credentials: { 
+export const loginUser = async (credentials: {
   email: string;
-  password: string;   
+  password: string;
 }) => {
   return await api.post('/api/auth/login', credentials);
-  
+
+};
+
+// 1b. Logout — revoca el refresh token del lado del backend (lo marca
+// active=false en la tabla refresh_tokens). Sin esto, cerrar sesión solo
+// borraba el token del localStorage: el refresh token seguía siendo
+// válido hasta su expiración natural (7 días) aunque alguien lo hubiera
+// robado y el usuario ya hubiera "cerrado sesión".
+export const logoutUser = async (refreshToken: string): Promise<void> => {
+  await api.post('/api/auth/logout', { refresh_token: refreshToken });
 };
 
 // 2. Registrar usuario con invitación
 export const registerUser = async (data: {
   token: string;
   name: string;
+  last_name?: string;
   password: string;
 }) => {
   return await api.post('/api/users/register', data);

@@ -3,12 +3,20 @@
 // al mismo default de siempre.
 export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
+// AppError del backend siempre manda { code, message } — antes acá se
+// tiraba el "code" y solo quedaba el mensaje, así que ningún lado del
+// frontend podía diferenciar errores puntuales (ej. IFC_INVALID_CONTENT
+// vs cualquier otro 4xx) sin comparar el texto del mensaje a mano. Ahora
+// el Error que se tira trae ambos: err.message de siempre, y err.code
+// nuevo para quien lo necesite.
 const parseResponse = async (response: Response) => {
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {
     if (contentType.includes('application/json')) {
       const errorData = await response.json();
-      throw new Error(errorData.message || 'Error en la petición');
+      const err: Error & { code?: string } = new Error(errorData.message || 'Error en la petición');
+      err.code = errorData.code;
+      throw err;
     }
     throw new Error('Error en la petición');
   }

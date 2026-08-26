@@ -10,12 +10,16 @@ import { projectService } from '../../services/project.service';
 interface IFCViewerProps {
   fileBuffer: ArrayBuffer | null;
   projectId?: number;
+  viewCubeVisible?: boolean;
   onFileUploaded?: () => void;
-  // Cuánto restarle a la posición horizontal del ViewCube, en píxeles —
-  // pasar el ancho del panel lateral superpuesto (ej. Metrados) para que
-  // el cubo no quede tapado y se deslice junto con el panel al abrirlo,
-  // cerrarlo, o cambiar su ancho. 0 (default) si no hay panel superpuesto.
+
   viewCubeRightOffset?: number;
+  // Cuando es false (el tab del visor no es el que se está mirando, ej.
+  // estás en Inicio/Archivos/Colaboradores), el loop de renderizado 3D
+  // se pausa — sin esto quedaba corriendo para siempre de fondo aunque
+  // el canvas estuviera oculto (display:none no lo frena solo), gastando
+  // CPU/GPU en cada frame y frenando el scroll de las demás pestañas.
+  isActive?: boolean;
 }
 
 export interface IFCViewerHandle {
@@ -24,6 +28,7 @@ export interface IFCViewerHandle {
   isolateElementsByIds: (expressIds: number[]) => void;
   selectGroupInViewer: (expressIds: number[]) => void;
   clearIsolation: () => void;
+  clearSelection: () => void; 
 }
 
 const InfoRow: React.FC<{ label: string; value: string; multiline?: boolean }> = ({ label, value, multiline }) => (
@@ -38,7 +43,7 @@ const DistanceLabel: React.FC<{ x: number; y: number; distance: number }> = ({ x
     className="absolute z-30 -translate-x-1/2 -translate-y-full pointer-events-none"
     style={{ left: x, top: y - 10 }}
   >
-    <div className="bg-[#0056b3] text-white text-xs font-semibold px-2 py-1 rounded-md shadow-lg whitespace-nowrap">
+    <div className="bg-[#0056b3]/80 text-white text-[9px] font-semibold px-1 py-0.5 rounded shadow-lg whitespace-nowrap">
       {distance.toFixed(3)} m
     </div>
   </div>
@@ -49,7 +54,7 @@ const DistanceLabelWithDelete: React.FC<{ x: number; y: number; distance: number
     className="absolute z-30 -translate-x-1/2 -translate-y-full"
     style={{ left: x, top: y - 10 }}
   >
-    <div className="relative bg-[#0056b3] text-white text-xs font-semibold px-2 py-1 rounded-md shadow-lg whitespace-nowrap">
+    <div className="relative bg-[#0056b3]/80 text-white text-[9px] font-semibold px-1 py-0.5 rounded shadow-lg whitespace-nowrap">
       {distance.toFixed(3)} m
       <button
         onClick={onDelete}
@@ -61,6 +66,32 @@ const DistanceLabelWithDelete: React.FC<{ x: number; y: number; distance: number
     </div>
   </div>
 );
+
+
+const CenterDeleteHandle: React.FC<{ x: number; y: number; onDelete: () => void }> = ({ x, y, onDelete }) => (
+  <button
+    onClick={onDelete}
+    className="absolute z-40 w-4 h-4 flex items-center justify-center rounded-full bg-red-500/70 hover:bg-red-500/90 text-white shadow-md transition-colors"
+    style={{ left: x + 9, top: y - 17 }}
+    title="Borrar cruz"
+  >
+    <XIcon size={9} />
+  </button>
+);
+
+
+const CROSS_LABEL_MIN_ARM_PX = 55;
+const CROSS_LABEL_PAST_TIP_PX = 16;
+function crossLabelPos(center: { x: number; y: number }, tip: { x: number; y: number }) {
+  const dx = tip.x - center.x;
+  const dy = tip.y - center.y;
+  const armLen = Math.hypot(dx, dy);
+  if (armLen >= CROSS_LABEL_MIN_ARM_PX || armLen === 0) {
+    return { x: (center.x + tip.x) / 2, y: (center.y + tip.y) / 2 };
+  }
+  const ux = dx / armLen, uy = dy / armLen;
+  return { x: tip.x + ux * CROSS_LABEL_PAST_TIP_PX, y: tip.y + uy * CROSS_LABEL_PAST_TIP_PX };
+}
 
 const SnapIcon: React.FC<{ x: number; y: number; snapType: string }> = ({ x, y, snapType }) => {
   const config = {
@@ -101,7 +132,7 @@ const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, 
       <rect
         x={x - s} y={y - s} width={s * 2} height={s * 2}
         fill={colors.fill} stroke={colors.stroke} strokeWidth={1.5}
-        opacity={0.95}
+        opacity={0.75}
       />
     );
   }
@@ -111,8 +142,9 @@ const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, 
     return (
       <rect
         x={x - s} y={y - s} width={s * 2} height={s * 2}
+        rx={2.5} ry={2.5}
         fill={colors.fill} stroke={colors.stroke} strokeWidth={1.5}
-        opacity={0.95}
+        opacity={0.75}
         transform={`rotate(45 ${x} ${y})`}
       />
     );
@@ -129,8 +161,7 @@ const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, 
 };
 
 const PAINT_COLORS = ['#ff3b30', '#34c759', '#0056b3', '#ffcc00', '#ffffff'];
-
-const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, projectId, onFileUploaded, viewCubeRightOffset = 0 }, ref) => {
+const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, projectId, onFileUploaded, viewCubeRightOffset = 0, viewCubeVisible = true, isActive = true }, ref) => {
   const {
     canvasRef,
     containerRef,
@@ -165,6 +196,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     crosses,
     clearCross,
     removeCross,
+    draggingId: draggingCrossId,
     paintMode,
     togglePaintMode,
     exitPaintMode,
@@ -199,6 +231,10 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     selectedTypes,
     toggleSelectType,
     clearSelectedTypes,
+    levelGroups,
+    selectedLevels,
+    toggleSelectLevel,
+    clearSelectedLevels,
 
     hiddenTypes,
     hiddenElementIds,
@@ -216,23 +252,19 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     exitCut,
     dismissPopup,
     handleCutMouseDown,
-  } = useIfcModel(fileBuffer);
-
+} = useIfcModel(fileBuffer, viewCubeRightOffset, isActive);
   useImperativeHandle(ref, () => ({
     selectEntityById: (expressId: number) => selectEntityById(expressId),
     selectByIdOrGuid: (value: string) => selectByIdOrGuid(value),
     isolateElementsByIds: (expressIds: number[]) => isolateElementsByIds(expressIds),
     selectGroupInViewer: (expressIds: number[]) => selectGroupInViewer(expressIds),
     clearIsolation: () => clearIsolation(),
+     clearSelection: () => clearSelection(), 
   }));
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
-  // Antes solo abría el panel al seleccionar un elemento, pero nunca lo
-  // cerraba al deseleccionar (ej. al tocar la X del popup flotante
-  // Ocultar/Aislar/Cortar) — el panel se quedaba abierto y, sin
-  // elemento, caía en su modo "sin selección" = buscador general
-  // ("Buscar en el modelo"), apareciendo sin que nadie lo pidiera.
+  
   useEffect(() => {
     setPanelOpen(!!selectedEntity);
     setCategoryPanelOpen(false);
@@ -246,6 +278,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
   const handleSelectMeasure = () => {
     if (crossMode) exitCrossMode();
     if (paintMode) exitPaintMode();
+    if (sectionEnabled) toggleSectionEnabled();
     enableAndArmMeasure();
     setRulerMenuOpen(false);
   };
@@ -253,6 +286,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
   const handleSelectCross = () => {
     if (measureMode) exitMeasureMode();
     if (paintMode) exitPaintMode();
+    if (sectionEnabled) toggleSectionEnabled();
     enableAndArm();
     setRulerMenuOpen(false);
   };
@@ -264,7 +298,20 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     }
     if (measureMode) exitMeasureMode();
     if (crossMode) exitCrossMode();
+    if (sectionEnabled) toggleSectionEnabled();
     togglePaintMode();
+  };
+
+  
+  const handleToggleSection = () => {
+    if (sectionEnabled) {
+      toggleSectionEnabled();
+      return;
+    }
+    if (measureMode) exitMeasureMode();
+    if (crossMode) exitCrossMode();
+    if (paintMode) exitPaintMode();
+    toggleSectionEnabled();
   };
 
   const handleSaveScreenshotToProject = async () => {
@@ -289,10 +336,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     discardScreenshot();
   };
 
-  // Cubre TANTO aislamiento (ver solo X) COMO ocultamiento puntual (ver
-  // todo MENOS X) — antes solo miraba aislamiento, así que si ocultabas
-  // un elemento con "Ocultar" no había forma de volver a mostrarlo: el
-  // botón "Mostrar todo" ni aparecía.
+
   const hasAnyIsolation =
     isolatedElementId !== null ||
     isolatedType !== null ||
@@ -310,8 +354,12 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
       >
         {ready && (
           <>
-            <ViewCube3D onSelect={setPresetView} anchorRef={containerRef} rightOffset={viewCubeRightOffset} />
-
+            <ViewCube3D onSelect={setPresetView} 
+            anchorRef={containerRef} 
+            rightOffset={viewCubeRightOffset} 
+            visible={viewCubeVisible}
+            />
+              
             <div className="absolute top-2 left-24 z-20 flex flex-row gap-1.5">
               <button
                 onClick={() => { setPanelOpen((p) => !p); setCategoryPanelOpen(false); }}
@@ -327,12 +375,12 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
   className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
     categoryPanelOpen ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
   }`}
-  title="Filtrar por categoría"
+  title="Filtrar por categoría o nivel"
 >
   <Layers size={16} />
 </button>
               <button
-                onClick={toggleSectionEnabled}
+                onClick={handleToggleSection}
                 className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
                   sectionEnabled ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
                 }`}
@@ -454,16 +502,19 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
       selectedTypes={selectedTypes}
       toggleSelectType={toggleSelectType}
       clearSelectedTypes={clearSelectedTypes}
+      levelGroups={levelGroups}
+      selectedLevels={selectedLevels}
+      toggleSelectLevel={toggleSelectLevel}
+      clearSelectedLevels={clearSelectedLevels}
     />
   </div>
 )}
 
-            {isWalkMode && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 bg-black/70 text-white text-xs px-4 py-2 rounded-lg">
-                Modo caminar: <span className="font-semibold">W A S D</span> para moverte · arrastrá el mouse para mirar
-              </div>
-            )}
-
+         {isWalkMode && (
+  <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-white text-slate-700 text-[11px] px-3 py-1.5 rounded-lg shadow-lg">
+    Modo caminar: <span className="font-semibold">W A S D</span> para moverte · arrastrá el mouse para mirar
+  </div>
+)}
             {measureMode && (
               <>
                 <svg
@@ -514,7 +565,8 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                       x1={hoverEdge.a.x} y1={hoverEdge.a.y}
                       x2={hoverEdge.b.x} y2={hoverEdge.b.y}
                       stroke="#3b82f6"
-                      strokeWidth={3}
+                      strokeWidth={4}
+                      strokeLinecap="round"
                       opacity={0.7}
                     />
                   )}
@@ -541,11 +593,11 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                 })}
 
                 {measurements.length > 0 && (
-  <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-black/85 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-3 shadow-xl">
-    <Ruler size={14} className="text-blue-300" />
+  <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
+    <Ruler size={13} className="text-[#0056b3] flex-shrink-0" />
     <button
       onClick={() => { clearMeasurement(); exitMeasureMode(); }}
-      className="text-[11px] text-blue-300 hover:text-blue-200 font-medium"
+      className="text-[11px] text-[#0056b3] hover:text-[#004494] font-medium"
     >
       Eliminar medida
     </button>
@@ -556,8 +608,12 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
 
             {crossMode && (
               <>
+                {/* z-40, por encima de las etiquetas de medida (z-30) —
+                    antes el círculo del centro (el punto de arrastre)
+                    podía quedar tapado por una etiqueta que cayera cerca,
+                    sobre todo con medidas cortas. */}
                 <svg
-                  className="absolute inset-0 z-20 pointer-events-none"
+                  className="absolute inset-0 z-40 pointer-events-none"
                   style={{ width: '100%', height: '100%' }}
                 >
                   {crosses.map((c) => {
@@ -588,7 +644,11 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                             <circle cx={c.depthPosScreen.x} cy={c.depthPosScreen.y} r={4} fill="#fff" stroke="#ef4444" strokeWidth={1.5} />
                           </>
                         )}
-                        <circle cx={c.centerScreen!.x} cy={c.centerScreen!.y} r={7} fill="#0056b3" stroke="#fff" strokeWidth={2} />
+                        <circle
+                          cx={c.centerScreen!.x} cy={c.centerScreen!.y} r={7}
+                          fill={draggingCrossId === c.id ? '#f97316' : '#0056b3'}
+                          stroke="#fff" strokeWidth={2}
+                        />
                       </g>
                     );
                   })}
@@ -598,38 +658,33 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   if (!c.centerScreen) return null;
                   return (
                     <React.Fragment key={c.id}>
-                      {c.uPosScreen && (
-                        <DistanceLabelWithDelete
-                          x={(c.uPosScreen.x + c.centerScreen.x) / 2}
-                          y={(c.uPosScreen.y + c.centerScreen.y) / 2}
-                          distance={c.lengthU}
-                          onDelete={() => removeCross(c.id)}
-                        />
-                      )}
-                      {c.vPosScreen && (
-                        <DistanceLabel
-                          x={(c.vPosScreen.x + c.centerScreen.x) / 2}
-                          y={(c.vPosScreen.y + c.centerScreen.y) / 2}
-                          distance={c.lengthV}
-                        />
-                      )}
-                      {c.depthPosScreen && c.lengthDepth !== null && (
-                        <DistanceLabel
-                          x={(c.depthPosScreen.x + c.centerScreen.x) / 2}
-                          y={(c.depthPosScreen.y + c.centerScreen.y) / 2}
-                          distance={c.lengthDepth}
-                        />
-                      )}
+                      <CenterDeleteHandle
+                        x={c.centerScreen.x}
+                        y={c.centerScreen.y}
+                        onDelete={() => removeCross(c.id)}
+                      />
+                      {c.uPosScreen && (() => {
+                        const pos = crossLabelPos(c.centerScreen!, c.uPosScreen);
+                        return <DistanceLabel x={pos.x} y={pos.y} distance={c.lengthU} />;
+                      })()}
+                      {c.vPosScreen && (() => {
+                        const pos = crossLabelPos(c.centerScreen!, c.vPosScreen);
+                        return <DistanceLabel x={pos.x} y={pos.y} distance={c.lengthV} />;
+                      })()}
+                      {c.depthPosScreen && c.lengthDepth !== null && (() => {
+                        const pos = crossLabelPos(c.centerScreen!, c.depthPosScreen);
+                        return <DistanceLabel x={pos.x} y={pos.y} distance={c.lengthDepth!} />;
+                      })()}
                     </React.Fragment>
                   );
                 })}
 
                 {crosses.length > 0 && (
-  <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-black/85 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-3 shadow-xl">
-    <Crosshair size={14} className="text-yellow-300" />
+  <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
+    <Crosshair size={13} className="text-[#0056b3] flex-shrink-0" />
     <button
       onClick={() => { clearCross(); exitCrossMode(); }}
-      className="text-[11px] text-blue-300 hover:text-blue-200 font-medium"
+      className="text-[11px] text-[#0056b3] hover:text-[#004494] font-medium"
     >
       Eliminar medida
     </button>
@@ -639,15 +694,15 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
             )}
 
             {paintMode && (
-              <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 bg-black/85 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-3 shadow-xl">
-                <Paintbrush size={14} />
+              <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
+                <Paintbrush size={13} className="text-[#0056b3] flex-shrink-0" />
                 <div className="flex items-center gap-1.5">
                   {PAINT_COLORS.map((c) => (
                     <button
                       key={c}
                       onClick={() => setPaintColor(c)}
-                      className="w-5 h-5 rounded-full border-2 transition-colors"
-                      style={{ backgroundColor: c, borderColor: paintColor === c ? '#ffffff' : 'transparent' }}
+                      className="w-4 h-4 rounded-full border-2 transition-colors"
+                      style={{ backgroundColor: c, borderColor: paintColor === c ? '#0056b3' : 'transparent' }}
                       title={c}
                     />
                   ))}
@@ -655,35 +710,35 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                 {strokes.length > 0 && (
                   <button
                     onClick={clearStrokes}
-                    className="text-[11px] text-blue-300 hover:text-blue-200 font-medium"
+                    className="text-[11px] text-[#0056b3] hover:text-[#004494] font-medium"
                   >
                     Borrar todo
                   </button>
                 )}
                 <button
                   onClick={exitPaintMode}
-                  className="text-gray-400 hover:text-white"
+                  className="text-gray-400 hover:text-gray-700 ml-auto"
                   title="Salir de pintar"
                 >
-                  <XIcon size={14} />
+                  <XIcon size={13} />
                 </button>
               </div>
             )}
 
             {sectionEnabled && (
-              <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-30 bg-black/85 text-white text-sm px-4 py-3 rounded-lg shadow-xl flex flex-col gap-2 min-w-[320px]">
-                <div className="flex items-center gap-3">
-                  <Scissors size={14} className="text-blue-300" />
+              <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg shadow-xl flex flex-col gap-1.5 min-w-[230px]">
+                <div className="flex items-center gap-2">
+                  <Scissors size={12} className="text-[#0056b3] flex-shrink-0" />
 
                   <div className="flex gap-1">
                     {(['down', 'front', 'side'] as const).map((axis) => (
                       <button
                         key={axis}
                         onClick={() => setSectionAxis(axis)}
-                        className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-medium transition-colors ${
                           sectionAxis === axis
                             ? 'bg-[#0056b3] text-white'
-                            : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                            : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                         }`}
                       >
                         {axis === 'down' ? 'Horizontal' : axis === 'front' ? 'Frontal' : 'Lateral'}
@@ -691,38 +746,38 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                     ))}
                   </div>
 
-                  <div className="w-px h-4 bg-white/20" />
+                  <div className="w-px h-3.5 bg-gray-200" />
 
                   <button
                     onClick={toggleSectionFlipped}
-                    className={`text-xs font-medium px-2 py-1 rounded transition-colors ${
-                      sectionFlipped ? 'bg-[#0056b3] text-white' : 'bg-white/10 text-gray-300 hover:bg-white/20'
+                    className={`text-[11px] font-medium px-1.5 py-0.5 rounded transition-colors ${
+                      sectionFlipped ? 'bg-[#0056b3] text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
                     }`}
                     title="Invertir lado del corte"
                   >
                     Invertir
                   </button>
 
-                  <div className="w-px h-4 bg-white/20" />
+                  <div className="w-px h-3.5 bg-gray-200" />
 
                   <button
                     onClick={resetSection}
-                    className="text-[11px] text-blue-300 hover:text-blue-200 font-medium"
+                    className="text-[11px] text-[#0056b3] hover:text-[#004494] font-medium"
                   >
                     Reiniciar
                   </button>
 
                   <button
                     onClick={toggleSectionEnabled}
-                    className="text-gray-400 hover:text-white ml-1"
+                    className="text-gray-400 hover:text-gray-700 ml-auto"
                     title="Salir de corte"
                   >
-                    <XIcon size={14} />
+                    <XIcon size={13} />
                   </button>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-gray-400 w-8">0%</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[9px] text-gray-400 w-6">0%</span>
                   <input
                     type="range"
                     min={0}
@@ -732,7 +787,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                     onChange={(e) => setSectionPosition(Number(e.target.value))}
                     className="flex-1 accent-[#0056b3]"
                   />
-                  <span className="text-[10px] text-gray-400 w-8 text-right">100%</span>
+                  <span className="text-[9px] text-gray-400 w-8 text-right">100%</span>
                 </div>
               </div>
             )}

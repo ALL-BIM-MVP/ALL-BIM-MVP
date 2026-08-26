@@ -5,6 +5,9 @@ import {
     createProjectInvitation,
     updateInvitationStatus,
     getProjectMembers,
+    setMemberAdmin,
+    setMemberModuleRole,
+    removeProjectMember,
 } from '../services/invitation.service';
 import {
     Invitation,
@@ -53,11 +56,7 @@ export const useProjectInvitations = (projectId: number) => {
         loadMembers();
     }, [loadInvitations, loadMembers]);
 
-    // Antes esto se pedía a GET /:projectId/user-role (endpoint
-    // eliminado en el backend). Ahora sale directo de tu propia fila en
-    // el listado de miembros — que YA incluye al owner como fila
-    // sintética (project_member_id: null) y marca is_me — así que no
-    // hace falta ningún pedido extra.
+    
     const myMembership = useMemo(
         () => members.find((m) => m.is_me) ?? null,
         [members]
@@ -66,14 +65,10 @@ export const useProjectInvitations = (projectId: number) => {
     const isAdmin = myMembership?.is_admin ?? false;
     const checkingOwner = membersLoading;
 
-    // Compatibilidad: DashboardProjects.tsx muestra un badge simple con
-    // "el rol del usuario en este proyecto" (userRole.role_name). Ya no
-    // existe un único rol de proyecto, así que se arma una etiqueta
-    // representativa: Owner/Administrador, o el primer rol de módulo que
-    // tenga asignado.
+  
     const userRole = useMemo(() => {
         if (!myMembership) return null;
-        if (myMembership.is_owner) return { role_name: 'Owner' };
+        if (myMembership.is_owner) return { role_name: 'Propietario' };
         if (myMembership.is_admin) return { role_name: 'Administrador' };
         const first = myMembership.module_roles[0];
         return { role_name: first ? first.role_name : 'Miembro' };
@@ -92,9 +87,7 @@ export const useProjectInvitations = (projectId: number) => {
         }
     }, [projectId]);
 
-    // Invitar: ahora manda is_admin + module_roles en vez de un único
-    // project_role_id (ese modelo ya no existe en el backend). Si
-    // isAdminInvite es true, module_roles va vacío (400 si no).
+
     const createInvitation = useCallback(async (
         email: string,
         isAdminInvite: boolean,
@@ -138,6 +131,39 @@ export const useProjectInvitations = (projectId: number) => {
 
     const pendingInvitations = invitations.filter(inv => inv.status === 'pendiente');
 
+    // memberId acá es project_member_id (no user_id) — así lo pide el
+    // backend en /members/:memberId/admin y /members/:memberId/modules/...
+    const updateMemberAdmin = useCallback(async (memberId: number, isAdminValue: boolean) => {
+        if (!projectId) throw new Error('Project ID required');
+        if (!isOwner && !isAdmin) {
+            throw new Error('Solo el dueño o un administrador del proyecto puede cambiar roles');
+        }
+        await setMemberAdmin(projectId, memberId, isAdminValue);
+        await loadMembers();
+    }, [projectId, isOwner, isAdmin, loadMembers]);
+
+    const updateMemberModuleRole = useCallback(async (
+        memberId: number, moduleCode: string, moduleRoleId: number
+    ) => {
+        if (!projectId) throw new Error('Project ID required');
+        if (!isOwner && !isAdmin) {
+            throw new Error('Solo el dueño o un administrador del proyecto puede cambiar roles');
+        }
+        await setMemberModuleRole(projectId, memberId, moduleCode, moduleRoleId);
+        await loadMembers();
+    }, [projectId, isOwner, isAdmin, loadMembers]);
+
+    // Acá sí es user_id (no project_member_id) — así lo pide el backend
+    // en DELETE /members/:userId.
+    const removeMember = useCallback(async (userId: number) => {
+        if (!projectId) throw new Error('Project ID required');
+        if (!isOwner && !isAdmin) {
+            throw new Error('Solo el dueño o un administrador del proyecto puede eliminar miembros');
+        }
+        await removeProjectMember(projectId, userId);
+        await loadMembers();
+    }, [projectId, isOwner, isAdmin, loadMembers]);
+
     return {
         invitations,
         pendingInvitations,
@@ -153,5 +179,8 @@ export const useProjectInvitations = (projectId: number) => {
         searchUsers,
         createInvitation,
         cancelInvitation,
+        updateMemberAdmin,
+        updateMemberModuleRole,
+        removeMember,
     };
 };

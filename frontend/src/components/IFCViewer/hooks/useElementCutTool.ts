@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
 
 interface Vec3 { x: number; y: number; z: number; }
 interface ScreenPos { x: number; y: number; }
@@ -27,6 +28,7 @@ export function useElementCutTool(
   const scissorsScreenRef = useRef<ScreenPos | null>(null);
   const dragStartScreenRef = useRef<{ x: number; y: number } | null>(null);
   const dragStartOffsetRef = useRef(0);
+  const lastCameraSnapshotRef = useRef<CameraSnapshot | null>(null);
 
   useEffect(() => { armedRef.current = armed; }, [armed]);
   useEffect(() => { draggingRef.current = dragging; }, [dragging]);
@@ -172,11 +174,13 @@ export function useElementCutTool(
     const o = originRef.current;
     const n = normalRef.current;
     if (!o || !n) return;
+    
+    if (!cameraOrCanvasChanged(rendererRef.current, canvasRef.current, lastCameraSnapshotRef)) return;
     const displayPoint = { x: o.x + n.x * offsetRef.current, y: o.y + n.y * offsetRef.current, z: o.z + n.z * offsetRef.current };
     const screenPos = projectPoint(displayPoint);
     setScissorsScreen(screenPos);
     scissorsScreenRef.current = screenPos;
-  }, [projectPoint]);
+  }, [projectPoint, rendererRef, canvasRef]);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {

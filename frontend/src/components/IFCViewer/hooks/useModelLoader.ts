@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import * as THREE from 'three';
-import type { TypeGroup, ModelBounds, ViewPreset } from '../types';
+import type { TypeGroup, LevelGroup, ModelBounds, ViewPreset } from '../types';
 import { ThreeSceneController } from '../utils/ThreeSceneController';
 import { IfcWorkerClient } from '../workers/ifcWorkerClient';
 
@@ -30,6 +30,8 @@ interface UseModelLoaderOptions {
   onFrame?: (dt: number) => void;
   getClearColor?: () => [number, number, number, number];
   getSectionPlane?: () => any;
+
+  isActive?: boolean;
 }
 
 export function useModelLoader(
@@ -38,7 +40,10 @@ export function useModelLoader(
   options: UseModelLoaderOptions = {}
 ) {
   const { canvasRef, containerRef, rendererRef, storeRef, modelBoundsRef } = refs;
-  const { onFrame, getClearColor, getSectionPlane } = options;
+  const { onFrame, getClearColor, getSectionPlane, isActive = true } = options;
+
+  const isActiveRef = useRef(isActive);
+  useEffect(() => { isActiveRef.current = isActive; }, [isActive]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,6 +51,7 @@ export function useModelLoader(
   const [debugInfo, setDebugInfo] = useState('Esperando archivo...');
   const [ready, setReady] = useState(false);
   const [typeGroups, setTypeGroups] = useState<TypeGroup[]>([]);
+  const [levelGroups, setLevelGroups] = useState<LevelGroup[]>([]);
   const [paramIndex, setParamIndex] = useState<ParamIndexEntry[]>([]);
   const [pendingScreenshot, setPendingScreenshot] = useState<PendingScreenshot | null>(null);
   const pendingScreenshotRef = useRef<PendingScreenshot | null>(null);
@@ -75,6 +81,7 @@ export function useModelLoader(
       setProgress(0);
       setReady(false);
       setTypeGroups([]);
+      setLevelGroups([]);
       setParamIndex([]);
       setDebugInfo('Iniciando carga...');
 
@@ -115,7 +122,7 @@ export function useModelLoader(
               setDebugInfo(label);
             },
 
-            onShellReady: ({ shellMeshes, typeGroups: groups, expressIdToTypeEntries }) => {
+            onShellReady: ({ shellMeshes, typeGroups: groups, levelGroups: levels, expressIdToTypeEntries }) => {
               if (!isMounted || !controller) return;
 
               const meshes = shellMeshes.map(materializeMesh);
@@ -126,6 +133,7 @@ export function useModelLoader(
               setProgress(85);
 
               setTypeGroups(groups);
+              setLevelGroups(levels ?? []);
 
               const bounds = computeBoundsFromMeshes(meshes);
               modelBoundsRef.current = bounds;
@@ -137,6 +145,14 @@ export function useModelLoader(
               let lastTime = performance.now();
               const renderLoop = () => {
                 if (!isMounted || !controller) return;
+
+                
+                if (!isActiveRef.current) {
+                  lastTime = performance.now();
+                  rafId = requestAnimationFrame(renderLoop);
+                  return;
+                }
+
                 const now = performance.now();
                 const dt = Math.min((now - lastTime) / 1000, 0.1);
                 lastTime = now;
@@ -265,7 +281,7 @@ export function useModelLoader(
   }, []);
 
   return {
-    loading, error, progress, debugInfo, ready, typeGroups, paramIndex,
+    loading, error, progress, debugInfo, ready, typeGroups, levelGroups, paramIndex,
     handleFitToView, setPresetView,
     takeScreenshot, pendingScreenshot, discardScreenshot, downloadScreenshot,
     edgesVisible, toggleEdges,
@@ -280,10 +296,13 @@ function materializeMesh(payload: MeshPayload): THREE.Mesh {
   geometry.setAttribute('expressId', new THREE.BufferAttribute(payload.expressId, 1));
   geometry.setAttribute('hidden', new THREE.BufferAttribute(new Float32Array(payload.expressId.length), 1));
   geometry.setAttribute('selected', new THREE.BufferAttribute(new Float32Array(payload.expressId.length), 1));
+  
+  geometry.setAttribute('ghosted', new THREE.BufferAttribute(new Float32Array(payload.expressId.length), 1));
 
   const material = new THREE.MeshStandardMaterial({
     color: new THREE.Color(payload.color.r, payload.color.g, payload.color.b),
-    transparent: payload.opacity < 1,
+
+    transparent: true,
     opacity: payload.opacity,
     side: THREE.DoubleSide,
     roughness: 0.6,
@@ -301,6 +320,9 @@ function materializeMesh(payload: MeshPayload): THREE.Mesh {
   edgesGeometry.setAttribute('position', new THREE.BufferAttribute(payload.edgePosition, 3));
   edgesGeometry.setAttribute('expressId', new THREE.BufferAttribute(payload.edgeExpressId, 1));
   edgesGeometry.setAttribute('hidden', new THREE.BufferAttribute(new Float32Array(payload.edgeExpressId.length), 1));
+  // Mismo atributo "ghosted" para las líneas de contorno, así el contorno
+  // de los elementos atenuados también se ve tenue (no solo la cara).
+  edgesGeometry.setAttribute('ghosted', new THREE.BufferAttribute(new Float32Array(payload.edgeExpressId.length), 1));
 
   const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x5a5a5a, transparent: true, opacity: 0.3 });
   applyEdgeHiddenShader(edgesMaterial);
@@ -339,41 +361,44 @@ function boostSaturation(color: THREE.Color, factor: number): THREE.Color {
 }
 void boostSaturation;
 
+
+const GHOSTED_ALPHA_FACTOR = 0.06;
+
 function applyPerElementShader(material: THREE.MeshStandardMaterial) {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
-        `attribute float hidden;\nattribute float selected;\nvarying float vHidden;\nvarying float vSelected;\n#include <common>`
+        `attribute float hidden;\nattribute float selected;\nattribute float ghosted;\nvarying float vHidden;\nvarying float vSelected;\nvarying float vGhosted;\n#include <common>`
       )
       .replace(
         '#include <begin_vertex>',
-        `#include <begin_vertex>\nvHidden = hidden;\nvSelected = selected;`
+        `#include <begin_vertex>\nvHidden = hidden;\nvSelected = selected;\nvGhosted = ghosted;`
       );
 
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        `varying float vHidden;\nvarying float vSelected;\n#include <common>`
+        `varying float vHidden;\nvarying float vSelected;\nvarying float vGhosted;\n#include <common>`
       )
       .replace(
         '#include <color_fragment>',
-        `#include <color_fragment>\nif (vHidden > 0.5) { discard; }\nif (vSelected > 0.5) { diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0, 0.898, 1.0), 0.6); }`
+        `#include <color_fragment>\nif (vHidden > 0.5) { discard; }\nif (vSelected > 0.5) { diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0, 0.898, 1.0), 0.6); }\nif (vGhosted > 0.5) { diffuseColor.a *= ${GHOSTED_ALPHA_FACTOR.toFixed(3)}; }`
       );
   };
-  material.customProgramCacheKey = () => 'per-element-vis-sel';
+  material.customProgramCacheKey = () => 'per-element-vis-sel-ghost';
 }
 
 function applyEdgeHiddenShader(material: THREE.LineBasicMaterial) {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `attribute float hidden;\nvarying float vHidden;\n#include <common>`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvHidden = hidden;`);
+      .replace('#include <common>', `attribute float hidden;\nattribute float ghosted;\nvarying float vHidden;\nvarying float vGhosted;\n#include <common>`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvHidden = hidden;\nvGhosted = ghosted;`);
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `varying float vHidden;\n#include <common>`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\nif (vHidden > 0.5) { discard; }`);
+      .replace('#include <common>', `varying float vHidden;\nvarying float vGhosted;\n#include <common>`)
+      .replace('#include <color_fragment>', `#include <color_fragment>\nif (vHidden > 0.5) { discard; }\nif (vGhosted > 0.5) { diffuseColor.a *= ${GHOSTED_ALPHA_FACTOR.toFixed(3)}; }`);
   };
-  material.customProgramCacheKey = () => 'edge-hidden';
+  material.customProgramCacheKey = () => 'edge-hidden-ghost';
 }
 
 interface MeshPayload {

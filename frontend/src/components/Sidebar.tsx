@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Users, UserPlus, FolderKanban, Mail, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import logo from "../assets/logo3.png";
+import logo from "../assets/logo3.jpg";
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 
@@ -82,7 +82,7 @@ const Sidebar: React.FC = () => {
           <nav className="flex-1 min-h-0 overflow-y-auto">
             {showAdminSection && (
               <div className="mb-7">
-                <h4 className="text-[13px] font-semibold uppercase tracking-wide text-[#3F7CB8] mb-3 pl-3">
+                <h4 className="font-sans text-lg font-bold tracking-tight text-slate-600 mb-3 pl-3">
                   Administración
                 </h4>
                 <ul className="space-y-3.5">
@@ -107,14 +107,14 @@ const Sidebar: React.FC = () => {
             )}
 
             <div>
-              <h4 className="text-[13px] font-semibold uppercase tracking-wide text-[#3F7CB8] mb-3 pl-3">
-                Proyectos
+              <h4 className="font-sans text-lg font-bold tracking-tight text-slate-600 mb-3 pl-3">
+                Espacio de trabajo
               </h4>
               <ul className="space-y-3.5">
                 <li>
                   <Link to="/dashboard/projects" className={linkClasses('/dashboard/projects')}>
                     <FolderKanban size={18} className={iconClasses('/dashboard/projects')} />
-                    <span>Proyectos</span>
+                    <span>Panel de proyectos</span>
                   </Link>
                 </li>
                 <li>
@@ -143,7 +143,9 @@ const Sidebar: React.FC = () => {
       </div>
     )}
     <div className="min-w-0">
-      <p className="text-[13px] font-medium text-[#1C2430] truncate">{user?.name || 'Usuario'}</p>
+      <p className="text-[13px] font-medium text-[#1C2430] truncate">
+        {user ? `${user.name}${user.last_name ? ` ${user.last_name}` : ''}` : 'Usuario'}
+      </p>
       <p className="text-[12px] text-[#8B93A1] truncate">{user?.email || ''}</p>
     </div>
   </div>
