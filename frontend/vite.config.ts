@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     optimizeDeps: {
       include: ['jszip'],
-      exclude: ['@ifc-lite/parser', '@ifc-lite/geometry', '@ifc-lite/renderer', 'web-ifc'],
+      exclude: ['web-ifc'],
     },
     build: {
       target: 'esnext',

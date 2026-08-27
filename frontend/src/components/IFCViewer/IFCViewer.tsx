@@ -1,6 +1,7 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
 import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, Search, Crosshair, Paintbrush, Layers, Download, FolderOpen, RefreshCw, SeparatorHorizontal } from 'lucide-react';
 import { useIfcModel } from './hooks/useIfcModel';
+import { crossLabelPos } from './hooks/useCrossTool';
 import { ViewPreset } from './types';
 import PropertiesPanel from "./PropertiesPanel/PropertiesPanel";
 import ViewCube3D from './Viewcube3d';
@@ -80,18 +81,9 @@ const CenterDeleteHandle: React.FC<{ x: number; y: number; onDelete: () => void 
 );
 
 
-const CROSS_LABEL_MIN_ARM_PX = 55;
-const CROSS_LABEL_PAST_TIP_PX = 16;
-function crossLabelPos(center: { x: number; y: number }, tip: { x: number; y: number }) {
-  const dx = tip.x - center.x;
-  const dy = tip.y - center.y;
-  const armLen = Math.hypot(dx, dy);
-  if (armLen >= CROSS_LABEL_MIN_ARM_PX || armLen === 0) {
-    return { x: (center.x + tip.x) / 2, y: (center.y + tip.y) / 2 };
-  }
-  const ux = dx / armLen, uy = dy / armLen;
-  return { x: tip.x + ux * CROSS_LABEL_PAST_TIP_PX, y: tip.y + uy * CROSS_LABEL_PAST_TIP_PX };
-}
+// crossLabelPos ahora vive en useCrossTool.ts (se importa arriba) —
+// reprojectOnFrame también lo necesita para escribir la posición de las
+// etiquetas directo al DOM.
 
 const SnapIcon: React.FC<{ x: number; y: number; snapType: string }> = ({ x, y, snapType }) => {
   const config = {
@@ -190,6 +182,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     removeMeasurement,
     measureHoverPoint,
     hoverEdge,
+    registerMeasureLabelEl,
     crossMode,
     enableAndArm,
     exitCrossMode,
@@ -197,6 +190,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     clearCross,
     removeCross,
     draggingId: draggingCrossId,
+    registerCrossPosEl,
     paintMode,
     togglePaintMode,
     exitPaintMode,
@@ -581,14 +575,25 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   if (!p2 || !p1?.screen || !p2.screen || m.distance === null) return null;
                   const midX = (p1.screen.x + p2.screen.x) / 2;
                   const midY = (p1.screen.y + p2.screen.y) / 2;
+                  // El wrapper es lo que se mueve (por transform, escrito
+                  // directo por reprojectOnFrame en cada frame — ver
+                  // useMeasureTool.ts). La etiqueta de adentro queda fija
+                  // en (0,0) relativo a él, así su propio -translate-x/y
+                  // de centrado sigue funcionando igual que antes.
                   return (
-                    <DistanceLabelWithDelete
+                    <div
                       key={m.id}
-                      x={midX}
-                      y={midY}
-                      distance={m.distance}
-                      onDelete={() => removeMeasurement(m.id)}
-                    />
+                      ref={(el) => registerMeasureLabelEl(m.id, el)}
+                      className="absolute left-0 top-0"
+                      style={{ transform: `translate(${midX}px, ${midY}px)`, willChange: 'transform' }}
+                    >
+                      <DistanceLabelWithDelete
+                        x={0}
+                        y={0}
+                        distance={m.distance}
+                        onDelete={() => removeMeasurement(m.id)}
+                      />
+                    </div>
                   );
                 })}
 
@@ -656,24 +661,54 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
 
                 {crosses.map((c) => {
                   if (!c.centerScreen) return null;
+                  // Mismo patrón que en medición: cada pieza (centro y las
+                  // 3 etiquetas de longitud) vive en su propio wrapper con
+                  // ref, movido por transform desde reprojectOnFrame en
+                  // useCrossTool.ts — no por re-render de React.
                   return (
                     <React.Fragment key={c.id}>
-                      <CenterDeleteHandle
-                        x={c.centerScreen.x}
-                        y={c.centerScreen.y}
-                        onDelete={() => removeCross(c.id)}
-                      />
+                      <div
+                        ref={(el) => registerCrossPosEl(`${c.id}:center`, el)}
+                        className="absolute left-0 top-0"
+                        style={{ transform: `translate(${c.centerScreen.x}px, ${c.centerScreen.y}px)`, willChange: 'transform' }}
+                      >
+                        <CenterDeleteHandle x={0} y={0} onDelete={() => removeCross(c.id)} />
+                      </div>
                       {c.uPosScreen && (() => {
                         const pos = crossLabelPos(c.centerScreen!, c.uPosScreen);
-                        return <DistanceLabel x={pos.x} y={pos.y} distance={c.lengthU} />;
+                        return (
+                          <div
+                            ref={(el) => registerCrossPosEl(`${c.id}:u`, el)}
+                            className="absolute left-0 top-0"
+                            style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
+                          >
+                            <DistanceLabel x={0} y={0} distance={c.lengthU} />
+                          </div>
+                        );
                       })()}
                       {c.vPosScreen && (() => {
                         const pos = crossLabelPos(c.centerScreen!, c.vPosScreen);
-                        return <DistanceLabel x={pos.x} y={pos.y} distance={c.lengthV} />;
+                        return (
+                          <div
+                            ref={(el) => registerCrossPosEl(`${c.id}:v`, el)}
+                            className="absolute left-0 top-0"
+                            style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
+                          >
+                            <DistanceLabel x={0} y={0} distance={c.lengthV} />
+                          </div>
+                        );
                       })()}
                       {c.depthPosScreen && c.lengthDepth !== null && (() => {
                         const pos = crossLabelPos(c.centerScreen!, c.depthPosScreen);
-                        return <DistanceLabel x={pos.x} y={pos.y} distance={c.lengthDepth!} />;
+                        return (
+                          <div
+                            ref={(el) => registerCrossPosEl(`${c.id}:depth`, el)}
+                            className="absolute left-0 top-0"
+                            style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
+                          >
+                            <DistanceLabel x={0} y={0} distance={c.lengthDepth!} />
+                          </div>
+                        );
                       })()}
                     </React.Fragment>
                   );

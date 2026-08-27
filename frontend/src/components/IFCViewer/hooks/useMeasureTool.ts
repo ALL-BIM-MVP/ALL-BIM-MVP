@@ -11,6 +11,11 @@ interface MeasurePointEntry extends Vec3 {
   screen: ScreenPos | null;
   snapped?: boolean;
   snapType?: SnapType;
+  // A qué elemento pertenece este punto — se usa para, mientras se
+  // arrastra, preferir quedarse sobre el MISMO elemento (ver
+  // magneticSnapAt / raycastSceneMagnetic) en vez de "resbalar" a otro
+  // cuando la cara queda vista de canto.
+  expressId?: number | null;
 }
 
 export interface MeasureEntry {
@@ -29,9 +34,17 @@ interface SnapResult {
   snapped: boolean;
   snapType: SnapType;
   edge?: { v0: Vec3; v1: Vec3 };
+  expressId?: number | null;
 }
 
 const DRAG_HIT_RADIUS = 10; // px — agarrar un punto ya puesto
+
+// Cuánto esperar entre recálculos de snap mientras se mueve el mouse. El
+// snap magnético (magneticSnapAt -> raycastSceneMagnetic) es la parte cara
+// de esta herramienta; recalcularlo en CADA mousemove (pueden ser 100+ por
+// segundo) es lo que se sentía como lag. 32ms ~= 30 recálculos por segundo,
+// de sobra para que el punto se vea seguir al mouse sin trabas.
+const SNAP_THROTTLE_MS = 32;
 const EMPTY_EDGE_LOCK: EdgeLockState = { edge: null, meshExpressId: null, lockStrength: 0 };
 
 const EDGE_HINT_HALF_LEN = 0.2;
@@ -73,6 +86,16 @@ export function useMeasureTool(
   const draggingRef = useRef<{ id: string; pointIndex: 0 | 1 } | null>(null);
   const edgeLockRef = useRef<EdgeLockState>(EMPTY_EDGE_LOCK);
   const lastCameraSnapshotRef = useRef<CameraSnapshot | null>(null);
+  const lastSnapAtRef = useRef(0);
+
+  // Elemento DOM de la etiqueta de distancia de cada medición (por id),
+  // para poder escribirle la posición directo por fuera de React — ver
+  // reprojectOnFrame más abajo.
+  const labelElsRef = useRef(new Map<string, HTMLDivElement>());
+  const registerMeasureLabelEl = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) labelElsRef.current.set(id, el);
+    else labelElsRef.current.delete(id);
+  }, []);
 
   useEffect(() => { measureModeRef.current = measureMode; }, [measureMode]);
   useEffect(() => { measureArmedRef.current = measureArmed; }, [measureArmed]);
@@ -114,7 +137,7 @@ export function useMeasureTool(
     }
   }, [rendererRef, canvasRef]);
 
-  const magneticSnapAt = useCallback((clientX: number, clientY: number): SnapResult | null => {
+  const magneticSnapAt = useCallback((clientX: number, clientY: number, preferredExpressId?: number | null): SnapResult | null => {
     const renderer = rendererRef.current;
     const css = clientToCanvasCss(clientX, clientY);
     if (!renderer?.raycastSceneMagnetic || !css) return null;
@@ -124,7 +147,7 @@ export function useMeasureTool(
         css.x,
         css.y,
         snapEnabled ? edgeLockRef.current : EMPTY_EDGE_LOCK,
-        {}
+        { preferredExpressId }
       );
 
       if (result?.edgeLock) {
@@ -142,12 +165,13 @@ export function useMeasureTool(
           snapped: true,
           snapType: target.type as SnapType,
           edge: result.edgeLock?.edge ?? undefined,
+          expressId: result.expressId ?? null,
         };
       }
 
       const fallbackPoint = result?.intersection?.point ?? null;
       if (fallbackPoint) {
-        return { point: fallbackPoint as Vec3, snapped: false, snapType: 'none', edge: undefined };
+        return { point: fallbackPoint as Vec3, snapped: false, snapType: 'none', edge: undefined, expressId: result?.expressId ?? null };
       }
       return null;
     } catch (err) {
@@ -160,6 +184,7 @@ export function useMeasureTool(
     ...result.point,
     screen: projectPoint(result.point),
     snapped: result.snapped,
+    expressId: result.expressId ?? null,
     snapType: result.snapType,
   }), [projectPoint]);
 
@@ -263,7 +288,21 @@ export function useMeasureTool(
     const drag = draggingRef.current;
     if (!drag) return false;
 
-    const result = magneticSnapAt(clientX, clientY);
+    // Seguimos "consumiendo" el evento (para que la cámara no orbite
+    // mientras arrastrás un punto) aunque todavía no toque recalcular el
+    // snap — así el punto no se recalcula en cada pixel, solo cada
+    // SNAP_THROTTLE_MS.
+    const now = performance.now();
+    if (now - lastSnapAtRef.current < SNAP_THROTTLE_MS) return true;
+    lastSnapAtRef.current = now;
+
+    // El elemento al que pertenecía el punto ANTES de este movimiento —
+    // se lo pasamos al raycast para que prefiera quedarse ahí en vez de
+    // resbalarse a otro elemento si la cara está vista de canto.
+    const draggedPoint = measurementsRef.current.find((m) => m.id === drag.id)?.points[drag.pointIndex];
+    const preferredExpressId = draggedPoint?.expressId ?? null;
+
+    const result = magneticSnapAt(clientX, clientY, preferredExpressId);
     if (!result) return true; // seguimos "consumiendo" el move aunque no haya snap nuevo
     const newPoint = buildPointEntry(result);
 
@@ -304,6 +343,10 @@ export function useMeasureTool(
       setHoverEdge(null);
       return;
     }
+    const now = performance.now();
+    if (now - lastSnapAtRef.current < SNAP_THROTTLE_MS) return; // el hover previo se queda tal cual hasta el próximo recálculo
+    lastSnapAtRef.current = now;
+
     const result = magneticSnapAt(clientX, clientY);
     if (!result) {
       setHoverPoint(null);
@@ -332,14 +375,35 @@ export function useMeasureTool(
 
   const reprojectOnFrame = useCallback(() => {
     if (!measureModeRef.current || measurementsRef.current.length === 0) return;
-
     if (!cameraOrCanvasChanged(rendererRef.current, canvasRef.current, lastCameraSnapshotRef)) return;
+
     const dragId = draggingRef.current?.id ?? null;
-    setMeasurements(prev => prev.map(m => {
+    const updated = measurementsRef.current.map(m => {
       if (m.id === dragId) return m; // esa se recalcula por raycast en el mousemove
       const points = m.points.map(p => ({ ...p, screen: projectPoint(p) }));
       return { ...m, points };
-    }));
+    });
+
+    // Posición visual: se escribe directo al elemento DOM, todos los
+    // frames, sin pasar por setState — así la etiqueta queda pegada al
+    // modelo aunque React todavía no haya vuelto a renderizar.
+    for (const m of updated) {
+      const el = labelElsRef.current.get(m.id);
+      if (!el) continue;
+      const [p1, p2] = m.points;
+      if (p2 && p1?.screen && p2?.screen) {
+        const midX = (p1.screen.x + p2.screen.x) / 2;
+        const midY = (p1.screen.y + p2.screen.y) / 2;
+        el.style.transform = `translate(${midX}px, ${midY}px)`;
+      }
+    }
+
+    // El estado de React se sigue actualizando en cada frame con cámara
+    // cambiada (como antes de este cambio) — es lo que mantiene la
+    // línea/marcas del SVG (abajo, en IFCViewer.tsx) siguiendo suave. Lo
+    // único nuevo es la escritura directa de arriba, que saca a la
+    // ETIQUETA de depender de que ese re-render llegue a tiempo.
+    setMeasurements(updated);
   }, [projectPoint, rendererRef, canvasRef]);
 
   return {
@@ -348,5 +412,6 @@ export function useMeasureTool(
     measureHoverPoint: hoverPoint, hoverEdge,
     handleMeasureMouseDown, handleMeasureMouseMove, handleMeasureMouseUp, updateHoverPreview,
     reprojectOnFrame,
+    registerMeasureLabelEl,
   };
 }
