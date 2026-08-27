@@ -1,6 +1,17 @@
 // src/components/IFCViewer/utils/ThreeSceneController.ts
 import * as THREE from 'three';
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import type { ModelBounds, ViewPreset } from '../types';
+
+// Acelera el raycast de three.js con una estructura BVH: sin esto,
+// this.raycaster.intersectObjects(...) recorre triángulo por triángulo
+// en cada click/mousemove (selección, medición, cruz de ejes) — con
+// modelos grandes eso se notaba como lag en esas herramientas. Esto
+// parchea el prototipo UNA sola vez; computeBoundsTree() se llama por
+// geometría en loadGeometry() más abajo.
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
 const UP = new THREE.Vector3(0, 1, 0);
 
@@ -312,6 +323,11 @@ export class ThreeSceneController {
 
   loadGeometry(meshes: THREE.Mesh[]) {
     for (const mesh of meshes) {
+      // BVH para raycast rápido (selección, snap de medición, cruz de
+      // ejes) — se construye una sola vez acá; la geometría (posición/
+      // índice) no cambia después, solo los atributos hidden/selected/
+      // ghosted, así que el árbol sigue siendo válido toda la sesión.
+      mesh.geometry.computeBoundsTree();
       this.modelGroup.add(mesh);
       this.meshes.push(mesh);
       const ranges = mesh.userData.expressIdRanges as ExpressIdRange[] | undefined;
@@ -747,7 +763,7 @@ export class ThreeSceneController {
     cssX: number,
     cssY: number,
     _edgeLockState?: any,
-    opts: { vertexPixelThreshold?: number; edgePixelThreshold?: number; worldPrefilterRadius?: number } = {}
+    opts: { vertexPixelThreshold?: number; edgePixelThreshold?: number; worldPrefilterRadius?: number; preferredExpressId?: number | null } = {}
     ) {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = this.canvas.width / rect.width;
@@ -759,26 +775,45 @@ export class ThreeSceneController {
     const ndc = this.ndcFromCanvasPixels(pxX, pxY);
     this.raycaster.setFromCamera(ndc, this.cameraController.camera);
     const hits = this.raycaster.intersectObjects(this.meshes, false);
-    const hit = hits.find(
+    const validHits = hits.filter(
       (h) =>
         h.object.visible &&
         h.faceIndex !== undefined &&
         !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
     );
+
+    // Mientras se arrastra un punto ya puesto (measure/cross le pasan el
+    // expressId del elemento al que pertenecía ese punto), preferimos
+    // quedarnos sobre ESE elemento si el rayo también lo toca — aunque
+    // no sea el hit más cercano. Sin esto, mirar una cara casi de canto
+    // podía hacer que el rayo "se resbale" al elemento de atrás, y el
+    // punto arrastrado terminaba lejos de la superficie que se estaba
+    // midiendo.
+    let hit = validHits[0];
+    if (opts.preferredExpressId != null) {
+      const preferredHit = validHits.find((h) => {
+        const mesh = h.object as THREE.Mesh;
+        const index = mesh.geometry.getIndex();
+        if (!index || h.faceIndex == null) return false;
+        const vIdx = index.getX(h.faceIndex * 3);
+        return this.findExpressIdForVertex(mesh, vIdx) === opts.preferredExpressId;
+      });
+      if (preferredHit) hit = preferredHit;
+    }
     if (!hit) return null;
 
     const mesh = hit.object as THREE.Mesh;
     const rawPoint = hit.point;
     const geom = mesh.geometry as THREE.BufferGeometry;
     const index = geom.getIndex();
-    if (!index) return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null };
+    if (!index) return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null, expressId: null };
 
     const hitVIdx = index.getX(hit.faceIndex! * 3);
     const hitExpressId = this.findExpressIdForVertex(mesh, hitVIdx);
     const range = hitExpressId !== null
       ? (mesh.userData.expressIdRanges as ExpressIdRange[]).find((r) => r.expressId === hitExpressId)
       : null;
-    if (!range) return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null };
+    if (!range) return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null, expressId: hitExpressId };
 
     const worldRadius = opts.worldPrefilterRadius ?? 2;
     const vertexPx = opts.vertexPixelThreshold ?? 12;
@@ -812,6 +847,7 @@ export class ThreeSceneController {
         intersection: { point: rawPoint },
         snapTarget: { position: { x: bestVertex.x, y: bestVertex.y, z: bestVertex.z }, type: 'vertex' as const },
         edgeLock: null,
+        expressId: hitExpressId,
       };
     }
 
@@ -847,13 +883,14 @@ export class ThreeSceneController {
           meshExpressId: hitExpressId,
           shouldLock: true,
         },
+        expressId: hitExpressId,
       };
     }
 
-    return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null };
+    return { intersection: { point: rawPoint }, snapTarget: null, edgeLock: null, expressId: hitExpressId };
   }
 
-  raycastFaceCross(cssX: number, cssY: number, fast = false): {
+  raycastFaceCross(cssX: number, cssY: number, fast = false, recenter = true): {
     center: { x: number; y: number; z: number };
     normal: { x: number; y: number; z: number };
     uPos: { x: number; y: number; z: number };
@@ -988,9 +1025,36 @@ export class ThreeSceneController {
     });
     const edges2D = boundaryEdges.map(({ a, b }) => ({ a: to2D(a), b: to2D(b) }));
 
+    // La cruz puede quedar centrada en la CARA (para que, en un elemento
+    // de 4 lados, cada brazo llegue al medio de su lado) en vez de en el
+    // punto exacto donde clickeaste — pero eso solo cuando recenter=true.
+    // Con recenter=false, faceCenter termina siendo el propio click
+    // (origin): hace falta para poder ARRASTRAR la cruz con el mouse —
+    // si siempre se recentra, cualquier punto dentro de la MISMA cara
+    // da el mismo resultado, y arrastrar dentro de esa cara no mueve
+    // nada. El llamador decide: recenter=false mientras se arrastra
+    // (dinámico, sigue al mouse), recenter=true al soltar (asienta la
+    // cruz centrada) o al colocar una nueva.
+    let faceCenterU = 0;
+    let faceCenterV = 0;
+    if (recenter && edges2D.length > 0) {
+      let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+      for (const { a, b } of edges2D) {
+        uMin = Math.min(uMin, a.u, b.u); uMax = Math.max(uMax, a.u, b.u);
+        vMin = Math.min(vMin, a.v, b.v); vMax = Math.max(vMax, a.v, b.v);
+      }
+      faceCenterU = (uMin + uMax) / 2;
+      faceCenterV = (vMin + vMax) / 2;
+    }
+    const faceCenter = origin.clone().addScaledVector(uAxis, faceCenterU).addScaledVector(vAxis, faceCenterV);
+    const edges2DFromCenter = edges2D.map(({ a, b }) => ({
+      a: { u: a.u - faceCenterU, v: a.v - faceCenterV },
+      b: { u: b.u - faceCenterU, v: b.v - faceCenterV },
+    }));
+
     const rayHit2D = (dx: number, dy: number): number | null => {
       let best: number | null = null;
-      for (const { a, b } of edges2D) {
+      for (const { a, b } of edges2DFromCenter) {
         const ex = b.u - a.u, ey = b.v - a.v;
         const D = ex * dy - ey * dx;
         if (Math.abs(D) < 1e-9) continue;
@@ -1009,14 +1073,14 @@ export class ThreeSceneController {
 
     const FALLBACK = 0.3;
     const endPoint = (axis: THREE.Vector3, dist: number | null, sign: 1 | -1) => {
-      const p = origin.clone().addScaledVector(axis, (dist ?? FALLBACK) * sign);
+      const p = faceCenter.clone().addScaledVector(axis, (dist ?? FALLBACK) * sign);
       return { x: p.x, y: p.y, z: p.z };
     };
 
     let depthPos: { x: number; y: number; z: number } | null = null;
     if (!fast) {
       const DEPTH_EPS = 1e-4;
-      const depthOrigin = origin.clone().addScaledVector(normal, DEPTH_EPS);
+      const depthOrigin = faceCenter.clone().addScaledVector(normal, DEPTH_EPS);
       this.raycaster.set(depthOrigin, normal);
       const depthHits = this.raycaster.intersectObjects(this.meshes, false);
       const depthHit = depthHits.find((h) => {
@@ -1035,7 +1099,7 @@ export class ThreeSceneController {
     }
 
     return {
-      center: { x: origin.x, y: origin.y, z: origin.z },
+      center: { x: faceCenter.x, y: faceCenter.y, z: faceCenter.z },
       normal: { x: normal.x, y: normal.y, z: normal.z },
       uPos: endPoint(uAxis, tuPos, 1),
       uNeg: endPoint(uAxis, tuNeg, -1),
@@ -1189,6 +1253,7 @@ export class ThreeSceneController {
   dispose() {
     this.modelGroup.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
+        obj.geometry.disposeBoundsTree?.();
         obj.geometry.dispose();
         (Array.isArray(obj.material) ? obj.material : [obj.material]).forEach((m) => m?.dispose());
       }
