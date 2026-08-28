@@ -63,6 +63,13 @@ export const PartidaIdParamSchema = IfcFileIdParamSchema.extend({
 
 export type PartidaIdParam = z.infer<typeof PartidaIdParamSchema>;
 
+// GET /ifc-files/:id/elements/:expressId/metrado (mejoras-backend-post-auditoria.md, punto 1)
+export const ElementMetradoParamSchema = IfcFileIdParamSchema.extend({
+    expressId: z.coerce.number(),
+});
+
+export type ElementMetradoParam = z.infer<typeof ElementMetradoParamSchema>;
+
 export const GROUP_BY_FIELDS = ["level_name", "space_name", "tag"] as const;
 export type GroupByField = (typeof GROUP_BY_FIELDS)[number];
 
