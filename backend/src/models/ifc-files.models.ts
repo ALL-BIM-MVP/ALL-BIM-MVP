@@ -21,3 +21,16 @@ export interface IfcFileStatusRow {
 export type IfcFileStatusFull = IfcFileStatusRow;
 
 export const transformIfcFileStatus = (row: IfcFileStatusRow): IfcFileStatusFull => row;
+
+// B3 de la migración del visor a ThatOpen (ver
+// docs/roadmap/migracion-visor-thatopen-backend.md) — GET
+// /ifc-files/:id (getIfcFileStatusService) suma si ya existe un
+// Fragments generado para este archivo. BIGINT de Postgres viaja
+// como string (ver docs/api-contract.md, punto 0) — null si todavía
+// no se generó. Separado de IfcFileStatusFull a propósito: el resto
+// de los usos de esa forma (ej. la respuesta de POST
+// /ifc-metrados/process, justo al lanzar el procesamiento) no
+// necesitan este dato.
+export interface IfcFileStatusWithFragments extends IfcFileStatusFull {
+    fragments_file_id: string | null;
+}

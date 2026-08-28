@@ -195,7 +195,11 @@ CREATE TABLE project_invitation_module_roles (
 CREATE TABLE files (
     file_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    file_type VARCHAR(20) NOT NULL CHECK (file_type IN ('ifc','excel','pdf','txt','image','other')),
+    -- 'fragments': migración del visor a ThatOpen (ver
+    -- docs/roadmap/migracion-visor-thatopen-backend.md, B1/B2) — un
+    -- .frag generado a partir de un 'ifc' ya procesado, mismo patrón
+    -- que 'excel' (generated_from_ifc_file_id más abajo).
+    file_type VARCHAR(20) NOT NULL CHECK (file_type IN ('ifc','excel','pdf','txt','image','other','fragments')),
     name VARCHAR(150) NOT NULL,
     file_path TEXT NOT NULL,
     file_size BIGINT,

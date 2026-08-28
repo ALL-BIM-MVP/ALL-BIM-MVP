@@ -1,6 +1,6 @@
 import z from 'zod';
 
-export const FILE_TYPES = ["ifc", "excel", "pdf", "txt", "image", "other"] as const;
+export const FILE_TYPES = ["ifc", "excel", "pdf", "txt", "image", "other", "fragments"] as const;
 export type FileType = (typeof FILE_TYPES)[number];
 
 export const saveFileBodySchema = z.object({

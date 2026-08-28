@@ -14,7 +14,7 @@ import {
     classificationDryRunService, getIfcFileStatusService, processIfcMetradosService,
 } from "../services/ifc-metrados.service.js";
 import type { ClassificationDryRunResult } from "../services/ifc-metrados.service.js";
-import type { IfcFileStatusFull } from "../models/ifc-files.models.js";
+import type { IfcFileStatusWithFragments } from "../models/ifc-files.models.js";
 import type { Request, Response } from "express";
 
 export const processIfcMetradosController = asyncHandler (
@@ -87,7 +87,7 @@ export const getIfcFileStatusController = asyncHandler (
             throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
         }
 
-        const status : IfcFileStatusFull = await getIfcFileStatusService(req.user, params.data);
+        const status : IfcFileStatusWithFragments = await getIfcFileStatusService(req.user, params.data);
 
         res.status(200).json(status);
 });

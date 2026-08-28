@@ -104,3 +104,8 @@ backend/uploads/public/*
 !backend/uploads/public/default/
 backend/dist/
 frontend/dist/
+
+# Herramienta de prueba suelta para comparar web-ifc vs ThatOpen
+# Fragments (docs/report/solve/) — no es parte de la app, nunca se
+# commitea.
+herramienta-comparacion-visor/
