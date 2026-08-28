@@ -2,10 +2,13 @@ import pool from "../db/database.js";
 import { AppError } from "../models/errors/app-error.js";
 import { IFC_METRADOS_ERRORS } from "../models/errors/ifc-metrados.errors.js";
 import type { DecodedToken } from "../models/auth.models.js";
-import type { IfcFileIdParam, PartidaElementsBody, PartidaIdParam } from "../schemas/ifc-metrados.schema.js";
+import type {
+    ElementMetradoParam, IfcFileIdParam, PartidaElementsBody, PartidaIdParam
+} from "../schemas/ifc-metrados.schema.js";
 import { GROUP_BY_FIELDS } from "../schemas/ifc-metrados.schema.js";
 import {
-    buildPartidaTree, groupPartidaElements,
+    buildPartidaTree, groupPartidaElements, transformElementMetrado,
+    type ElementMetradoResult, type ElementMetradoRow,
     type PartidaElementRow, type PartidaElementsDetail, type PartidaTreeNode, type PartidaTreeRow,
     type ResolvedPropertyColumn
 } from "../models/metrado-partidas.models.js";
@@ -170,4 +173,32 @@ export const getPartidaElementsService = async (
     // Ya no se devuelve "total" acá (ver comentario en PartidaElementsDetail)
     // — ese valor ya lo trae PartidaTreeNode.total desde el árbol.
     return { partida_id: partidaId, unit: partida.unit, resolved_properties: resolvedProperties, groups };
+};
+
+// GET /ifc-files/:id/elements/:expressId/metrado — el camino inverso
+// de getPartidaElementsService: dado un elemento puntual (clickeado en
+// el visor), a qué partida pertenece y con qué metrado — liviano a
+// propósito, NO trae los demás elementos de esa partida (eso ya lo
+// resuelve getPartidaElementsService/POST .../partidas/:partidaId/elements,
+// que el frontend llama aparte si el usuario pide ver la partida
+// completa — ver mejoras-backend-post-auditoria.md, punto 1).
+export const getElementMetradoService = async (
+    user : DecodedToken, { ifcFileId, expressId } : ElementMetradoParam
+) : Promise<ElementMetradoResult> => {
+
+    await assertIfcFileAccess(ifcFileId, user.user_id);
+
+    const result = await pool.query<ElementMetradoRow>(
+        `SELECT e.express_id, e.tag,
+            mp.partida_id, mp.code, mp.description, mp.unit,
+            me.length, me.run_length, me.width, me.height, me.diameter, me.quantity, me.area, me.volume, me.weight,
+            me.origen_metrado
+        FROM ifc_elements e
+        LEFT JOIN metrado_elements me ON me.element_id = e.element_id
+        LEFT JOIN metrado_partidas mp ON mp.partida_id = me.partida_id
+        WHERE e.ifc_file_id = $1 AND e.express_id = $2`,
+        [ifcFileId, expressId]
+    );
+
+    return transformElementMetrado(expressId, result.rows[0]);
 };

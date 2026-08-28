@@ -358,3 +358,80 @@ export const groupPartidaElements = (
         };
     });
 };
+
+// ------------------------------------------------------------------
+// GET /ifc-files/:id/elements/:expressId/metrado — metrado de un
+// elemento puntual (mejoras-backend-post-auditoria.md, punto 1). Fila
+// cruda: LEFT JOIN completo (ifc_elements -> metrado_elements ->
+// metrado_partidas) — partida_id viene NULL cuando el elemento existe
+// pero no está clasificado en ninguna partida (hoy no pasa nunca, ver
+// docs/roadmap/mejoras-backend-post-auditoria.md punto 1: el pipeline
+// de Python descarta los elementos que no logra clasificar ANTES de
+// que lleguen a ifc_elements — pero el JOIN queda defensivo por si eso
+// cambia algún día).
+export interface ElementMetradoRow {
+    express_id : number;
+    tag : string | null;
+    partida_id : number | null;
+    code : string | null;
+    description : string | null;
+    unit : string | null;
+    length : string | number | null;
+    run_length : string | number | null;
+    width : string | number | null;
+    height : string | number | null;
+    diameter : string | number | null;
+    quantity : string | number | null;
+    area : string | number | null;
+    volume : string | number | null;
+    weight : string | number | null;
+    origen_metrado : string | null;
+};
+
+export interface ElementMetradoResult {
+    express_id : number;
+    tag : string | null;
+    // null en los dos juntos (nunca uno sí y el otro no) — un solo
+    // caso de "no hay nada para mostrar acá", sea porque el express_id
+    // no existe en este archivo, sea porque existe pero no tiene
+    // partida. El frontend no necesita (ni puede, con esta forma)
+    // distinguir uno del otro — ver el roadmap, fue una decisión
+    // explícita, no un descuido.
+    partida : { partida_id : number; code : string; description : string; unit : string | null } | null;
+    metrado : {
+        length : number | null; run_length : number | null; width : number | null; height : number | null;
+        diameter : number | null; quantity : number | null; area : number | null; volume : number | null;
+        weight : number | null; origen_metrado : string | null;
+    } | null;
+};
+
+export const transformElementMetrado = (
+    expressId : number, row : ElementMetradoRow | undefined
+) : ElementMetradoResult => {
+    if (!row || row.partida_id === null) {
+        return { express_id : expressId, tag : row?.tag ?? null, partida : null, metrado : null };
+    }
+
+    return {
+        express_id : row.express_id,
+        tag : row.tag,
+        partida : {
+            partida_id : row.partida_id,
+            code : row.code as string,
+            description : row.description as string,
+            unit : row.unit,
+        },
+        metrado : {
+            length : toNumberOrNull(row.length),
+            run_length : toNumberOrNull(row.run_length),
+            width : toNumberOrNull(row.width),
+            height : toNumberOrNull(row.height),
+            diameter : toNumberOrNull(row.diameter),
+            quantity : toNumberOrNull(row.quantity),
+            area : toNumberOrNull(row.area),
+            volume : toNumberOrNull(row.volume),
+            weight : toNumberOrNull(row.weight),
+            origen_metrado : row.origen_metrado,
+        },
+    };
+};

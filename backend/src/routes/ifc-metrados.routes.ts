@@ -3,7 +3,9 @@ import { uploadDryRunFile, uploadSingleFile } from '../middlewares/upload.midlew
 import {
     classificationDryRunController, getIfcFileStatusController, processIfcMetradosController,
 } from '../controllers/ifc-metrados.controller.js';
-import { getPartidaElementsController, getPartidasTreeController } from '../controllers/metrado-partidas.controller.js';
+import {
+    getElementMetradoController, getPartidaElementsController, getPartidasTreeController
+} from '../controllers/metrado-partidas.controller.js';
 import { getAvailableColumnsController } from '../controllers/templates.controller.js';
 import { getEstadoElementosController } from '../controllers/metrados-estado.controller.js';
 import { generateExcelExportController } from '../controllers/ifc-excel-export.controller.js';
@@ -43,6 +45,12 @@ ifcFilesRouter.get('/:ifcFileId/partidas', requireAuth, getPartidasTreeControlle
 // Todavía no hay sistema de plantillas: siempre usa el set de columnas
 // por defecto (ver comentario en ifc-metrados.schema.ts).
 ifcFilesRouter.post('/:ifcFileId/partidas/:partidaId/elements', requireAuth, getPartidaElementsController);
+
+// Metrado de un elemento puntual (mejoras-backend-post-auditoria.md,
+// punto 1) — el pedido del cliente: clickear un elemento en el visor
+// y ver a qué partida pertenece, sin traer los demás elementos de esa
+// partida (eso es POST .../partidas/:partidaId/elements, aparte).
+ifcFilesRouter.get('/:ifcFileId/elements/:expressId/metrado', requireAuth, getElementMetradoController);
 
 // Catálogo (builtin + propiedades IFC de ESTE archivo) para armar o
 // editar columnas de plantilla en el frontend.

@@ -3,8 +3,20 @@ import z from 'zod';
 export const FILE_TYPES = ["ifc", "excel", "pdf", "txt", "image", "other", "fragments"] as const;
 export type FileType = (typeof FILE_TYPES)[number];
 
+// 'fragments' (migración del visor a ThatOpen, ver
+// docs/roadmap/migracion-visor-thatopen-backend.md) lo genera
+// ÚNICAMENTE fragments-runner.ts, por su propio INSERT directo — nunca
+// algo que un usuario suba a mano. Sin este enum aparte, POST
+// /:projectId/files aceptaría `file_type: "fragments"` en el body de
+// cualquier subida normal (el enum de FILE_TYPES ya lo permite a nivel
+// de Postgres/tipo), dejando crear filas "fragments" falsas, sin
+// generated_from_ifc_file_id, que además el listado normal esconde a
+// propósito (ver getProjectFilesService) — quedarían huérfanas e
+// invisibles para el propio usuario que las subió.
+export const UPLOADABLE_FILE_TYPES = ["ifc", "excel", "pdf", "txt", "image", "other"] as const;
+
 export const saveFileBodySchema = z.object({
-    file_type: z.enum(FILE_TYPES).optional(),
+    file_type: z.enum(UPLOADABLE_FILE_TYPES).optional(),
 });
 
 export type SaveFileBody = z.infer<typeof saveFileBodySchema>;
