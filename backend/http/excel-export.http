@@ -74,7 +74,7 @@ Content-Disposition: form-data; name="classification_override"
 Content-Disposition: form-data; name="file"; filename="CUS_ET2.ifc"
 Content-Type: application/octet-stream
 
-< ../../processing/proceso-metrados-base/archives/CUS-ET2 ST1 EST BIM 5A ZZZ 1001.ifc
+< ../../processing/proceso-metrados-base/archives/CUS ET2 ST1 EST BIM 5A ZZZ 1001.ifc
 --WebAppBoundary--
 
 

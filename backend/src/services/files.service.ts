@@ -135,6 +135,16 @@ export const getProjectFilesService = async (
         INNER JOIN users u ON u.user_id = f.uploaded_by
         WHERE f.project_id = $1
             AND ($2::VARCHAR IS NULL OR f.file_type = $2)
+            -- Migración del visor a ThatOpen (ver
+            -- docs/roadmap/migracion-visor-thatopen-backend.md) — el
+            -- .frag es puramente técnico (para el visor), nadie lo sube
+            -- ni lo pide a mano; no tiene sentido mezclarlo en el
+            -- listado de archivos del proyecto con nombre de UUID
+            -- ilegible. Se descarga siempre por fragments_file_id (GET
+            -- /ifc-files/:id, B3), nunca navegando este listado —
+            -- incondicional, ni siquiera pidiendo ?file_type=fragments
+            -- a propósito (mismo criterio que la portada, abajo).
+            AND f.file_type != 'fragments'
             AND (
                 $3::BOOLEAN IS NULL                                             -- no se pidió filtro de procesado
                 OR ($3 = true  AND i.status = 'done')

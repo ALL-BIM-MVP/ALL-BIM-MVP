@@ -94,7 +94,11 @@ export const getProjectByIdService = async (
     // Resumen de archivos por tipo — 'ifc' sale de ifc_documents (por
     // lo mismo de arriba: documentos, no versiones), el resto es
     // conteo directo de `files` (excluyendo la portada del proyecto,
-    // que no es "un archivo subido" para este resumen).
+    // que no es "un archivo subido" para este resumen, y 'fragments' —
+    // migración del visor a ThatOpen — que es puramente técnico, no
+    // algo que el usuario subió/generó a propósito, ver
+    // getProjectFilesService en files.service.ts para el mismo
+    // criterio aplicado al listado).
     const ifcCountResult = await pool.query<{ count : number }>(
         `SELECT COUNT(*)::int AS count FROM ifc_documents WHERE project_id = $1`,
         [projectId]
@@ -102,7 +106,7 @@ export const getProjectByIdService = async (
     const otherTypesResult = await pool.query<FileTypeSummary>(
         `SELECT f.file_type, COUNT(*)::int AS count
         FROM files f
-        WHERE f.project_id = $1 AND f.file_type != 'ifc'
+        WHERE f.project_id = $1 AND f.file_type NOT IN ('ifc', 'fragments')
             AND NOT EXISTS (SELECT 1 FROM project_images pi WHERE pi.file_id = f.file_id)
         GROUP BY f.file_type`,
         [projectId]

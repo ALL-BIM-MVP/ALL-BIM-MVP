@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import pool from "../db/database.js";
 import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import type { IfcClassificationSnapshot } from "../models/ifc-classification.models.js";
+import { generateFragmentsForIfcFile } from "./fragments-runner.js";
 
 // ------------------------------------------------------------------
 // El "worker" real: invoca el pipeline de Python como subprocess,
@@ -540,6 +541,16 @@ export const runIfcProcessing = async (
 
         try {
             await insertarResultado(ifcFileId, resultado, classificationSnapshot);
+            // Fase 2 de la migración del visor a ThatOpen (ver
+            // docs/roadmap/migracion-visor-thatopen-backend.md, B2) —
+            // fire-and-forget A PROPÓSITO, igual que el resto del
+            // pipeline: el metrado/clasificación ya quedó guardado bien
+            // arriba, esto es puramente una optimización del visor que
+            // nunca debe demorar ni condicionar la respuesta de este
+            // procesamiento. generateFragmentsForIfcFile nunca lanza
+            // hacia arriba (loguea sus propios errores) y es idempotente
+            // (no repite conversión en un reproceso del mismo archivo).
+            void generateFragmentsForIfcFile(ifcFileId, resolvedPath);
         } catch (error) {
             console.error(`[ifc-metrados] fallo insertando resultado (ifc_file_id=${ifcFileId}):`, error);
             await markError(ifcFileId, (error as Error).message ?? String(error));

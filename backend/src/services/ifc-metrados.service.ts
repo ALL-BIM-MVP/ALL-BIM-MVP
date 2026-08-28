@@ -14,7 +14,9 @@ import type { ProjectIdParam } from "../schemas/projects.schema.js";
 import type {
     ClassificationDryRunBody, IfcFileIdParam, ProcessIfcMetradosBody, ProcessIfcMetradosQuery,
 } from "../schemas/ifc-metrados.schema.js";
-import { transformIfcFileStatus, type IfcFileStatusFull, type IfcFileStatusRow } from "../models/ifc-files.models.js";
+import {
+    transformIfcFileStatus, type IfcFileStatusFull, type IfcFileStatusRow, type IfcFileStatusWithFragments
+} from "../models/ifc-files.models.js";
 import { saveFileService } from "./files.service.js";
 import { assertModulePermission } from "./project-access.service.js";
 import {
@@ -327,14 +329,17 @@ export const processIfcMetradosService = async (
 
 export const getIfcFileStatusService = async (
     user: DecodedToken, { ifcFileId }: IfcFileIdParam
-): Promise<IfcFileStatusFull> => {
+): Promise<IfcFileStatusWithFragments> => {
 
-    const { rows } = await pool.query<IfcFileStatusRow & { project_id: number }>(
+    const { rows } = await pool.query<IfcFileStatusRow & { project_id: number; fragments_file_id: string | null }>(
         `SELECT i.ifc_file_id, i.ifc_document_id, i.version_number, i.is_current,
             i.status, i.schema_version, i.processed_at, i.error_message,
-            i.classification_config_used, f.project_id
+            i.classification_config_used, f.project_id,
+            frag.file_id AS fragments_file_id
         FROM ifc_files i
         INNER JOIN files f ON f.file_id = i.ifc_file_id
+        LEFT JOIN files frag
+            ON frag.generated_from_ifc_file_id = i.ifc_file_id AND frag.file_type = 'fragments'
         WHERE i.ifc_file_id = $1`,
         [ifcFileId]
     );
@@ -345,10 +350,9 @@ export const getIfcFileStatusService = async (
     await assertModulePermission(row.project_id, user.user_id, METRADOS_MODULE_CODE, "view");
 
     // project_id solo se pidió para validar el acceso — no es parte del
-    // contrato de salida, así que no se pasa tal cual (transformIfcFileStatus
-    // es una identidad y lo hubiera dejado pasar igual).
+    // contrato de salida, así que no se pasa tal cual.
     const { project_id: _projectId, ...status } = row;
-    return transformIfcFileStatus(status);
+    return status;
 };
 
 // Confirma que el ifc_file_id exista y que el usuario tenga el permiso

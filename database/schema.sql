@@ -92,6 +92,12 @@ CREATE TABLE projects (
     owner_id INT NOT NULL REFERENCES users(user_id),
     created_by INT NOT NULL REFERENCES users(user_id)
 );
+-- Postgres no indexa automático las columnas de FK (solo el lado
+-- referenciado) — GET /projects (scope mine/member) filtra por esto
+-- en cada login/carga del dashboard, importa más a medida que crece la
+-- cantidad de USUARIOS, no de proyectos (ver
+-- docs/roadmap/mejoras-backend-post-auditoria.md, punto 2).
+CREATE INDEX idx_projects_owner_id ON projects(owner_id);
 
 -- ------------------------------------------------------------
 -- MÓDULOS + ROLES/PERMISOS POR MÓDULO (Fase 2, ver
@@ -148,6 +154,11 @@ CREATE TABLE project_members(
     joined_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(project_id,user_id)
 );
+-- "¿a qué proyectos pertenece este usuario?" — usado en el scope
+-- mine/member de GET /projects, misma justificación que
+-- idx_projects_owner_id de arriba (ver
+-- docs/roadmap/mejoras-backend-post-auditoria.md, punto 2).
+CREATE INDEX idx_project_members_user_id ON project_members(user_id);
 
 -- Rol de módulo de un miembro que NO es owner ni admin — si un
 -- miembro no tiene fila acá para un módulo dado, el mínimo por
@@ -175,6 +186,10 @@ CREATE TABLE project_invitations(
     is_admin BOOLEAN NOT NULL DEFAULT FALSE,
     invited_by INT NOT NULL REFERENCES users(user_id)
 );
+-- getListInvitationsOfProjectService filtra por esto en cada listado
+-- de invitaciones de un proyecto (ver
+-- docs/roadmap/mejoras-backend-post-auditoria.md, punto 2).
+CREATE INDEX idx_project_invitations_project_id ON project_invitations(project_id);
 
 -- Espejo de project_member_module_roles, pero sobre la invitación
 -- (todavía no existe el project_member) — se copia 1:1 a
@@ -195,7 +210,11 @@ CREATE TABLE project_invitation_module_roles (
 CREATE TABLE files (
     file_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    file_type VARCHAR(20) NOT NULL CHECK (file_type IN ('ifc','excel','pdf','txt','image','other')),
+    -- 'fragments': migración del visor a ThatOpen (ver
+    -- docs/roadmap/migracion-visor-thatopen-backend.md, B1/B2) — un
+    -- .frag generado a partir de un 'ifc' ya procesado, mismo patrón
+    -- que 'excel' (generated_from_ifc_file_id más abajo).
+    file_type VARCHAR(20) NOT NULL CHECK (file_type IN ('ifc','excel','pdf','txt','image','other','fragments')),
     name VARCHAR(150) NOT NULL,
     file_path TEXT NOT NULL,
     file_size BIGINT,
@@ -210,6 +229,10 @@ CREATE TABLE files (
     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     uploaded_by INT NOT NULL REFERENCES users(user_id)
 );
+-- getProjectFilesService (listado de archivos de un proyecto) y la
+-- consulta de "estado de elementos" filtran por esto siempre — ver
+-- docs/roadmap/mejoras-backend-post-auditoria.md, punto 2.
+CREATE INDEX idx_files_project_id ON files(project_id);
 
 -- ------------------------------------------------------------
 -- ESPECIALIDADES Y VERSIONADO DE IFC (Fase 3, ver
@@ -242,6 +265,10 @@ CREATE TABLE ifc_documents (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id)
 );
+-- El árbol de documentos IFC de un proyecto (GET /projects/:id/ifc-documents)
+-- filtra por esto — ver docs/roadmap/mejoras-backend-post-auditoria.md,
+-- punto 2.
+CREATE INDEX idx_ifc_documents_project_id ON ifc_documents(project_id);
 
 CREATE TABLE ifc_files (
     ifc_file_id BIGINT PRIMARY KEY REFERENCES files(file_id) ON DELETE CASCADE,
@@ -516,6 +543,12 @@ CREATE TABLE metrado_elements (
     UNIQUE (partida_id, element_id)
 );
 CREATE INDEX idx_metrado_elements_partida ON metrado_elements (partida_id);
+-- GET /ifc-files/:id/elements/:expressId/metrado (ver
+-- docs/roadmap/mejoras-backend-post-auditoria.md, punto 1/2) resuelve
+-- "dame el metrado de ESTE elemento puntual" sin saber de antemano su
+-- partida_id — element_id no era columna líder de ningún índice hasta
+-- ahora (solo acompañaba a partida_id en el UNIQUE de arriba).
+CREATE INDEX idx_metrado_elements_element ON metrado_elements (element_id);
 
 
 -- ------------------------------------------------------------
