@@ -142,6 +142,7 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
   const [editModuleRoles, setEditModuleRoles] = useState<Record<string, number>>({});
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [removingMemberId, setRemovingMemberId] = useState<number | null>(null);
+  const [cancelingInvitationId, setCancelingInvitationId] = useState<number | null>(null);
   const [editAnchorRect, setEditAnchorRect] = useState<DOMRect | null>(null);
   // Posición final ya corregida (puede "voltearse" hacia arriba si no
   // entra hacia abajo) — se calcula después de medir el alto real del
@@ -287,11 +288,14 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
 
   const handleCancelInvitation = async (invitationId: number) => {
     if (!window.confirm('¿Estás seguro de cancelar esta invitación?')) return;
+    setCancelingInvitationId(invitationId);
     try {
       await cancelInvitation(invitationId);
       showMessage('✅ Invitación cancelada', 'success');
     } catch (err: any) {
       showMessage(err.message || 'Error al cancelar invitación', 'error');
+    } finally {
+      setCancelingInvitationId(null);
     }
   };
 
@@ -904,9 +908,10 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
                           <td className="px-6 py-3 text-right">
                             <button
                               onClick={() => handleCancelInvitation(inv.invitation_id)}
-                              className="text-red-500 hover:text-red-700 hover:bg-red-50 text-sm font-medium flex items-center gap-1 ml-auto px-2 py-1 rounded-md transition-colors"
+                              disabled={cancelingInvitationId === inv.invitation_id}
+                              className="text-red-500 hover:text-red-700 hover:bg-red-50 text-sm font-medium flex items-center gap-1 ml-auto px-2 py-1 rounded-md transition-colors disabled:opacity-50"
                             >
-                              <Trash2 size={14} /> Cancelar
+                              <Trash2 size={14} /> {cancelingInvitationId === inv.invitation_id ? 'Cancelando...' : 'Cancelar'}
                             </button>
                           </td>
                         </tr>

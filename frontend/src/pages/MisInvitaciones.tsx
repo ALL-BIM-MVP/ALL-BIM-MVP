@@ -9,6 +9,7 @@ const MisInvitaciones: React.FC = () => {
     loading,
     error,
     respondingId,
+    respondError,
     loadInvitations,
     respondInvitation
   } = useInvitations();
@@ -57,6 +58,9 @@ const MisInvitaciones: React.FC = () => {
                     <Clock size={12} />
                     Expira: {new Date(inv.expires_at).toLocaleDateString()}
                   </p>
+                  {respondError?.invitationId === inv.invitation_id && (
+                    <p className="text-xs text-red-500 mt-1">{respondError.message}</p>
+                  )}
                 </div>
                 <div className="flex gap-2">
                   <button

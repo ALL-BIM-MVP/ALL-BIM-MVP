@@ -1,6 +1,6 @@
 // src/types/project.types.ts
 
-export type ProjectScope = 'mine' | 'owner' | 'member' | 'all';
+export type ProjectScope = 'mine' | 'owner' | 'member';
 
 export interface CoverImage {
   file_id: string | null;

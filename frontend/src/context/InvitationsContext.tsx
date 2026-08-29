@@ -17,6 +17,10 @@ interface InvitationsContextType {
   loading: boolean;
   error: string | null;
   respondingId: number | null;
+  // Error de responder UNA invitación puntual — separado de "error"
+  // (que es de cargar la lista completa) para no reemplazar toda la
+  // lista por un error que solo afecta a una fila.
+  respondError: { invitationId: number; message: string } | null;
   loadInvitations: () => Promise<void>;
   respondInvitation: (
     projectId: number,
@@ -36,6 +40,7 @@ export const InvitationsProvider: React.FC<{ children: ReactNode }> = ({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [respondingId, setRespondingId] = useState<number | null>(null);
+  const [respondError, setRespondError] = useState<{ invitationId: number; message: string } | null>(null);
 
   const loadInvitations = useCallback(async () => {
     setLoading(true);
@@ -57,11 +62,12 @@ export const InvitationsProvider: React.FC<{ children: ReactNode }> = ({
       status: 'aceptado' | 'rechazado'
     ) => {
       setRespondingId(invitationId);
+      setRespondError(null);
       try {
         await updateInvitationStatus(projectId, invitationId, { status });
         await loadInvitations();
       } catch (err: any) {
-        setError(err.message || 'Error al responder la invitación');
+        setRespondError({ invitationId, message: err.message || 'Error al responder la invitación' });
       } finally {
         setRespondingId(null);
       }
@@ -80,6 +86,7 @@ export const InvitationsProvider: React.FC<{ children: ReactNode }> = ({
         loading,
         error,
         respondingId,
+        respondError,
         loadInvitations,
         respondInvitation
       }}

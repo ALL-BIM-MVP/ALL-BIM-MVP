@@ -3,6 +3,28 @@
 // al mismo default de siempre.
 export const BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
 
+// Sin esto, un fetch colgado (servidor caído, red cortada) deja
+// cualquier botón "cargando" para siempre, sin aviso. 30s para
+// requests normales; 5min para subir/bajar archivos (pueden ser
+// varios MB, no hay que cortarlos con el mismo límite).
+const DEFAULT_TIMEOUT_MS = 30_000;
+const FILE_TIMEOUT_MS = 5 * 60_000;
+
+const fetchWithTimeout = async (url: string, options: RequestInit, timeoutMs: number): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error('Se perdió la conexión con el servidor. Probá de nuevo.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 // AppError del backend siempre manda { code, message } — antes acá se
 // tiraba el "code" y solo quedaba el mensaje, así que ningún lado del
 // frontend podía diferenciar errores puntuales (ej. IFC_INVALID_CONTENT
@@ -31,11 +53,11 @@ const refreshToken = async (): Promise<string | null> => {
   refreshPromise = (async () => {
     try {
       const refresh = localStorage.getItem('refreshToken');
-      const response = await fetch(`${BASE_URL}/api/auth/refresh`, {
+      const response = await fetchWithTimeout(`${BASE_URL}/api/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refresh }), // el backend espera "refresh_token", no "token" (ver auth.controller.ts)
-      });
+      }, DEFAULT_TIMEOUT_MS);
 
       if (!response.ok) throw new Error();
       const data = await response.json();
@@ -81,6 +103,7 @@ const refreshToken = async (): Promise<string | null> => {
 const request = async (endpoint: string, options: RequestInit = {}) => {
   let token = localStorage.getItem('accessToken');
   const isFormData = options.body instanceof FormData;
+  const timeoutMs = isFormData ? FILE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
 
   const headers = {
     ...options.headers,
@@ -88,7 +111,7 @@ const request = async (endpoint: string, options: RequestInit = {}) => {
     'Authorization': token ? `Bearer ${token}` : '',
   };
 
-  let response = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+  let response = await fetchWithTimeout(`${BASE_URL}${endpoint}`, { ...options, headers }, timeoutMs);
 
   if (!response.ok) {
     const errorData = await response.clone().json().catch(() => ({}));
@@ -98,7 +121,7 @@ const request = async (endpoint: string, options: RequestInit = {}) => {
       token = await refreshToken();
       if (token) {
         const newHeaders = { ...headers, 'Authorization': `Bearer ${token}` };
-        response = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers: newHeaders });
+        response = await fetchWithTimeout(`${BASE_URL}${endpoint}`, { ...options, headers: newHeaders }, timeoutMs);
       }
     }
   }
@@ -130,9 +153,9 @@ export const api = {
   // que esto pide el archivo por fetch y devuelve el blob directo.
   getBlob: async (endpoint: string): Promise<Blob> => {
     const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${BASE_URL}${endpoint}`, {
+    const response = await fetchWithTimeout(`${BASE_URL}${endpoint}`, {
       headers: { 'Authorization': token ? `Bearer ${token}` : '' },
-    });
+    }, FILE_TIMEOUT_MS);
     if (!response.ok) {
       throw new Error('No se pudo descargar el archivo.');
     }
