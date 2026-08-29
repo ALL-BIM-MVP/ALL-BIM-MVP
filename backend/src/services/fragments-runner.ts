@@ -8,6 +8,7 @@ import pool from "../db/database.js";
 import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import { computeChecksum } from "./files.service.js";
 import { acquireSlot, releaseSlot } from "./ifc-processing-runner.js";
+import { logger } from "../utils/logger.js";
 
 // ------------------------------------------------------------------
 // Fase 2 de la migración del visor a ThatOpen (ver
@@ -68,7 +69,7 @@ export const generateFragmentsForIfcFile = async (
         );
         const owner = rows[0];
         if (!owner) {
-            console.error(`[fragments-runner] no se encontró la fila de files (ifc_file_id=${ifcFileId}), se omite la generación de Fragments.`);
+            logger.error({ ifcFileId }, "no se encontró la fila de files, se omite la generación de Fragments");
             return;
         }
 
@@ -108,6 +109,6 @@ export const generateFragmentsForIfcFile = async (
             releaseSlot();
         }
     } catch (error) {
-        console.error(`[fragments-runner] fallo generando Fragments (ifc_file_id=${ifcFileId}):`, error);
+        logger.error({ ifcFileId, err: error }, "fallo generando Fragments");
     }
 };
