@@ -1,9 +1,11 @@
 import React from 'react';
 import { Mail, Check, X, Clock, RefreshCw, AlertCircle } from 'lucide-react';
 import { useInvitations } from '../context/InvitationsContext';
+import { useHelpSection } from '../context/HelpContext';
 import PageHeader from '../components/PageHeader';
 
 const MisInvitaciones: React.FC = () => {
+  useHelpSection('colaboradores');
   const {
     invitations,
     loading,

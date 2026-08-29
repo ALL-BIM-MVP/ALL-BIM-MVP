@@ -4,6 +4,7 @@ import { MapPin, Plus, Filter, Search, Eye } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import NewProjectModal from '../components/NewProjectModal';
 import ProjectDetailsModal from '../components/ProjectDetailsModal';
+import { OnboardingTour } from '../components/OnboardingTour';
 import { Project, ProjectScope } from '../types/project.types';
 import { useProjects } from '../hooks/useProjects';
 import { resolveMediaUrl } from '../utils/media';
@@ -80,6 +81,7 @@ const ProjectRegistration: React.FC = () => {
           <div className="flex gap-2">
             <button
               onClick={() => setShowNewProject(true)}
+              data-tour="new-project-button"
               className="flex items-center gap-1.5 px-4 py-2 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition-colors font-semibold text-sm"
             >
               <Plus size={16} />
@@ -100,7 +102,7 @@ const ProjectRegistration: React.FC = () => {
         </div>
 
         {/* Filtros rápidos por scope */}
-        <div className="flex gap-2 mb-6 flex-wrap">
+        <div className="flex gap-2 mb-6 flex-wrap" data-tour="scope-filters">
           <button
             onClick={() => handleScopeChange('mine')}
             className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
@@ -228,6 +230,8 @@ const ProjectRegistration: React.FC = () => {
           }
         `}</style>
       </div>
+
+      <OnboardingTour />
     </div>
   );
 };

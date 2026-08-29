@@ -1,6 +1,6 @@
 // src/components/tabs/PartidasTree.tsx
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, Save, Trash2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, Save, Trash2, Info } from 'lucide-react';
 import {
   PartidaNode,
   getPartidasTree,
@@ -162,8 +162,8 @@ const PartidaDetailScreen: React.FC<{
 
   return (
     <div className="flex flex-col h-full relative">
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2 flex-shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
+      <div className="flex items-center justify-between gap-2 mb-2 flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
           <button
             onClick={onBack}
             className="w-6 h-6 flex items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors flex-shrink-0"
@@ -172,9 +172,17 @@ const PartidaDetailScreen: React.FC<{
             <ChevronLeft size={16} />
           </button>
           <div className="min-w-0">
-            <p className="text-xs font-bold text-black truncate leading-tight">
-              {node.code} · {node.description}
-            </p>
+            <div className="flex items-center gap-1">
+              <p className="text-xs font-bold text-black truncate leading-tight min-w-0">
+                {node.code} · {node.description}
+              </p>
+              <span
+                title="Partida: ítem de medición de obra — agrupa los elementos del modelo que comparten este código, con su metrado total."
+                className="flex-shrink-0"
+              >
+                <Info size={12} className="text-gray-400 cursor-help" />
+              </span>
+            </div>
             {detail && (
               <p className="text-[9px] text-gray-500 leading-tight truncate">
                 {detail.groups.length} grupo(s) · total {formatNumber(detail.total)} {node.unit}
@@ -193,6 +201,9 @@ const PartidaDetailScreen: React.FC<{
               selectTemplate(id);
             }}
           />
+          <span title="Plantilla: define qué columnas se muestran acá (propiedades del IFC, además de las columnas fijas).">
+            <Info size={12} className="text-gray-400 cursor-help" />
+          </span>
           <button
             onClick={() => {
               setEditorMode('create');

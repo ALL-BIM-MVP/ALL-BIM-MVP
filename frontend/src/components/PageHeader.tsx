@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Search, HelpCircle, Bell, Mail, Check, X, Clock, RefreshCw, User, Settings, LogOut } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { useInvitations } from "../context/InvitationsContext";
+import { useHelp } from "../context/HelpContext";
 import MiPerfilModal from "./MiPerfilModal";
 
 interface PageHeaderProps {
@@ -12,6 +13,7 @@ interface PageHeaderProps {
 
 const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
   const { user, logout } = useAuth();
+  const { helpSection } = useHelp();
   const {
     invitations,
     loading: loadingNotifications,
@@ -55,14 +57,19 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
           <Search size={18} />
         </button>
 
-        <button className="text-gray-400 hover:text-gray-600 transition-colors" title="Ayuda">
+        <button
+          onClick={() => window.open(`/ayuda/${helpSection}`, '_blank', 'noopener')}
+          className="text-gray-400 hover:text-gray-600 transition-colors"
+          title="Ayuda (se abre en una pestaña nueva)"
+          data-tour="header-help"
+        >
           <HelpCircle size={18} />
         </button>
 
         {/* ========================== */}
         {/* NOTIFICACIONES */}
         {/* ========================== */}
-        <div className="relative" ref={notificationsRef}>
+        <div className="relative" ref={notificationsRef} data-tour="header-notifications">
           <button
             onClick={() => {
               setIsNotificationsOpen(!isNotificationsOpen);
@@ -166,7 +173,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
         {/* ========================== */}
         {/* USUARIO */}
         {/* ========================== */}
-        <div className="relative" ref={menuRef}>
+        <div className="relative" ref={menuRef} data-tour="header-profile">
           <button
             onClick={() => {
               setIsMenuOpen(!isMenuOpen);

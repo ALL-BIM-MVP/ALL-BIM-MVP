@@ -1,10 +1,10 @@
 // .. pages/DashboardProjects.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { 
-  Upload, FileText, AlertCircle, 
+import {
+  Upload, FileText, AlertCircle,
   Plus, Download, X,
-  ChevronRight, Search, Maximize2, Minimize2, FileSearch, Box, ArrowLeft
+  ChevronRight, Search, Maximize2, Minimize2, FileSearch, Box, ArrowLeft, HelpCircle
 } from 'lucide-react';
 import {
   House, FolderOpen, UsersThree, Cube, SquaresFour,
@@ -25,6 +25,12 @@ import ColaboradoresTab from "../components/tabs/ColaboradoresTab";
 import ArchivosTab from "../components/tabs/ArchivosTab";
 import Visor3DTab from "../components/tabs/Visor3DTab";
 import { getEstadoElementos, EstadoElementosResult } from '../services/ifcfiles.service';
+import { useHelp, useHelpSection } from '../context/HelpContext';
+
+const TAB_TO_HELP_SECTION: Record<string, string> = {
+  colaboradores: 'colaboradores',
+  visor3d: 'visor-3d',
+};
 
 const DashboardProjects: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -42,6 +48,8 @@ const DashboardProjects: React.FC = () => {
   const [estadoElementos, setEstadoElementos] = useState<EstadoElementosResult | null>(null);
   const [ifcFiles, setIfcFiles] = useState<IFCFile[]>([]);
   const [activeTab, setActiveTab] = useState<TabType>('modulos');
+  useHelpSection(TAB_TO_HELP_SECTION[activeTab] ?? 'dentro-de-un-proyecto');
+  const { helpSection } = useHelp();
   const [showModulos, setShowModulos] = useState(false);
   const [selectedModulos, setSelectedModulos] = useState<string[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -279,6 +287,15 @@ const DashboardProjects: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-4">
+              <button
+                onClick={() => window.open(`/ayuda/${helpSection}`, '_blank', 'noopener')}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                title="Ayuda (se abre en una pestaña nueva)"
+                data-tour="header-help"
+              >
+                <HelpCircle size={18} />
+              </button>
+
               <div className="relative border-l border-gray-200 pl-4" ref={userMenuRef}>
                 <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-2">
                   {user?.profile_picture_url ? (

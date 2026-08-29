@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import {
   Plus, Trash2, X, Check, Users, CheckCircle,
   Mail, Send, RefreshCw, Clock, Search, AlertCircle,
-  Crown, Shield, AtSign, Pencil, Save,
+  Crown, Shield, AtSign, Pencil, Save, ChevronDown,
 } from 'lucide-react';
 import { useProjectInvitations } from '../../hooks/useProjectInvitations';
 import { getModules, getModuleRoles } from '../../services/module.service';
@@ -59,6 +59,66 @@ const MemberAvatar: React.FC<{ name?: string; email?: string; photoUrl?: string 
   return (
     <div className={`${dims} rounded-full ${colors.bg} ${colors.text} flex items-center justify-center font-semibold ring-2 ring-white shadow-sm flex-shrink-0`}>
       {getInitial(name, email)}
+    </div>
+  );
+};
+
+// Selector de rol con la descripción de cada opción a la vista al
+// abrirlo (no un <select> nativo — ahí solo entra texto plano en una
+// línea, no alcanza para mostrar nombre + descripción con jerarquía).
+interface RoleDropdownProps {
+  roles: ModuleRoleOption[];
+  value: number;
+  onChange: (roleId: number) => void;
+  placeholderLabel: string;
+}
+
+const RoleDropdown: React.FC<RoleDropdownProps> = ({ roles, value, onChange, placeholderLabel }) => {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, []);
+
+  const selected = roles.find((r) => r.module_role_id === value);
+
+  return (
+    <div className="relative flex-shrink-0" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1 px-2 py-1.5 border border-gray-200 rounded-md text-xs bg-white hover:border-gray-300 transition-colors whitespace-nowrap"
+      >
+        {selected ? selected.name : placeholderLabel}
+        <ChevronDown size={12} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-50 mt-1 w-72 bg-white border border-gray-200 rounded-lg shadow-xl py-1.5 max-h-80 overflow-y-auto">
+          {roles.map((role) => (
+            <button
+              key={role.module_role_id}
+              type="button"
+              onClick={() => { onChange(role.module_role_id); setOpen(false); }}
+              className="w-full text-left px-3 py-2 hover:bg-blue-50 transition-colors flex items-start justify-between gap-2"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-800">{role.name}</p>
+                {role.description && (
+                  <p className="text-xs text-gray-500 mt-0.5 leading-snug">{role.description}</p>
+                )}
+              </div>
+              {role.module_role_id === value && (
+                <Check size={14} className="text-[#0056b3] shrink-0 mt-0.5" />
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -521,21 +581,13 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
                       key={m.code}
                       className="flex items-center justify-between gap-2 bg-gray-50 border border-gray-200 rounded-md px-2.5 py-1.5"
                     >
-                      <span className="text-xs text-gray-700 font-medium truncate">{m.name}</span>
-                      <select
-                        value={editModuleRoles[m.code] ?? 0}
-                        onChange={(e) => handleEditModuleRoleChange(m.code, Number(e.target.value))}
-                        className="px-1.5 py-1 border border-gray-200 rounded text-xs outline-none focus:ring-2 focus:ring-[#0056b3] bg-white flex-shrink-0"
-                      >
-                        <option value={0}>{currentRole ? currentRole.role_name : 'Sin rol'}</option>
-                        {(moduleRolesByCode[m.code] ?? [])
-                          .filter((role) => role.module_role_id !== currentRole?.module_role_id)
-                          .map((role) => (
-                            <option key={role.module_role_id} value={role.module_role_id}>
-                              {role.name}
-                            </option>
-                          ))}
-                      </select>
+                      <span className="text-xs text-gray-700 font-medium truncate min-w-0">{m.name}</span>
+                      <RoleDropdown
+                        roles={moduleRolesByCode[m.code] ?? []}
+                        value={editModuleRoles[m.code] || currentRole?.module_role_id || 0}
+                        onChange={(roleId) => handleEditModuleRoleChange(m.code, roleId)}
+                        placeholderLabel={currentRole ? currentRole.role_name : 'Sin rol'}
+                      />
                     </div>
                   );
                 })}
@@ -752,26 +804,18 @@ const ColaboradoresTab: React.FC<ColaboradoresTabProps> = ({ onClose, projectId 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {activeModules.map((m) => (
                         <div key={m.code} className="flex items-center justify-between gap-3 bg-white border border-gray-200 rounded-md px-3 py-2">
-                          <span className="text-sm text-gray-700 font-medium">{m.name}</span>
-                          <select
+                          <span className="text-sm text-gray-700 font-medium truncate min-w-0">{m.name}</span>
+                          {/* No es un 4to rol: "Visualizador" ya ES el mínimo
+                              "solo ver" (mismo permiso view-only que el default
+                              implícito del backend cuando no se asigna ningún
+                              rol, ver project-access.service.ts) — "Seleccionar
+                              rol..." es solo el placeholder inicial. */}
+                          <RoleDropdown
+                            roles={moduleRolesByCode[m.code] ?? []}
                             value={inviteModuleRoles[m.code] ?? 0}
-                            onChange={(e) => handleModuleRoleChange(m.code, Number(e.target.value))}
-                            className="px-2 py-1.5 border border-gray-200 rounded-md text-sm outline-none focus:ring-2 focus:ring-[#0056b3] bg-white"
-                          >
-                            {/* No es un 4to rol: "Visualizador" ya ES el
-                                mínimo "solo ver" (mismo permiso view-only
-                                que el default implícito del backend cuando
-                                no se asigna ningún rol, ver
-                                project-access.service.ts). Placeholder no
-                                elegible, solo para que el select no
-                                arranque en "Administrador" por accidente. */}
-                            <option value={0} disabled hidden>Seleccionar rol...</option>
-                            {(moduleRolesByCode[m.code] ?? []).map((role) => (
-                              <option key={role.module_role_id} value={role.module_role_id}>
-                                {role.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(roleId) => handleModuleRoleChange(m.code, roleId)}
+                            placeholderLabel="Seleccionar rol..."
+                          />
                         </div>
                       ))}
                       {inactiveModules.map((m) => (
