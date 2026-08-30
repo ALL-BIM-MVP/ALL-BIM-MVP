@@ -1,8 +1,8 @@
 # Preparación para pruebas en red — instalación de todo el stack en
 # una máquina (ver docs/instalacion-cliente.md para la guía completa
-# paso a paso). Dockeriza backend (Node) + processing (Python) + BD
-# (Postgres) — el frontend NO está acá, corre nativo
-# (frontend/.env.example + "npm run dev -- --host").
+# paso a paso). Dockeriza TODO: backend (Node) + processing (Python) +
+# BD (Postgres) + frontend (build de producción, servido por nginx) —
+# "docker compose up/down" prende y apaga la instalación entera.
 #
 # .env real en la RAÍZ del repo (junto a este archivo), copiado desde
 # .env.example — docker-compose lo usa para sustituir ${DB_USER} etc.
@@ -81,6 +81,23 @@ services:
       # desde este cambio, ver .gitignore), así la portada por defecto
       # aparece sola sin ningún script de arranque a medida.
       - uploads_data:/app/backend/uploads
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Queda GRABADO en el build (ver frontend/Dockerfile) — cambiar
+        # esto implica "docker compose up -d --build frontend", no
+        # alcanza con tocar el .env y reiniciar (a diferencia del
+        # backend, que sí lee sus env vars en tiempo de ejecución).
+        VITE_API_URL: ${VITE_API_URL}
+    restart: unless-stopped
+    ports:
+      # 5173 de default a propósito, NO 80 — así el túnel de Cloudflare
+      # ya configurado (docs/instalacion-cliente.md, apunta a
+      # "http://localhost:5173") sigue funcionando sin tocar su
+      # config.yml al pasar el frontend de nativo a Docker.
+      - "${FRONTEND_HOST_PORT:-5173}:80"
 
 volumes:
   db_data:

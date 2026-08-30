@@ -10,8 +10,14 @@ export const projectService = {
   async createProject(projectData: NewProjectData): Promise<Project> {
     const newProject = {
       name: projectData.name,
-      start_date: projectData.startDate,
-      end_date: projectData.endDate,
+      // "" (fecha vacía en el <input type="date">) no es lo mismo que
+      // "sin fecha" para el backend — z.coerce.date() rechaza el
+      // string vacío como fecha inválida, a diferencia de los demás
+      // campos (texto plano, "" ahí sí es válido) — por eso solo las
+      // fechas daban error al dejarlas en blanco, aunque ninguna de
+      // las dos sea obligatoria.
+      start_date: projectData.startDate || null,
+      end_date: projectData.endDate || null,
       location: projectData.location,
       description: projectData.description,
       client: projectData.client ?? null,
@@ -41,8 +47,8 @@ export const projectService = {
   async updateProject(id: number, data: Partial<NewProjectData>): Promise<Project> {
     const payload: Record<string, any> = {};
     if (data.name !== undefined) payload.name = data.name;
-    if (data.startDate !== undefined) payload.start_date = data.startDate;
-    if (data.endDate !== undefined) payload.end_date = data.endDate;
+    if (data.startDate !== undefined) payload.start_date = data.startDate || null;
+    if (data.endDate !== undefined) payload.end_date = data.endDate || null;
     if (data.location !== undefined) payload.location = data.location;
     if (data.description !== undefined) payload.description = data.description;
     if (data.client !== undefined) payload.client = data.client;

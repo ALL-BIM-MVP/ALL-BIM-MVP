@@ -278,7 +278,16 @@ const DashboardProjectsInner: React.FC = () => {
     { id: 'visor3d', label: 'Visor 3D', icon: Cube },
   ];
 
-  if (loading) {
+  // "loading" (de useProjects) arranca en false — en el primerísimo
+  // render de esta pantalla, ANTES de que el useEffect de más arriba
+  // llegue siquiera a llamar fetchProjectById, loading=false Y
+  // project=null a la vez (todavía no hay ni pedido en curso ni
+  // resultado). Sin el "&& !error" de abajo, esa combinación
+  // calificaba como "error/no encontrado" — un parpadeo real del
+  // cartel de error antes de que aparezca el proyecto de verdad, en
+  // CADA entrada a un proyecto (bug real reportado por el usuario el
+  // 2026-08-30, casi imperceptible pero a veces se nota).
+  if (loading || (!project && !error)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">

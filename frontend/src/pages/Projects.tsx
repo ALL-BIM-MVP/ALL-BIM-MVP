@@ -12,7 +12,7 @@ import { resolveMediaUrl } from '../utils/media';
 const ProjectRegistration: React.FC = () => {
   const navigate = useNavigate();
 
-  const { projects, fetchProjects, createProject, filterScope, setFilterScope, error } = useProjects();
+  const { projects, fetchProjects, createProject, deleteProject, filterScope, setFilterScope, error } = useProjects();
 
   const [showNewProject, setShowNewProject] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -214,6 +214,7 @@ const ProjectRegistration: React.FC = () => {
           isOpen={showDetailsModal}
           onClose={() => setShowDetailsModal(false)}
           project={selectedProjectForDetails}
+          onProjectDeleted={deleteProject}
         />
 
         <style>{`

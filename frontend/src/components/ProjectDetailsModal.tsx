@@ -8,7 +8,14 @@ interface ProjectDetailsModalProps {
   onClose: () => void;
   project: Project | null;
   onCoverImageUpdated?: (projectId: number, coverImage: Project['cover_image']) => void;
-  onProjectDeleted?: (projectId: number) => void;
+  // El PADRE hace el borrado de verdad (useProjects().deleteProject) —
+  // no este modal — porque ese hook, al terminar, también saca el
+  // proyecto de la lista compartida. Si este modal llamara al
+  // servicio directo (como hacía antes), el borrado funcionaba pero
+  // la lista de Projects.tsx nunca se enteraba — quedaba desactualizada
+  // hasta cambiar de filtro o hacer F5 (bug real reportado por el
+  // usuario el 2026-08-30).
+  onProjectDeleted?: (projectId: number) => Promise<void>;
 }
 
 const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
@@ -85,8 +92,7 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
     setDeleting(true);
     setDeleteError(null);
     try {
-      await projectService.deleteProject(project.project_id);
-      onProjectDeleted?.(project.project_id);
+      await onProjectDeleted?.(project.project_id);
       onClose();
     } catch (err: any) {
       setDeleteError(err.message || 'No se pudo eliminar el proyecto.');

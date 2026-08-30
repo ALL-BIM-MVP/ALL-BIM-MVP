@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Camera, Trash2, Loader2, AlertCircle, Save, ShieldAlert, X as XIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { updateMyProfile, uploadMyPhoto, deleteMyPhoto, deleteMyAccount } from '../services/users.service';
+import AvatarCropper from './AvatarCropper';
 
 interface MiPerfilModalProps {
   isOpen: boolean;
@@ -25,7 +26,9 @@ const MiPerfilModal: React.FC<MiPerfilModalProps> = ({ isOpen, onClose }) => {
   const [profileSaved, setProfileSaved] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingPhoto, setPendingPhoto] = useState<{ file: File; previewUrl: string } | null>(null);
+  // Solo el File elegido — el recorte (arrastrar/zoom) vive adentro de
+  // AvatarCropper, esto acá ni sabe que existe hasta que se confirma.
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [deletingPhoto, setDeletingPhoto] = useState(false);
@@ -68,25 +71,24 @@ const MiPerfilModal: React.FC<MiPerfilModalProps> = ({ isOpen, onClose }) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    const previewUrl = URL.createObjectURL(file);
-    setPendingPhoto({ file, previewUrl });
+    setPendingFile(file);
     setPhotoError(null);
   };
 
   const cancelPendingPhoto = () => {
-    if (pendingPhoto) URL.revokeObjectURL(pendingPhoto.previewUrl);
-    setPendingPhoto(null);
+    setPendingFile(null);
+    setPhotoError(null);
   };
 
-  const confirmUploadPhoto = async () => {
-    if (!pendingPhoto) return;
+  // Recibe el archivo YA recortado (cuadrado, según lo que el usuario
+  // eligió en AvatarCropper) — no el original que se seleccionó.
+  const confirmUploadPhoto = async (croppedFile: File) => {
     setUploadingPhoto(true);
     setPhotoError(null);
     try {
-      const result = await uploadMyPhoto(pendingPhoto.file);
+      const result = await uploadMyPhoto(croppedFile);
       updateUser({ profile_picture_url: result.profile_picture_url });
-      URL.revokeObjectURL(pendingPhoto.previewUrl);
-      setPendingPhoto(null);
+      setPendingFile(null);
     } catch (err: any) {
       setPhotoError(err.message || 'No se pudo subir la foto.');
     } finally {
@@ -263,42 +265,14 @@ const MiPerfilModal: React.FC<MiPerfilModalProps> = ({ isOpen, onClose }) => {
         </div>
       </div>
 
-      {pendingPhoto && (
-        <div
-          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-[210] p-6"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="bg-white rounded-xl shadow-2xl max-w-xs w-full overflow-hidden">
-            <div className="p-5 flex flex-col items-center">
-              <img
-                src={pendingPhoto.previewUrl}
-                alt="Vista previa"
-                className="w-32 h-32 rounded-full object-cover mb-3"
-              />
-              <p className="text-xs text-gray-500 text-center">
-                Se recorta automáticamente a un cuadrado al subirla.
-              </p>
-              {photoError && <p className="text-xs text-red-600 mt-2">{photoError}</p>}
-            </div>
-            <div className="px-5 py-3.5 border-t border-gray-100 bg-gray-50/70 flex justify-end gap-2">
-              <button
-                onClick={cancelPendingPhoto}
-                disabled={uploadingPhoto}
-                className="px-3.5 py-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors disabled:opacity-50"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={confirmUploadPhoto}
-                disabled={uploadingPhoto}
-                className="flex items-center gap-2 px-4 py-1.5 bg-[#0056b3] text-white rounded-lg text-sm font-semibold hover:bg-[#004494] disabled:opacity-50 transition-colors"
-              >
-                {uploadingPhoto && <Loader2 size={14} className="animate-spin" />}
-                Confirmar
-              </button>
-            </div>
-          </div>
-        </div>
+      {pendingFile && (
+        <AvatarCropper
+          file={pendingFile}
+          uploading={uploadingPhoto}
+          error={photoError}
+          onCancel={cancelPendingPhoto}
+          onConfirm={confirmUploadPhoto}
+        />
       )}
 
       {showDeleteAccount && (

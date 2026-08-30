@@ -181,6 +181,10 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
 
         {/* Contenido */}
         <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-6">
+          <p className="text-xs text-slate-500 -mb-2">
+            Define cómo el sistema identifica a qué partida pertenece cada elemento al subir un IFC.
+          </p>
+
           {/* Sección 1: Cómo agrupar */}
           <div className="space-y-3">
             <h4 className="text-sm font-semibold text-slate-800">Cómo agrupar los elementos</h4>
@@ -330,8 +334,8 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                 className="w-full px-3 py-2 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
               />
               <p className="text-xs text-slate-500 mt-1">
-                Identifica qué propiedades escribió a mano el usuario, vs. las que exporta Revit solo.
-                Aplica sin importar cómo agrupás arriba.
+                Sirve para diferenciar las propiedades que alguien completó a mano en el IFC de las
+                que Revit genera automáticamente. Se aplica sin importar qué opción elegiste arriba.
               </p>
             </div>
 
