@@ -4,7 +4,7 @@ import { NewProjectData } from '../types/project.types';
 interface NewProjectModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (projectData: NewProjectData) => void;
+  onCreate: (projectData: NewProjectData) => Promise<void>;
 }
 
 const NewProjectModal: React.FC<NewProjectModalProps> = ({
@@ -21,17 +21,23 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({
     client: '',
     contractor: ''
   });
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onCreate({
-      ...newProject,
-      // Campos opcionales: si quedaron vacíos, mandamos null en vez de
-      // string vacío (el backend acepta null, y así no guardamos "" como dato).
-      client: newProject.client?.trim() ? newProject.client.trim() : null,
-      contractor: newProject.contractor?.trim() ? newProject.contractor.trim() : null,
-    });
-    setNewProject({ name: '', location: '', startDate: '', endDate: '', description: '', client: '', contractor: '' });
+    setSubmitting(true);
+    try {
+      await onCreate({
+        ...newProject,
+        // Campos opcionales: si quedaron vacíos, mandamos null en vez de
+        // string vacío (el backend acepta null, y así no guardamos "" como dato).
+        client: newProject.client?.trim() ? newProject.client.trim() : null,
+        contractor: newProject.contractor?.trim() ? newProject.contractor.trim() : null,
+      });
+      setNewProject({ name: '', location: '', startDate: '', endDate: '', description: '', client: '', contractor: '' });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -43,9 +49,10 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({
         <div className="overflow-y-auto p-8">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-2xl font-bold text-gray-800">Nuevo Proyecto</h3>
-          <button 
+          <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 text-2xl transition-colors"
+            disabled={submitting}
+            className="text-gray-400 hover:text-gray-600 text-2xl transition-colors disabled:opacity-50"
           >
             ✕
           </button>
@@ -148,15 +155,17 @@ const NewProjectModal: React.FC<NewProjectModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-semibold"
+              disabled={submitting}
+              className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition font-semibold disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="flex-1 px-4 py-2.5 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition font-semibold"
+              disabled={submitting}
+              className="flex-1 px-4 py-2.5 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition font-semibold disabled:opacity-50"
             >
-              Crear Proyecto
+              {submitting ? 'Creando...' : 'Crear Proyecto'}
             </button>
           </div>
         </form>

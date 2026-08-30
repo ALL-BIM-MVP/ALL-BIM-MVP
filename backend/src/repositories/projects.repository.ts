@@ -1,9 +1,6 @@
-import { ROLES } from "../constants/roles.js";
-import { AppError } from "../models/errors/app-error.js";
-import { PERMISSION_ERRORS } from "../models/errors/permission.errors.js";
 import type { GetProjectsQuery } from "../schemas/projects.schema.js";
 
-export const buildProjectScopeFilter = ( scope : GetProjectsQuery["scope"], userId: number, roleId: number ) => {
+export const buildProjectScopeFilter = ( scope : GetProjectsQuery["scope"], userId: number ) => {
 
     switch(scope) {
         case "mine":
@@ -38,16 +35,6 @@ export const buildProjectScopeFilter = ( scope : GetProjectsQuery["scope"], user
                 AND p.owner_id != $1
                 `,
                 params: [userId]
-            };
-
-        case "all":
-            if (roleId !== ROLES.ADMINISTRADOR) {
-                throw new AppError(PERMISSION_ERRORS.ADMIN_PERMISSION_REQUIRED);
-            }
-
-            return {
-                where: "",
-                params: []
             };
     }
 };

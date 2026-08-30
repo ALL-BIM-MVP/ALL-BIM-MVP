@@ -14,11 +14,11 @@ import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import type { UserSuggestion } from "../models/users.models.js";
 import type { SearchUserQuery } from "../schemas/project-invitations.schema.js";
 
-export const getListProjectService = async ( 
-    { user_id : userId, role_id : roleId } : DecodedToken, { scope } : GetProjectsQuery
+export const getListProjectService = async (
+    { user_id : userId } : DecodedToken, { scope } : GetProjectsQuery
 ) : Promise< ProjectFull[] > => {
 
-    const { where, params } = buildProjectScopeFilter(scope, userId, roleId)
+    const { where, params } = buildProjectScopeFilter(scope, userId)
 
     const result = await pool.query<ProjectRow>(
         `SELECT

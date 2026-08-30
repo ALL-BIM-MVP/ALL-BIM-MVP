@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { Project, ProjectScope, NewProjectData } from '../types/project.types';
 import { projectService } from '../services/project.service';
 import { useAuth } from '../context/AuthContext';
-import { ROLE_IDS } from '../utils/roles';
 
 export const useProjects = () => {
   const { user } = useAuth();
@@ -10,11 +9,6 @@ export const useProjects = () => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Solo Administrador puede pedir "todos los proyectos" (scope=all).
-  // El resto de roles ve únicamente los suyos ("mine").
-  // Empieza en 'mine' por defecto (más restrictivo) hasta que
-  // el useEffect de abajo confirme el rol real.
   const [filterScope, setFilterScope] = useState<ProjectScope>('mine');
 
   // Obtener todos los proyectos
@@ -124,15 +118,6 @@ export const useProjects = () => {
       setLoading(false);
     }
   }, []);
-  // Recalcula el scope correcto cada vez que el usuario del Context
-  // cambia (por ejemplo, cuando termina de cargar tras un F5).
-  // No se calcula solo una vez en el useState de arriba, porque en el
-  // primer render "user" puede llegar null y quedaría mal fijado.
-  useEffect(() => {
-    if (!user) return;
-    const scope: ProjectScope = user.rol_id === ROLE_IDS.ADMINISTRADOR ? 'all' : 'mine';
-    setFilterScope(scope);
-  }, [user]);
 
   useEffect(() => {
     if (!user) return; // espera a que el AuthContext ya tenga el usuario cargado

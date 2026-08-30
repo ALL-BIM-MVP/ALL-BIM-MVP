@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import express from "express";
+import { pinoHttp } from "pino-http";
+import { logger } from './utils/logger.js';
 import corsConfig from './utils/cors.js'
 import routerAuth from './routes/auth.routes.js';
 import routerRoles from './routes/roles.routes.js';
@@ -30,6 +32,15 @@ const app = express();
 // leer X-Forwarded-For — ni cero (rompe el rate limit) ni "true" a
 // ciegas (confiaría en cualquier cantidad de hops, spoofeable).
 app.set('trust proxy', 1);
+
+// Loguea cada request (método, ruta, status, duración) en JSON
+// estructurado — antes de esto no había ningún registro automático de
+// tráfico, solo lo que cada endpoint decidiera loguear a mano (casi
+// nada). Va primero, antes de cualquier otro middleware, para medir
+// el tiempo total real de la request. auto-loguea excepciones no
+// atrapadas también (nivel 'error'), aunque errorHandler más abajo
+// sigue siendo el que arma la respuesta HTTP.
+app.use(pinoHttp({ logger }));
 
 app.use(corsConfig);
 app.use(express.json());
@@ -81,6 +92,5 @@ await recoverStaleProcessingRows();
 await ensureBootstrapAdminService();
 
 app.listen(PORT, () => {
-  console.log(`\nServidor corriendo en http://localhost:${PORT}\n`);
-
+  logger.info(`Servidor corriendo en http://localhost:${PORT}`);
 });

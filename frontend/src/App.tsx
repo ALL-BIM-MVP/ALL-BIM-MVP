@@ -11,16 +11,22 @@ import Register from './pages/Register';
 import DashboardProjects from './pages/DashboardProjects';
 import MisInvitaciones from './pages/MisInvitaciones';
 import FragmentsPreview from './components/FragmentsPreview';
+import Ayuda from './pages/Ayuda';
+import { GlobalHelpShortcut } from './components/GlobalHelpShortcut';
+
 
 import { AuthProvider } from './context/AuthContext';
-import { InvitationsProvider } from './context/InvitationsContext'; // 
+import { InvitationsProvider } from './context/InvitationsContext'; //
+import { HelpProvider } from './context/HelpContext';
 import { ROLE_IDS } from './utils/roles';
 
 function App() {
   return (
     <AuthProvider>
       <InvitationsProvider>{/*  nuevo, envuelve todo el router */}
+        <HelpProvider>
         <BrowserRouter>
+          <GlobalHelpShortcut />
           <Routes>
             {/* Ruta pública */}
             <Route path="/login" element={<Login />} />
@@ -37,6 +43,11 @@ function App() {
                 <FragmentsPreview />
               </ProtectedRoute>
             } />
+
+            {/* Pública a propósito — la guía no pide sesión, así se
+                puede abrir en una pestaña nueva y hasta compartir el
+                link sin que el destinatario tenga que estar logueado. */}
+            <Route path="/ayuda/:seccion?" element={<Ayuda />} />
 
             <Route element={<MainLayout />}>
 
@@ -76,13 +87,13 @@ function App() {
               {/* Nueva: pantalla de "Mi perfil" — cualquier usuario
                   logueado puede editar sus propios datos, sin importar
                   su rol. */}
-              
 
               {/* Redirección por defecto */}
               <Route path="/" element={<Navigate to="/login" replace />} />
             </Route>
           </Routes>
         </BrowserRouter>
+        </HelpProvider>
       </InvitationsProvider>
     </AuthProvider>
   );

@@ -9,6 +9,7 @@ import pool from "../db/database.js";
 import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import type { IfcClassificationSnapshot } from "../models/ifc-classification.models.js";
 import { generateFragmentsForIfcFile } from "./fragments-runner.js";
+import { logger } from "../utils/logger.js";
 
 // ------------------------------------------------------------------
 // El "worker" real: invoca el pipeline de Python como subprocess,
@@ -520,7 +521,7 @@ export const runIfcProcessing = async (
             const detalle = err.killed
                 ? `Tiempo de espera agotado procesando el IFC (${PROCESSING_TIMEOUT_MS}ms).`
                 : (err.stderr || err.message);
-            console.error(`[ifc-metrados] fallo en subprocess Python (ifc_file_id=${ifcFileId}):`, err.stderr || err.message);
+            logger.error({ ifcFileId, err }, "fallo en subprocess Python");
             await markError(ifcFileId, detalle);
             return;
         } finally {
@@ -532,7 +533,7 @@ export const runIfcProcessing = async (
             const raw = await fs.readFile(tmpOutPath, "utf-8");
             resultado = JSON.parse(raw) as PipelineResult;
         } catch (error) {
-            console.error(`[ifc-metrados] no se pudo leer/parsear el resultado (ifc_file_id=${ifcFileId}):`, error);
+            logger.error({ ifcFileId, err: error }, "no se pudo leer/parsear el resultado del pipeline");
             await markError(ifcFileId, "El procesamiento no devolvió un resultado válido.");
             return;
         } finally {
@@ -552,7 +553,7 @@ export const runIfcProcessing = async (
             // (no repite conversión en un reproceso del mismo archivo).
             void generateFragmentsForIfcFile(ifcFileId, resolvedPath);
         } catch (error) {
-            console.error(`[ifc-metrados] fallo insertando resultado (ifc_file_id=${ifcFileId}):`, error);
+            logger.error({ ifcFileId, err: error }, "fallo insertando el resultado del pipeline");
             await markError(ifcFileId, (error as Error).message ?? String(error));
         }
     } finally {
@@ -574,6 +575,6 @@ export const recoverStaleProcessingRows = async (): Promise<void> => {
         ["Procesamiento interrumpido por reinicio del servidor."]
     );
     if (result.rowCount && result.rowCount > 0) {
-        console.warn(`[ifc-metrados] ${result.rowCount} fila(s) en 'processing' marcadas como 'error' tras reinicio del servidor.`);
+        logger.warn({ rowCount: result.rowCount }, "filas en 'processing' marcadas como 'error' tras reinicio del servidor");
     }
 };
