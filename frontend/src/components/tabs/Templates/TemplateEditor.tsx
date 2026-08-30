@@ -157,15 +157,12 @@ const TemplateEditor: React.FC<TemplateEditorProps> = ({
         .map((s) =>
           s._localId !== setLocalId ? s : { ...s, columns: s.columns.filter((c) => c._localId !== colLocalId) }
         )
-        // Si el set se quedó sin columnas, se saca del todo — un set
-        // vacío no sirve para nada en la UI, y el backend lo rechaza
-        // igual al guardar (mínimo 1 columna por set).
+        
         .filter((s) => s.columns.length > 0)
     );
   }
 
-  // Agrega una columna del catálogo al set correcto, creándolo si
-  // hace falta (ver CATEGORY_TO_SET_NAME arriba).
+  
   function addColumn(
     targetSetName: string,
     column: Pick<TemplateColumn, 'name' | 'source_type' | 'builtin_field' | 'property_set_name' | 'property_name'>

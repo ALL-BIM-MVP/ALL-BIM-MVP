@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
+import { convertIfcToFragmentsClientSide } from '../IFCViewer/workers/fragmentsImportWorkerClient';
 import { UploadSimple, X as XIcon } from '@phosphor-icons/react';
 import PartidasTree from './PartidasTree';
 import ClassificationConfigModal from './ClassificationConfigModal';
@@ -20,6 +21,7 @@ import {
   ClassificationOverrideInput,
   listProjectIfcFiles,
   getFileContentArrayBuffer,
+  getIfcProcessStatus,
   uploadAndProcessIfcFile,
   processExistingIfcFile,
   pollIfcProcessStatus,
@@ -29,6 +31,7 @@ import {
   exportToExcel,
   getPartidasTree,
   classificationDryRun,
+  getElementMetrado,
 } from '../../services/ifcfiles.service';
 import type { PartidaNode, ClassificationDryRunResult } from '../../services/ifcfiles.service';
 import { projectService } from '../../services/project.service';
@@ -171,6 +174,15 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
 
   const [ifcFile, setIfcFile] = useState<File | null>(null);
   const [ifcArrayBuffer, setIfcArrayBuffer] = useState<ArrayBuffer | null>(null);
+  // Fragments como camino principal: se descarga/genera un .frag y se
+  // le pasa a IFCViewer aparte de ifcArrayBuffer (ver fragmentsBuffer
+  // en IFCViewer.tsx), que lo prefiere en cuanto está disponible — ver
+  // loadBufferIntoViewer más abajo para las dos formas de conseguirlo
+  // (ya generado en el servidor, o convertido acá mismo en el
+  // navegador) y loadTokenRef para no dejar que la conversión de un
+  // archivo viejo pise al que se cargó después.
+  const [fragmentsArrayBuffer, setFragmentsArrayBuffer] = useState<ArrayBuffer | null>(null);
+  const loadTokenRef = useRef(0);
   const [ifcLoading, setIfcLoading] = useState(false);
   const [ifcInfo, setIfcInfo] = useState<IfcFileInfo | null>(null);
   const [activePanelTab, setActivePanelTab] = useState<'resumen' | 'metrados'>('resumen');
@@ -400,10 +412,83 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showEntryPopover]);
 
-  const loadBufferIntoViewer = (buffer: ArrayBuffer, sourceFile: File | null) => {
-    setIfcArrayBuffer(buffer);
+  const loadBufferIntoViewer = (buffer: ArrayBuffer, sourceFile: File | null, ifcFileId?: string) => {
+    // Copia ANTES de hacer cualquier otra cosa con `buffer` — más abajo
+    // se guarda el ORIGINAL para el eventual respaldo web-ifc (si
+    // Fragments termina fallando del todo) y esta copia es la que se
+    // transfiere a la conversión/worker, para no arriesgar que ambos
+    // caminos terminen peleándose por el mismo buffer.
+    const bufferForFragments = buffer.slice(0);
+
     setIfcInfo(parseIfcHeader(buffer));
     setIfcFile(sourceFile);
+
+    // A propósito NO se llama setIfcArrayBuffer(buffer) acá — Fragments
+    // es el camino principal ahora: mientras se resuelve (bajar el
+    // .frag ya generado, o convertir en el navegador si hace falta), no
+    // se muestra nada por web-ifc para después tener que tirarlo y
+    // recargar todo de nuevo por Fragments (esto además fue la causa
+    // real de la carrera de "efecto que corre dos veces con el mismo
+    // buffer ya transferido" que arreglé antes en useModelLoader.ts).
+    // ifcArrayBuffer solo se termina seteando si Fragments falla de
+    // verdad (ver el catch más abajo) — ahí sí, como último recurso.
+    setIfcArrayBuffer(null);
+
+    // Token de esta carga puntual — si el usuario cambia de archivo
+    // mientras la conversión/descarga de abajo todavía está en vuelo
+    // (puede tardar bastante, sobre todo la conversión en el
+    // navegador), el resultado tardío no debe pisar el archivo nuevo
+    // que ya está en pantalla.
+    const myToken = ++loadTokenRef.current;
+    setFragmentsArrayBuffer(null);
+
+    // Cubre TODO el tiempo de espera hasta que hay algo para mostrar —
+    // antes este spinner solo tapaba la lectura del archivo local
+    // (rápida), no la descarga/conversión a Fragments de acá abajo
+    // (la parte que de verdad tarda); sin esto, después de elegir
+    // "Solo graficar"/"Procesar" parecía que no pasaba nada.
+    setIfcLoading(true);
+    const stopLoadingIfCurrent = () => { if (loadTokenRef.current === myToken) setIfcLoading(false); };
+
+    (async () => {
+      // Camino rápido: si este archivo ya pasó por el backend y tiene
+      // un .frag generado ahí (ifcFileId conocido), usar ESE — es
+      // trabajo de conversión que ya está hecho, no tiene sentido
+      // repetirlo en el navegador.
+      if (ifcFileId) {
+        try {
+          const status = await getIfcProcessStatus(ifcFileId);
+          if (status.fragments_file_id) {
+            const fragBuffer = await getFileContentArrayBuffer(status.fragments_file_id);
+            if (loadTokenRef.current === myToken) setFragmentsArrayBuffer(fragBuffer);
+            stopLoadingIfCurrent();
+            return;
+          }
+        } catch (err) {
+          console.warn('[Fragments] no se pudo traer el .frag ya generado, se intenta convertir en el navegador:', err);
+        }
+      }
+
+      // Camino de conversión en el navegador — para "Solo graficar"
+      // (el archivo nunca se sube, así que nunca va a tener un
+      // ifcFileId/.frag del servidor) y también como respaldo si el
+      // camino rápido de arriba falló o el backend todavía no terminó
+      // de generar el suyo. Corre en un Worker aparte (ver
+      // fragmentsImportWorker.ts) para no trabar la UI durante los
+      // ~15-25s reales que mide esta conversión en el backend.
+      try {
+        const fragBuffer = await convertIfcToFragmentsClientSide(bufferForFragments);
+        if (loadTokenRef.current === myToken) setFragmentsArrayBuffer(fragBuffer);
+      } catch (err) {
+        console.warn('[Fragments] no se pudo convertir a Fragments en el navegador, se cae al camino de siempre (web-ifc):', err);
+        // Último recurso — recién ACÁ se muestra algo por web-ifc, y
+        // solo porque Fragments genuinamente no se pudo armar (no como
+        // paso intermedio de todos los casos).
+        if (loadTokenRef.current === myToken) setIfcArrayBuffer(buffer);
+      } finally {
+        stopLoadingIfCurrent();
+      }
+    })();
   };
 
   // Intenta reanudar el último archivo recordado para este proyecto —
@@ -436,7 +521,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
         }
 
         const buffer = await getFileContentArrayBuffer(match.file_id);
-        loadBufferIntoViewer(buffer, new File([buffer], match.name, { type: match.mime_type }));
+        loadBufferIntoViewer(buffer, new File([buffer], match.name, { type: match.mime_type }), match.file_id);
         setCurrentFileId(match.file_id);
         setPanelStatus(ifcStatusToPanelStatus(match.ifc_status));
         setPanelErrorMessage(match.ifc_error_message ?? null);
@@ -690,7 +775,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
     setApplyingSelection(true);
     try {
       const buffer = await getFileContentArrayBuffer(selectedLoadedFileId);
-      loadBufferIntoViewer(buffer, selected ? new File([buffer], selected.name, { type: selected.mime_type }) : null);
+      loadBufferIntoViewer(buffer, selected ? new File([buffer], selected.name, { type: selected.mime_type }) : null, selectedLoadedFileId);
 
       setCurrentFileId(selectedLoadedFileId);
       const initialStatus = ifcStatusToPanelStatus(selected?.ifc_status ?? null);
@@ -722,6 +807,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   const clearIFC = () => {
     setIfcFile(null);
     setIfcArrayBuffer(null);
+    setFragmentsArrayBuffer(null);
     setIfcInfo(null);
     setCurrentFileId(null);
     setPanelStatus('unprocessed');
@@ -749,6 +835,31 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   const handleSelectGroupInViewer = useCallback((expressIds: number[]) => {
     viewerRef.current?.selectGroupInViewer(expressIds);
   }, []);
+
+  // Botón "Partida" del popup Ocultar/Aislar/Cortar (IFCViewer.tsx) —
+  // búsqueda inversa por elemento: a qué partida pertenece, si
+  // pertenece a alguna. focusPartida dispara el salto directo a esa
+  // pantalla de detalle dentro de PartidasTree (ver ese componente);
+  // onFocusPartidaHandled lo vuelve a null para que un segundo click en
+  // el MISMO elemento (mismo partida_id) dispare el efecto de nuevo.
+  const [focusPartida, setFocusPartida] = useState<{
+    partida_id: number; code: string; description: string; unit: string | null; expressId: number;
+  } | null>(null);
+
+  const handleViewElementInMetrados = useCallback(async (expressId: number) => {
+    if (!currentFileId) return;
+    try {
+      const result = await getElementMetrado(currentFileId, expressId);
+      if (!result.partida) {
+        alert('Este elemento no está clasificado en ninguna partida.');
+        return;
+      }
+      setPanelOpen(true);
+      setFocusPartida({ ...result.partida, expressId });
+    } catch (err: any) {
+      alert(err.message || 'No se pudo buscar la partida de este elemento.');
+    }
+  }, [currentFileId]);
 
   const EntryPopover: React.FC<{ align?: 'center' | 'up' }> = ({ align = 'center' }) => (
     <div
@@ -805,14 +916,16 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                   <p className="mt-4">Cargando archivo IFC...</p>
                 </div>
               </div>
-            ) : ifcArrayBuffer ? (
+            ) : (ifcArrayBuffer || fragmentsArrayBuffer) ? (
               <IFCViewer
                 ref={viewerRef}
                 fileBuffer={ifcArrayBuffer}
+                fragmentsBuffer={fragmentsArrayBuffer}
                 projectId={projectId}
                 viewCubeRightOffset={panelOpen ? panelWidth : 0}
                 viewCubeVisible={isActive}
                 isActive={isActive}
+                onViewElementInMetrados={handleViewElementInMetrados}
               />
             ) : (
               <div className="relative z-10 text-center flex flex-col items-center gap-4 px-6">
@@ -971,7 +1084,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
             </div>
 
             <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-              {!ifcArrayBuffer ? (
+              {!ifcArrayBuffer && !fragmentsArrayBuffer ? (
                 <div className="h-full flex flex-col items-center justify-center text-center gap-2 py-8">
                   <div className="w-12 h-12 rounded-full bg-slate-100/70 flex items-center justify-center">
                     <FileSearch size={22} className="text-slate-400" />
@@ -1029,6 +1142,8 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                       onSelectAllInViewer={handleSelectAllInViewer}
                       onSelectGroupInViewer={handleSelectGroupInViewer}
                       onClearSelectionInViewer={handleClearSelectionInViewer}
+                      focusPartida={focusPartida}
+                      onFocusPartidaHandled={() => setFocusPartida(null)}
                     />
                   )}
                 </div>
@@ -1081,12 +1196,12 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
             <div className="relative">
               <button
                 onClick={() => setSearchOpen((prev) => !prev)}
-                disabled={!ifcArrayBuffer}
+                disabled={!ifcArrayBuffer && !fragmentsArrayBuffer}
                 className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded transition-colors duration-200 ${
                   searchOpen
                     ? 'bg-[#0056b3] text-white'
                     : 'text-gray-700 hover:bg-gray-100 hover:text-[#0056b3]'
-                } ${!ifcArrayBuffer ? 'opacity-40 cursor-not-allowed' : ''}`}
+                } ${!ifcArrayBuffer && !fragmentsArrayBuffer ? 'opacity-40 cursor-not-allowed' : ''}`}
               >
                 <Search size={14} />
                 <span className="text-[9px] font-medium whitespace-nowrap">Buscar ID</span>

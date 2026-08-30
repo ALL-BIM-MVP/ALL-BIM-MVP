@@ -12,10 +12,7 @@ type IsolationTarget =
 export function useEntityVisibility(
   rendererRef: React.RefObject<any>,
   typeGroups: TypeGroup[],
-
   levelGroups: LevelGroup[],
-
-  
   panelOffsetPx = 0
 ) {
   const [hiddenTypes, setHiddenTypes] = useState<Set<string>>(new Set());
@@ -24,7 +21,6 @@ export function useEntityVisibility(
   const [selectedTypes, setSelectedTypes] = useState<Set<string>>(new Set());
   const [selectedLevels, setSelectedLevels] = useState<Set<string>>(new Set());
 
-  
   useEffect(() => {
     rendererRef.current?.applyPanelCompensation?.(panelOffsetPx);
     rendererRef.current?.requestRender?.();
@@ -38,8 +34,6 @@ export function useEntityVisibility(
     const renderer = rendererRef.current;
     if (!renderer) return;
 
-
-  
     renderer.clearGroupDimming?.();
 
     let isolatedIds: Set<number> | null = null;
@@ -72,53 +66,54 @@ export function useEntityVisibility(
   }, [rendererRef, typeGroups, levelGroups]);
 
   const toggleHideType = useCallback((type: string) => {
-    setHiddenTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
-      applyVisibility(next, hiddenElementIds, isolation);
-      return next;
-    });
-  }, [hiddenElementIds, isolation, applyVisibility]);
+    // Calcular fuera del updater
+    const next = new Set(hiddenTypes);
+    if (next.has(type)) next.delete(type);
+    else next.add(type);
+
+    setHiddenTypes(next);
+    applyVisibility(next, hiddenElementIds, isolation);
+  }, [hiddenTypes, hiddenElementIds, isolation, applyVisibility]);
 
   const toggleIsolateType = useCallback((type: string) => {
+    const nextIsolation: IsolationTarget = 
+      isolation?.kind === 'type' && isolation.value === type 
+        ? null 
+        : { kind: 'type', value: type };
+
     setSelectedTypes(new Set());
     setSelectedLevels(new Set());
-    setIsolation((prev) => {
-      const next: IsolationTarget = prev?.kind === 'type' && prev.value === type ? null : { kind: 'type', value: type };
-      applyVisibility(hiddenTypes, hiddenElementIds, next);
-      return next;
-    });
-  }, [hiddenTypes, hiddenElementIds, applyVisibility]);
+    setIsolation(nextIsolation);
+    applyVisibility(hiddenTypes, hiddenElementIds, nextIsolation);
+  }, [hiddenTypes, hiddenElementIds, isolation, applyVisibility]);
 
   const toggleSelectType = useCallback((type: string) => {
-    
-    setSelectedLevels(new Set());
-    setSelectedTypes((prev) => {
-      const next = new Set(prev);
-      if (next.has(type)) next.delete(type);
-      else next.add(type);
+    // Calcular fuera del updater
+    const next = new Set(selectedTypes);
+    if (next.has(type)) next.delete(type);
+    else next.add(type);
 
-      const nextIsolation: IsolationTarget = next.size > 0 ? { kind: 'types', value: next } : null;
-      setIsolation(nextIsolation);
-      applyVisibility(hiddenTypes, hiddenElementIds, nextIsolation);
-      return next;
-    });
-  }, [hiddenTypes, hiddenElementIds, applyVisibility]);
+    const nextIsolation: IsolationTarget = next.size > 0 ? { kind: 'types', value: next } : null;
+
+    setSelectedLevels(new Set());
+    setSelectedTypes(next);
+    setIsolation(nextIsolation);
+    applyVisibility(hiddenTypes, hiddenElementIds, nextIsolation);
+  }, [selectedTypes, hiddenTypes, hiddenElementIds, applyVisibility]);
 
   const toggleSelectLevel = useCallback((level: string) => {
-    setSelectedTypes(new Set());
-    setSelectedLevels((prev) => {
-      const next = new Set(prev);
-      if (next.has(level)) next.delete(level);
-      else next.add(level);
+    // Calcular fuera del updater
+    const next = new Set(selectedLevels);
+    if (next.has(level)) next.delete(level);
+    else next.add(level);
 
-      const nextIsolation: IsolationTarget = next.size > 0 ? { kind: 'levels', value: next } : null;
-      setIsolation(nextIsolation);
-      applyVisibility(hiddenTypes, hiddenElementIds, nextIsolation);
-      return next;
-    });
-  }, [hiddenTypes, hiddenElementIds, applyVisibility]);
+    const nextIsolation: IsolationTarget = next.size > 0 ? { kind: 'levels', value: next } : null;
+
+    setSelectedTypes(new Set());
+    setSelectedLevels(next);
+    setIsolation(nextIsolation);
+    applyVisibility(hiddenTypes, hiddenElementIds, nextIsolation);
+  }, [selectedLevels, hiddenTypes, hiddenElementIds, applyVisibility]);
 
   const clearSelectedLevels = useCallback(() => {
     setSelectedLevels(new Set());
@@ -133,39 +128,38 @@ export function useEntityVisibility(
   }, [hiddenTypes, hiddenElementIds, applyVisibility]);
 
   const hideElementById = useCallback((id: number) => {
-    setHiddenElementIds((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      applyVisibility(hiddenTypes, next, isolation);
-      return next;
-    });
-  }, [hiddenTypes, isolation, applyVisibility]);
+    const next = new Set(hiddenElementIds);
+    next.add(id);
+    setHiddenElementIds(next);
+    applyVisibility(hiddenTypes, next, isolation);
+  }, [hiddenTypes, hiddenElementIds, isolation, applyVisibility]);
 
   const showElementById = useCallback((id: number) => {
-    setHiddenElementIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      applyVisibility(hiddenTypes, next, isolation);
-      return next;
-    });
-  }, [hiddenTypes, isolation, applyVisibility]);
+    const next = new Set(hiddenElementIds);
+    next.delete(id);
+    setHiddenElementIds(next);
+    applyVisibility(hiddenTypes, next, isolation);
+  }, [hiddenTypes, hiddenElementIds, isolation, applyVisibility]);
 
   const isolateElementById = useCallback((id: number) => {
+    const nextIsolation: IsolationTarget = 
+      isolation?.kind === 'element' && isolation.value === id 
+        ? null 
+        : { kind: 'element', value: id };
+
     setSelectedTypes(new Set());
     setSelectedLevels(new Set());
-    setIsolation((prev) => {
-      const next: IsolationTarget = prev?.kind === 'element' && prev.value === id ? null : { kind: 'element', value: id };
-      applyVisibility(hiddenTypes, hiddenElementIds, next);
-      return next;
-    });
-  }, [hiddenTypes, hiddenElementIds, applyVisibility]);
+    setIsolation(nextIsolation);
+    applyVisibility(hiddenTypes, hiddenElementIds, nextIsolation);
+  }, [hiddenTypes, hiddenElementIds, isolation, applyVisibility]);
 
   const isolateElementsByIds = useCallback((ids: number[]) => {
+    const nextIsolation: IsolationTarget = ids.length > 0 ? { kind: 'elements', value: new Set(ids) } : null;
+
     setSelectedTypes(new Set());
     setSelectedLevels(new Set());
-    const next: IsolationTarget = ids.length > 0 ? { kind: 'elements', value: new Set(ids) } : null;
-    setIsolation(next);
-    applyVisibility(hiddenTypes, hiddenElementIds, next);
+    setIsolation(nextIsolation);
+    applyVisibility(hiddenTypes, hiddenElementIds, nextIsolation);
     
     if (ids.length > 0) {
       rendererRef.current?.flyToElements?.(ids, panelOffsetPx);
@@ -184,7 +178,6 @@ export function useEntityVisibility(
     setHiddenElementIds(new Set());
     applyVisibility(new Set(), new Set(), isolation);
   }, [isolation, applyVisibility]);
-
 
   const clearAll = useCallback(() => {
     setSelectedTypes(new Set());

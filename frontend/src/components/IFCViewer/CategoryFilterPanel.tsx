@@ -32,8 +32,10 @@ function formatTypeName(type: string): string {
 // resto (elementos sin IfcBuildingStorey asociado), no tiene sentido
 // que compita alfabéticamente con los pisos de verdad.
 function sortLevelLabel(a: string, b: string): number {
-  if (a === 'Sin nivel') return 1;
-  if (b === 'Sin nivel') return -1;
+  if (a === 'Sin nivel') 
+    return 1;
+  if (b === 'Sin nivel') 
+    return -1;
   return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 }
 

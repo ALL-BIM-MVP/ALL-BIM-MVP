@@ -10,6 +10,7 @@ import MainLayout from './layouts/MainLayout';
 import Register from './pages/Register';
 import DashboardProjects from './pages/DashboardProjects';
 import MisInvitaciones from './pages/MisInvitaciones';
+import FragmentsPreview from './components/FragmentsPreview';
 
 import { AuthProvider } from './context/AuthContext';
 import { InvitationsProvider } from './context/InvitationsContext'; // 
@@ -25,6 +26,17 @@ function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
             <Route path="/dashboard-projects/:id" element={<DashboardProjects />} />
+
+            {/* Fase 1 de la migración a ThatOpen/Fragments — pantalla de
+                validación aparte, no forma parte del visor real todavía
+                (ver FragmentsPreview.tsx). Cualquier usuario logueado
+                puede entrar; no depende de un rol puntual porque es una
+                herramienta de prueba, no una función de producto. */}
+            <Route path="/fragments-preview/:ifcFileId" element={
+              <ProtectedRoute allowedRoles={[ROLE_IDS.ADMINISTRADOR, ROLE_IDS.SUPERVISOR, ROLE_IDS.MODERADOR, ROLE_IDS.USUARIO]}>
+                <FragmentsPreview />
+              </ProtectedRoute>
+            } />
 
             <Route element={<MainLayout />}>
 

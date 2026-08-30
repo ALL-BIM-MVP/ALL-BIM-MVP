@@ -236,12 +236,13 @@ export function useCrossTool(
     const id = draggingIdRef.current;
     if (!id) return false;
 
-    // Asienta la cruz centrada en la cara justo al soltar — la última
-    // posición vista (lastDragClientRef), pero ahora con recenter=true,
-    // así los brazos terminan llegando al medio de cada lado.
+    // Recalcula una última vez con la posición vista (lastDragClientRef)
+    // por si el throttle del mousemove se saltó el último punto — pero
+    // con recenter=false, igual que durante el arrastre: la cruz queda
+    // exactamente donde se soltó, no salta al centro de la cara.
     const last = lastDragClientRef.current;
     if (last) {
-      const settled = computeCrossAt(last.x, last.y, id, false, true);
+      const settled = computeCrossAt(last.x, last.y, id, false, false);
       if (settled) setCrosses(prev => prev.map(c => (c.id === id ? settled : c)));
     }
 

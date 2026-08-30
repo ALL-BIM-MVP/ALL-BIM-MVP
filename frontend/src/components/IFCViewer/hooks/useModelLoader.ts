@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import * as THREE from 'three';
+import { FragmentsModels } from '@thatopen/fragments';
 import type { TypeGroup, LevelGroup, ModelBounds, ViewPreset } from '../types';
 import { ThreeSceneController } from '../utils/ThreeSceneController';
 import { IfcWorkerClient } from '../workers/ifcWorkerClient';
@@ -37,7 +38,16 @@ interface UseModelLoaderOptions {
 export function useModelLoader(
   fileBuffer: ArrayBuffer | null,
   refs: ModelLoaderRefs,
-  options: UseModelLoaderOptions = {}
+  options: UseModelLoaderOptions = {},
+  // Fase 1 real de la migración a ThatOpen/Fragments (ver
+  // docs/roadmap/migracion-visor-thatopen.md) — primer paso: si viene
+  // el .frag ya descargado, se carga por ESTE camino en vez de abrir el
+  // worker de web-ifc. A propósito, el objeto de Fragments NO se agrega
+  // a controller.meshes (ver ThreeSceneController.addExternalObject) —
+  // eso significa que medir/seleccionar/etc. no van a encontrar nada
+  // ahí todavía; esas herramientas se evalúan una por una en Fase 3,
+  // no se migran de una junto con la geometría.
+  fragmentsBuffer: ArrayBuffer | null = null
 ) {
   const { canvasRef, containerRef, rendererRef, storeRef, modelBoundsRef } = refs;
   const { onFrame, getClearColor, getSectionPlane, isActive = true } = options;
@@ -69,10 +79,29 @@ export function useModelLoader(
     let resizeObserver: ResizeObserver | null = null;
     let controller: ThreeSceneController | null = null;
     let client: IfcWorkerClient | null = null;
+    let fragmentsInstance: FragmentsModels | null = null;
+    let fragmentsObject: THREE.Object3D | null = null;
 
     const loadModel = async () => {
-      if (!fileBuffer || !canvasRef.current || !containerRef.current) {
+      if ((!fileBuffer && !fragmentsBuffer) || !canvasRef.current || !containerRef.current) {
         setDebugInfo('Esperando archivo IFC...');
+        return;
+      }
+
+      // Guarda contra un segundo pase de este mismo efecto llegando acá
+      // con el MISMO fragmentsBuffer ya consumido por un pase anterior
+      // — FragmentsModels.load() transfiere (detach) el buffer que
+      // recibe, así que uno ya detacheado tiene byteLength 0. TIENE que
+      // ir ACÁ, antes de cualquier setState — confirmado en vivo: si
+      // este chequeo vive más abajo (después de setReady(false)), este
+      // pase duplicado deja `ready` en false para siempre (nada más lo
+      // vuelve a poner en true), y eso rompía en silencio cualquier
+      // hook que dependa de `ready` para arrancar (ej. "Aislar" en
+      // useFragmentsEntityVisibility.ts, que se quedaba sin sus
+      // categorías/niveles cargados) — "Ocultar" seguía andando porque
+      // ESE no depende de `ready`, por eso el síntoma era tan puntual.
+      if (fragmentsBuffer && fragmentsBuffer.byteLength === 0) {
+        console.warn('[useModelLoader] fragmentsBuffer ya estaba transferido (detached) — se omite esta carga, ya se hizo antes.');
         return;
       }
 
@@ -101,6 +130,118 @@ export function useModelLoader(
         canvas.style.width = '100%';
         canvas.style.height = '100%';
         setProgress(10);
+
+        if (fragmentsBuffer) {
+          setDebugInfo('Cargando modelo (Fragments)...');
+          controller = new ThreeSceneController(canvas);
+          rendererRef.current = controller;
+
+          // OJO acá: React StrictMode (dev) monta este efecto, lo
+          // "desmonta" (corre el cleanup de abajo) y lo vuelve a montar,
+          // TODO en la misma tanda — a propósito, para detectar efectos
+          // mal limpiados. Si no chequeamos isMounted después de CADA
+          // await, la instancia "vieja" (ya cancelada) sigue corriendo
+          // en segundo plano y termina pisando storeRef/rendererRef de
+          // la instancia nueva — eso causaba selección inconsistente
+          // (a veces nada, a veces de un modelo viejo). El camino de
+          // web-ifc, más abajo, ya venía con este cuidado; acá faltaba.
+          const workerUrl = await FragmentsModels.getWorker();
+          if (!isMounted) return;
+          fragmentsInstance = new FragmentsModels(workerUrl);
+          setProgress(40);
+
+          // Segunda guarda contra el MISMO caso de arriba, para la
+          // ventana angosta en la que el detach pasa DURANTE este
+          // await (getWorker) — acá no hace falta arreglar `ready`:
+          // si esto dispara, es porque algún OTRO pase de este efecto
+          // ya está (o ya terminó) cargando este mismo buffer de
+          // verdad, y ESE es el que deja `ready` en true al terminar.
+          if (fragmentsBuffer.byteLength === 0) {
+            console.warn('[useModelLoader] fragmentsBuffer se detacheó mientras se esperaba el worker — se omite esta carga.');
+            return;
+          }
+
+          const camera = controller.getCamera().camera;
+          const model = await fragmentsInstance.load(fragmentsBuffer, { modelId: 'main', camera });
+          if (!isMounted || !controller) {
+            await fragmentsInstance.dispose();
+            return;
+          }
+          setProgress(80);
+
+          model.useCamera(camera);
+          fragmentsObject = model.object;
+          // Guardado acá para que hooks aparte (ej. useFragmentsSelection)
+          // puedan llamar model.raycast(...)/model.highlight(...) sin que
+          // este archivo tenga que saber nada de selección — mismo
+          // patrón que ya usa storeRef.current.client en el camino de
+          // siempre.
+          storeRef.current = { fragments: fragmentsInstance, fragmentsModel: model };
+          // A propósito, NO pasa por controller.loadGeometry(...) — ese
+          // método registra la malla en controller.meshes, que es lo
+          // que usan pick/raycastSceneMagnetic/etc. para saber qué hay
+          // para clickear. No registrarlo acá es justamente lo que dej
+          // a las herramientas "sin encontrar nada" en este modelo,
+          // sin necesidad de tocar ninguna de ellas todavía (Fase 3
+          // las evalúa una por una).
+          controller.addExternalObject(model.object);
+          await fragmentsInstance.update(true);
+          if (!isMounted || !controller) return;
+
+          const box = new THREE.Box3().setFromObject(model.object);
+          if (!box.isEmpty()) {
+            const bounds: ModelBounds = {
+              min: { x: box.min.x, y: box.min.y, z: box.min.z },
+              max: { x: box.max.x, y: box.max.y, z: box.max.z },
+            };
+            modelBoundsRef.current = bounds;
+            controller.setModelBounds(bounds);
+            controller.fitToView();
+            await fragmentsInstance.update(true);
+            if (!isMounted || !controller) return;
+          }
+
+          let lastTime = performance.now();
+          const renderLoop = () => {
+            if (!isMounted || !controller) return;
+            if (!isActiveRef.current) {
+              lastTime = performance.now();
+              rafId = requestAnimationFrame(renderLoop);
+              return;
+            }
+            const now = performance.now();
+            const dt = Math.min((now - lastTime) / 1000, 0.1);
+            lastTime = now;
+            onFrame?.(dt);
+            controller.getCamera().update(dt);
+            controller.render({
+              clearColor: getClearColor?.() ?? [0.9333, 0.9333, 0.9333, 1],
+              sectionPlane: getSectionPlane?.(),
+            });
+            rafId = requestAnimationFrame(renderLoop);
+          };
+          renderLoop();
+
+          const resizeCanvasToContainer = () => {
+            const dpr = Math.min(window.devicePixelRatio || 1, 2);
+            const newRect = container.getBoundingClientRect();
+            const w = Math.max(1, Math.round(newRect.width * dpr));
+            const h = Math.max(1, Math.round(newRect.height * dpr));
+            if (canvas.width === w && canvas.height === h) return;
+            controller?.resize(w, h);
+          };
+          requestAnimationFrame(() => requestAnimationFrame(resizeCanvasToContainer));
+          resizeObserver = new ResizeObserver(resizeCanvasToContainer);
+          resizeObserver.observe(container);
+
+          setDebugInfo('');
+          setLoading(false);
+          setProgress(100);
+          setReady(true);
+          return;
+        }
+
+        if (!fileBuffer) return; // el guard de arriba ya asegura que uno de los dos vino
 
         setDebugInfo('Inicializando web-ifc (worker)...');
         client = new IfcWorkerClient();
@@ -223,15 +364,22 @@ export function useModelLoader(
       isMounted = false;
       if (rafId !== null) cancelAnimationFrame(rafId);
       resizeObserver?.disconnect();
+      // El objeto de Fragments se saca de la escena ANTES de
+      // controller.dispose() — ese dispose() recorre modelGroup
+      // liberando geometría/material a su manera; el modelo de
+      // Fragments se libera con su propio fragmentsInstance.dispose(),
+      // no queremos que las dos limpiezas se pisen.
+      if (fragmentsObject) controller?.removeExternalObject(fragmentsObject);
       controller?.dispose();
       client?.dispose();
+      fragmentsInstance?.dispose();
       rendererRef.current = null;
       storeRef.current = null;
       if (pendingScreenshotRef.current) {
         URL.revokeObjectURL(pendingScreenshotRef.current.previewUrl);
       }
     };
-  }, [fileBuffer]);
+  }, [fileBuffer, fragmentsBuffer]);
 
   const handleFitToView = useCallback(() => rendererRef.current?.fitToView?.(), [rendererRef]);
 

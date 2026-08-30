@@ -121,21 +121,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return persistSession(response);
   };
 
-  // Auto-login tras un registro por invitación exitoso: el backend en
-  // /api/users/register devuelve exactamente la misma forma que el login
-  // (access_token, refresh_token, rol_id, user), así que reutilizamos la
-  // misma lógica de persistSession en vez de duplicarla.
+
   const loginWithResponse = (response: AuthApiResponse): AuthUser => {
     return persistSession(response);
   };
 
-  // Única función de logout — reemplaza la de useAuth.ts Y la duplicada en Sidebar.tsx
   const logout = () => {
-    // Revoca el refresh token del lado del backend (best-effort: si falla
-    // por red, no bloqueamos el logout — total, el token igual va a dejar
-    // de servir localmente porque lo borramos abajo, y expira solo en 7
-    // días si el backend nunca se entera). Se dispara ANTES de borrar el
-    // localStorage porque necesita leer el refresh token de ahí.
+    
     const refreshToken = localStorage.getItem('refreshToken');
     if (refreshToken) {
       logoutUser(refreshToken).catch((err) => {

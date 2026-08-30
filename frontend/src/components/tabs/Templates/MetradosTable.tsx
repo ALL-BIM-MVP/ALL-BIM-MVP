@@ -1,19 +1,5 @@
 // src/components/tabs/Templates/MetradosTable.tsx
-//
-// Pinta las columnas VISIBLES de la plantilla activa (dinámico, según
-// la plantilla) sobre el detalle agrupado de una partida.
-//
-// CAMBIOS de esta versión: los headers (fila de abajo, la de los
-// nombres de columna) ahora son arrastrables — drag & drop nativo del
-// navegador, sin librería. Se puede reordenar DENTRO del mismo grupo
-// (mismo colSpan de arriba: IDENTIFICACION/DIMENSIONES/METRADO/
-// PROPIEDADES IFC) — cruzar de un grupo a otro no está soportado (el
-// modelo de datos no lo permite bien, mismo límite que ya tenía el
-// mover con flechas del editor).
-//
-// Regla del doc (paso 7 del flujo end-to-end):
-//   - columna "builtin"      -> group[builtin_field] directo
-//   - columna "ifc_property" -> group.properties["set::name"]
+
 
 import React, { useRef, useState } from 'react';
 import type { PartidaDetail, PartidaGroup } from '../../../services/ifcfiles.service';
@@ -30,17 +16,16 @@ interface MetradosTableProps {
   code: string;
   description: string;
   unit: string | null;
-  // Se llama al soltar una columna arrastrada sobre otra DEL MISMO
-  // grupo — el padre (PartidasTree) aplica el nuevo orden sobre
-  // previewSets (vista previa en vivo, igual que el resto de las
-  // ediciones). Sin esta prop, los headers no son arrastrables (modo
-  // solo-lectura, por si algún consumidor futuro no quiere permitirlo).
+ 
   onReorderColumn?: (setIndex: number, fromColIndex: number, toColIndex: number) => void;
-  // NUEVO: click en una fila (un grupo) -> el padre aísla en el visor
-  // 3D los elementos de ESE grupo puntual (no toda la partida). No
-  // hace falta pedir nada al backend — cada group.elements ya viene
-  // cargado en `detail`, es 100% client-side.
-  onSelectGroupInViewer?: (group: PartidaGroup) => void;
+
+  // Toggle: click sobre una fila resalta ese grupo en el visor 3D
+  // (highlight + propiedades del primer elemento) SIN atenuar el resto
+  // de la partida, click de nuevo sobre la fila ya resaltada la
+  // deselecciona. selectedGroupIndex lo controla el padre
+  // (PartidasTree.tsx) para que sobreviva a los re-renders de esta tabla.
+  onToggleGroupSelect?: (group: PartidaGroup, index: number) => void;
+  selectedGroupIndex?: number | null;
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -53,10 +38,7 @@ const NUMERIC_BUILTIN_FIELDS = new Set([
   'weight', 'sub_total', 'total',
 ]);
 
-// De dónde salió el número que el grupo usa como metrado (ver
-// "origen_metrado" en ifcfiles.service.ts) — se muestra como un
-// puntito con tooltip pegado al "sub_total" del grupo, para poder
-// distinguir a simple vista un valor "raro" sin ir a revisar el IFC.
+
 const ORIGEN_METRADO_LABEL: Record<string, string> = {
   tipado: 'Dimensión tipada del elemento IFC',
   geometrico: 'Calculado a partir de la geometría',
@@ -95,9 +77,7 @@ function cellValue(
   return group.properties?.[key] ?? '—';
 }
 
-// Igual que flattenVisibleColumns, pero conservando a qué set
-// pertenece cada columna y su índice DENTRO de ese set — hace falta
-// para saber qué mover cuando se suelta un drag.
+
 interface FlatColumn {
   col: TemplateColumn;
   setIndex: number;
@@ -123,7 +103,8 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
   description,
   unit,
   onReorderColumn,
-  onSelectGroupInViewer,
+  onToggleGroupSelect,
+  selectedGroupIndex = null,
 }) => {
   const { orderedSets, flat } = buildFlatColumns(template.sets);
   const draggingRef = useRef<{ setIndex: number; colIndexInSet: number } | null>(null);
@@ -218,13 +199,24 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
           </tr>
         </thead>
         <tbody>
-          {detail.groups.map((group, i) => (
+          {detail.groups.map((group, i) => {
+            const isSelected = selectedGroupIndex === i;
+            return (
             <tr
               key={i}
-              onClick={() => onSelectGroupInViewer?.(group)}
-              title={onSelectGroupInViewer ? 'Click: seleccionar en el visor 3D' : undefined}
-              className={`${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'} ${
-                onSelectGroupInViewer ? 'cursor-pointer hover:bg-blue-50 transition-colors' : ''
+              id={`metrado-row-${i}`}
+              onClick={() => onToggleGroupSelect?.(group, i)}
+              title={
+                onToggleGroupSelect
+                  ? isSelected
+                    ? 'Click: deseleccionar'
+                    : 'Click: seleccionar este grupo en el visor 3D'
+                  : undefined
+              }
+              className={`${
+                isSelected ? 'bg-blue-100' : i % 2 === 0 ? 'bg-white' : 'bg-gray-50'
+              } ${
+                onToggleGroupSelect ? 'cursor-pointer hover:bg-blue-50 transition-colors' : ''
               }`}
             >
               {flat.map((fc) => (
@@ -245,7 +237,8 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
                 </td>
               ))}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
