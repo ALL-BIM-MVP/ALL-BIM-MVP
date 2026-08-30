@@ -67,20 +67,41 @@ export const registerService = async ({name, last_name, password, token} : Regis
         if (invitationQuery.rowCount === 0) throw new AppError(INVITATION_ERRRORS.INVITATION_INVALID);
         const { role_id, email } = invitationQuery.rows[0];
 
-        const userQuery = await client.query(
-            `SELECT 1 FROM users WHERE email = $1`,
+        // El email puede pertenecer a una cuenta ACTIVA (bloquea, como
+        // siempre) o a una ELIMINADA (is_deleted=true) — en ese caso no
+        // hay choque real: esa fila se retoma más abajo en vez de
+        // insertar una nueva (ver createInvitationService, que ya deja
+        // pasar la invitación en este segundo caso).
+        const userQuery = await client.query<{ user_id : number; is_deleted : boolean }>(
+            `SELECT user_id, is_deleted FROM users WHERE email = $1`,
             [email]
         );
+        const existing = userQuery.rows[0];
 
-        if (userQuery.rowCount !== 0) throw new AppError(USER_ERRORS.USER_ALREADY_EXISTS);
+        if (existing && !existing.is_deleted) throw new AppError(USER_ERRORS.USER_ALREADY_EXISTS);
 
         const passwordHash = await bcrypt.hash(password, 10);
-        const newUser = await client.query(
-            `INSERT INTO users(name, last_name, email, password_hash, role_id)
-                VALUES ($1, $2, $3, $4, $5)
+
+        // Retoma la cuenta eliminada: mismo user_id de siempre, así que
+        // conserva su historial (proyectos, archivos subidos) — pero
+        // contraseña y rol quedan totalmente nuevos, no se reutiliza
+        // nada de la cuenta vieja más que la fila en sí.
+        const newUser = existing
+            ? await client.query(
+                `UPDATE users SET
+                    name = $1, last_name = $2, password_hash = $3, role_id = $4,
+                    is_deleted = false, deleted_by = NULL, deleted_at = NULL,
+                    active = true, deactivated_by = NULL, deactivated_at = NULL
+                WHERE user_id = $5
                 RETURNING *`,
-            [name, last_name ?? null, email, passwordHash, role_id]
-        );
+                [name, last_name ?? null, passwordHash, role_id, existing.user_id]
+            )
+            : await client.query(
+                `INSERT INTO users(name, last_name, email, password_hash, role_id)
+                    VALUES ($1, $2, $3, $4, $5)
+                    RETURNING *`,
+                [name, last_name ?? null, email, passwordHash, role_id]
+            );
         const user = newUser.rows[0];
 
         await client.query(
@@ -301,6 +322,17 @@ const getUserByIdForAdminService = async (userId : number) : Promise<UserRespons
 // de los datos del usuario (archivos subidos, membresías, invitaciones)
 // se deja intacto a propósito.
 const deleteUserCore = async (targetUserId : number, deletedBy : number) : Promise<void> => {
+    // La cuenta ADMINISTRADOR nunca se borra — ver CANNOT_DELETE_ADMINISTRATOR.
+    // Chequeo explícito ANTES de la transacción: un mensaje claro acá,
+    // no el error crudo del CHECK de la BD (esa es la red de
+    // seguridad de verdad, esto es la experiencia normal).
+    const roleCheck = await pool.query<{ role_id : number }>(
+        `SELECT role_id FROM users WHERE user_id = $1`, [targetUserId]
+    );
+    if (roleCheck.rows[0]?.role_id === ROLES.ADMINISTRADOR) {
+        throw new AppError(USER_ERRORS.CANNOT_DELETE_ADMINISTRATOR);
+    }
+
     const client = await pool.connect();
     try {
         await client.query("BEGIN");

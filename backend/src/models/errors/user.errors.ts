@@ -56,6 +56,21 @@ export const USER_ERRORS = {
         }
     },
 
+    // La cuenta ADMINISTRADOR (role_id=1) nunca se puede eliminar —
+    // ni por autogestión ni por otro administrador. Es la única cuenta
+    // que puede asignar el resto de los roles (is_assignable=false, ver
+    // users.service.ts, ensureBootstrapAdminService) — perderla deja la
+    // plataforma sin forma de administrarse. Reforzado también con un
+    // CHECK a nivel de BD (database/schema.sql), esto es la primera
+    // barrera (mensaje claro), no la única.
+    CANNOT_DELETE_ADMINISTRATOR: {
+        statusCode:400,
+        response:{
+            code:"CANNOT_DELETE_ADMINISTRATOR",
+            message:"La cuenta de Administrador no se puede eliminar."
+        }
+    },
+
     NO_PROFILE_PICTURE: {
         statusCode:404,
         response:{

@@ -1,6 +1,6 @@
 // .. pages/DashboardProjects.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Upload, FileText, AlertCircle,
   Plus, Download, X,
@@ -17,7 +17,7 @@ import { MODULOS } from '../constants/modulos';
 import { Project, IFCFile, TabType } from '../types/project.types';
 import { useProjects } from '../hooks/useProjects';
 import { usePermissions } from '../hooks/usePermissions';
-import { useProjectInvitations } from '../hooks/useProjectInvitations';
+import { ProjectInvitationsProvider, useProjectInvitationsContext } from '../context/ProjectInvitationsContext';
 import { useAuth } from '../context/AuthContext';
 import { formatDate, formatFileSize } from '../utils/dateUtils';
 import InicioTab from '../components/tabs/InicioTab';
@@ -26,15 +26,36 @@ import ArchivosTab from "../components/tabs/ArchivosTab";
 import Visor3DTab from "../components/tabs/Visor3DTab";
 import { getEstadoElementos, EstadoElementosResult } from '../services/ifcfiles.service';
 import { useHelp, useHelpSection } from '../context/HelpContext';
+import { RoleSummary } from '../components/RoleSummary';
 
 const TAB_TO_HELP_SECTION: Record<string, string> = {
   colaboradores: 'colaboradores',
   visor3d: 'visor-3d',
 };
 
+// El Provider tiene que estar POR ENCIMA del componente que lo usa
+// (ver useProjectInvitationsContext más abajo) — de ahí el wrapper.
+// No se puede envolver solo el JSX final: los hooks se llaman
+// incondicionalmente arriba del todo, antes de cualquier return
+// temprano (loading/error).
 const DashboardProjects: React.FC = () => {
   const { id } = useParams<{ id: string }>();
+  return (
+    <ProjectInvitationsProvider projectId={Number(id) || 0}>
+      <DashboardProjectsInner />
+    </ProjectInvitationsProvider>
+  );
+};
+
+// Tabs que tiene sentido guardar en la URL — 'modulos' es la pantalla
+// de selección inicial, no un destino real al que volver con F5 o
+// compartir por link.
+const URL_TABS: TabType[] = ['inicio', 'archivos', 'colaboradores', 'visor3d'];
+
+const DashboardProjectsInner: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, isAuthenticated, loading: authLoading, logout } = useAuth();
   const { fetchProjectById, uploadIFC, updateProject, loading, error } = useProjects();
 
@@ -47,7 +68,17 @@ const DashboardProjects: React.FC = () => {
   // oculta la sección entera cuando esto es null.
   const [estadoElementos, setEstadoElementos] = useState<EstadoElementosResult | null>(null);
   const [ifcFiles, setIfcFiles] = useState<IFCFile[]>([]);
-  const [activeTab, setActiveTab] = useState<TabType>('modulos');
+
+  // Lee el tab desde la URL una sola vez, al montar — si hay un
+  // ?tab=... válido, arranca ahí directo (y con el módulo ya dado por
+  // confirmado, ver confirmedModuloId más abajo) en vez de siempre
+  // volver a la pantalla de elegir módulo. Único módulo real hoy es
+  // "metrados" (ver el mismo supuesto ya usado en el botón SIGUIENTE
+  // de abajo, esMetrados).
+  const tabFromUrl = searchParams.get('tab') as TabType | null;
+  const initialTab: TabType = tabFromUrl && URL_TABS.includes(tabFromUrl) ? tabFromUrl : 'modulos';
+
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
   useHelpSection(TAB_TO_HELP_SECTION[activeTab] ?? 'dentro-de-un-proyecto');
   const { helpSection } = useHelp();
   const [showModulos, setShowModulos] = useState(false);
@@ -57,7 +88,29 @@ const DashboardProjects: React.FC = () => {
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [showTagsModal, setShowTagsModal] = useState(false);
 
-  const [confirmedModuloId, setConfirmedModuloId] = useState<string | null>(null);
+  // Si arrancó con un tab restaurado desde la URL, el módulo también
+  // cuenta como ya confirmado (si no, la navegación lateral no
+  // aparece — depende de confirmedModuloId, ver el render más abajo).
+  const [confirmedModuloId, setConfirmedModuloId] = useState<string | null>(
+    initialTab !== 'modulos' ? 'metrados' : null
+  );
+
+  // Mantiene la URL al día con el tab activo — cambiar de tab con clic
+  // no agrega entradas nuevas al historial (replace), y en 'modulos'
+  // se saca el parámetro para no dejar una URL con un tab que no es un
+  // destino real.
+  useEffect(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (activeTab === 'modulos') next.delete('tab');
+        else next.set('tab', activeTab);
+        return next;
+      },
+      { replace: true }
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Visor3DTab NO debe desmontarse al cambiar de tab (perdería el IFC
   // cargado, la escena de Three.js, la cámara, etc. — ver el render más
@@ -78,7 +131,13 @@ const DashboardProjects: React.FC = () => {
   const userMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      // El panel de detalle de RoleSummary vive portado a
+      // document.body — sin este chequeo, abrirlo cierra el menú
+      // entero antes de poder leerlo (mismo bug ya encontrado en
+      // RoleDropdown, ColaboradoresTab.tsx).
+      if (target instanceof Element && target.closest('[data-role-summary-panel]')) return;
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
         setIsUserMenuOpen(false);
       }
     };
@@ -87,7 +146,7 @@ const DashboardProjects: React.FC = () => {
   }, []);
 
   const { canEditProject } = usePermissions();
-  const { isOwner, checkingOwner, userRole } = useProjectInvitations(project?.project_id || 0);
+  const { isOwner, checkingOwner, myMembership } = useProjectInvitationsContext();
   const canActuallyEdit = canEditProject && isOwner && !checkingOwner;
 
   const [isEditingInfo, setIsEditingInfo] = useState(false);
@@ -278,9 +337,16 @@ const DashboardProjects: React.FC = () => {
                 <span className="text-2xl font-black text-[#0056b3]"></span>
                 <span className="text-sm text-gray-400">|</span>
                 <span className="text-sm font-medium text-gray-600 truncate max-w-xs">{project.name}</span>
-                {!checkingOwner && userRole && (
+                {!checkingOwner && (isOwner || myMembership) && (
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-[#0056b3] border border-blue-100">
-                    {userRole.role_name}
+                    {isOwner ? 'Propietario' : (
+                      <RoleSummary
+                        isAdmin={myMembership!.is_admin}
+                        moduleRoles={myMembership!.module_roles}
+                        adminLabel="Administrador"
+                        emptyLabel="Miembro"
+                      />
+                    )}
                   </span>
                 )}
               </div>
@@ -344,9 +410,16 @@ const DashboardProjects: React.FC = () => {
                           {user.role}
                         </span>
                       )}
-                      {!checkingOwner && userRole && (
+                      {!checkingOwner && (isOwner || myMembership) && (
                         <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-blue-50 text-[#0056b3] ring-1 ring-blue-200">
-                          {userRole.role_name} en este proyecto
+                          {isOwner ? 'Propietario' : (
+                            <RoleSummary
+                              isAdmin={myMembership!.is_admin}
+                              moduleRoles={myMembership!.module_roles}
+                              adminLabel="Administrador"
+                              emptyLabel="Miembro"
+                            />
+                          )} en este proyecto
                         </span>
                       )}
                     </div>

@@ -11,9 +11,10 @@ import {
   getMeInvitations,
   updateInvitationStatus
 } from '../services/invitation.service';
+import { MyInvitation } from '../types/invitation.types';
 
 interface InvitationsContextType {
-  invitations: any[];
+  invitations: MyInvitation[];
   loading: boolean;
   error: string | null;
   respondingId: number | null;
@@ -36,7 +37,7 @@ const InvitationsContext = createContext<InvitationsContextType | undefined>(
 export const InvitationsProvider: React.FC<{ children: ReactNode }> = ({
   children
 }) => {
-  const [invitations, setInvitations] = useState<any[]>([]);
+  const [invitations, setInvitations] = useState<MyInvitation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [respondingId, setRespondingId] = useState<number | null>(null);

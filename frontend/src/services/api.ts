@@ -115,9 +115,17 @@ const request = async (endpoint: string, options: RequestInit = {}) => {
 
   if (!response.ok) {
     const errorData = await response.clone().json().catch(() => ({}));
-    console.log('Error completo del backend:', errorData); // TEMPORAL
 
-    if (errorData.code === "AUTH_ACCESS_TOKEN_EXPIRED") {
+    // AUTH_ACCESS_TOKEN_EXPIRED es el caso normal (jwt.TokenExpiredError,
+    // ver verifyToken en jwt.ts del backend) — se refresca solo, en
+    // silencio. Pero CUALQUIER otro rechazo del access token
+    // (AUTH_ACCESS_TOKEN_INVALID: firma rara, token de otra sesión
+    // vieja, reloj del navegador desalineado con el servidor, etc.) NO
+    // se estaba tratando igual — se dejaba pasar como error real,
+    // mostrando "Access Token inválido." en pantalla aunque un simple
+    // refresh lo hubiera solucionado solo, igual que el caso normal
+    // (bug real reportado por el usuario el 2026-08-30).
+    if (errorData.code === "AUTH_ACCESS_TOKEN_EXPIRED" || errorData.code === "AUTH_ACCESS_TOKEN_INVALID") {
       token = await refreshToken();
       if (token) {
         const newHeaders = { ...headers, 'Authorization': `Bearer ${token}` };

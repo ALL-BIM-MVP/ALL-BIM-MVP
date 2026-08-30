@@ -5,6 +5,7 @@ import {
     CreateInvitationRequest,
     UpdateInvitationRequest,
     ProjectMember,
+    MyInvitation,
 } from '../types/invitation.types';
 
 export const getProjectInvitations = async (projectId: number): Promise<Invitation[]> => {
@@ -97,7 +98,7 @@ export const getCurrentUserProjectRole = async (projectId: number): Promise<{ ro
 };  
 export const getMeInvitations = async (
     filter: 'all' | 'pending' | 'completed' = 'pending'
-): Promise<any[]> => {
+): Promise<MyInvitation[]> => {
     const response = await api.get(`/api/users/invitations?filter=${filter}`);
     return response || [];
 };
