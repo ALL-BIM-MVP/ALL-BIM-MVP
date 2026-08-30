@@ -44,7 +44,11 @@ export function useIfcModel(
   const fragmentsCross = useFragmentsCrossTool(rendererRef, storeRef, canvasRef);
   const fragmentsSelection = useFragmentsSelection(
     rendererRef, storeRef, canvasRef,
-    fragmentsMeasure.fragmentsMeasureModeRef, fragmentsCross.fragmentsCrossModeRef
+    // fragmentsMeasureBusyRef (no fragmentsMeasureModeRef): pedido
+    // explícito del usuario — apenas se completa una medición (ya no
+    // está armada) un click normal tiene que poder seleccionar, sin
+    // salir del modo medición para eso.
+    fragmentsMeasure.fragmentsMeasureBusyRef, fragmentsCross.fragmentsCrossModeRef
   );
 
   const onFrame = useCallback((dt: number) => {
@@ -77,34 +81,14 @@ export function useIfcModel(
   const visibility = useEntityVisibility(rendererRef, loader.typeGroups, loader.levelGroups, panelOffsetPx);
   const fragmentsVisibility = useFragmentsEntityVisibility(storeRef, loader.ready);
 
-  // "Buscar ID/GUID" (Fragments) además atenúa el resto del modelo —
-  // reutiliza el mismo mecanismo de aislar (applyIsolation/GHOST_MATERIAL)
-  // que ya usa el botón "Aislar" del popup, en vez de dibujar un marcador
-  // aparte: pedido explícito del usuario ("osea solo quiero transparente
-  // los demas elementos cundao busco por id"). Hace falta este wrapper
-  // acá (y no dentro de useFragmentsSelection.ts) porque isolateFragmentsElementById
-  // vive en useFragmentsEntityVisibility, un hook hermano.
+
   const selectFragmentsByIdOrGuidAndIsolate = useCallback(async (rawInput: string): Promise<boolean> => {
     const localId = await fragmentsSelection.selectFragmentsByIdOrGuid(rawInput);
     if (localId !== null) fragmentsVisibility.isolateFragmentsElementById(localId);
     return localId !== null;
   }, [fragmentsSelection, fragmentsVisibility]);
 
-  // Vuela la cámara hasta encuadrar un conjunto de ids de Fragments —
-  // mismo resultado que ThreeSceneController.flyToElements (usado por
-  // isolateElementsByIds, camino viejo), pero calculado con
-  // model.getMergedBox en vez de expressIdRanges (que no existen para
-  // mallas de Fragments). Reusado por "apretar una partida" y por
-  // seleccionar un subgrupo dentro de una partida.
-  //
-  // instant=true (aislar TODA la partida, el default): salto directo,
-  // mismo criterio que la vieja flyToElements — y mismo margen de
-  // siempre, hay que encuadrar varios elementos repartidos, no
-  // acercarse de más. instant=false (click en un elemento/grupo
-  // puntual dentro de una partida): vuelo animado (pedido explícito del
-  // usuario, "no quiero saltos directos") Y con un margen más chico —
-  // la cámara tiene que quedar bien cerca del elemento clickeado, no
-  // solo encuadrarlo de lejos ("tiene que acercarse la camara").
+  
   const flyToFragmentsElements = useCallback(async (ids: number[], instant = true) => {
     const model = storeRef.current?.fragmentsModel;
     if (!model || ids.length === 0) return;
@@ -124,38 +108,12 @@ export function useIfcModel(
     }
   }, [storeRef, rendererRef]);
 
-  // Reemplaza a isolateElementsByIds (camino viejo) cuando el modelo
-  // cargó por Fragments — "apretar una partida" en PartidasTree.tsx (y
-  // el botón "Aislar toda la partida" del encabezado): aísla (atenúa el
-  // resto) TODOS los elementos de esa partida. A propósito NO vuela la
-  // cámara acá — pedido explícito del usuario: a nivel PARTIDA, si ya
-  // tenía la cámara posicionada donde quería, no se la tiene que mover,
-  // solo filtrar/atenuar ahí mismo. A diferencia de esto, clickear una
-  // fila/grupo DENTRO de la tabla (selectFragmentsGroupInViewer, más
-  // abajo) sigue enfocando con la cámara, sin cambios — la distinción
-  // es a propósito, pedida así explícitamente.
+
   const isolateFragmentsElementsByIdsAndFly = useCallback((ids: number[]) => {
     fragmentsVisibility.isolateFragmentsElementsByIds(ids);
   }, [fragmentsVisibility]);
 
-  // Reemplaza a selectGroupInViewer (camino viejo) cuando el modelo
-  // cargó por Fragments — click en un elemento/subgrupo dentro del
-  // detalle de una partida: resalta TODOS los ids del grupo (no solo
-  // el primero — una partida de acero, por ejemplo, agrupa muchas
-  // barras de refuerzo bajo una sola fila, y resaltar nada más la
-  // primera dejaba "el resto adentro" sin marcar), muestra el popup de
-  // propiedades del primer elemento, y vuela la cámara para encuadrar
-  // el grupo. A propósito NO aísla/atenúa nada acá — pedido explícito
-  // y confirmado del usuario: seleccionar un elemento puntual dentro de
-  // la tabla NO tiene que atenuar los demás (a diferencia de "Aislar
-  // toda la partida", que sí sigue atenuando todo lo demás). Vuelo
-  // animado (instant=false), análogo a un click normal.
-  //
-  // Si el filtro de categoría o de nivel (CategoryFilterPanel) está
-  // activo, se lo saca ANTES de seleccionar — si no, un elemento que no
-  // sea de la categoría/nivel filtrada queda "fantasma" (atenuado) aun
-  // estando recién seleccionado, porque ese filtro sigue de fondo sin
-  // enterarse de la selección nueva. Pedido explícito del usuario.
+
   const selectFragmentsGroupInViewer = useCallback(async (ids: number[]) => {
     if (ids.length === 0) return;
     if (fragmentsVisibility.fragmentsSelectedTypes.size > 0) fragmentsVisibility.clearFragmentsSelectedTypes();
@@ -208,13 +166,7 @@ export function useIfcModel(
     else selection.clearSelection();
   }, [selection.selectEntityById, selection.clearSelection]);
 
-  // Esconde el popup Ocultar/Aislar/Cortar mientras se mueve la cámara
-  // (zoom/orbit/pan) y lo vuelve a mostrar al soltar — de los DOS
-  // sistemas de popup a la vez (selection: web-ifc, fragmentsSelection:
-  // Fragments), sea cual sea el que esté con un elemento seleccionado.
-  // Antes esto solo tocaba "selection" (el popup viejo) — el de
-  // Fragments (el que se usa en la práctica ahora) nunca se escondía al
-  // interactuar con la cámara.
+
   const onZoom = useCallback(() => {
     if (elementCut.cutArmed) return;
     selection.dismissPopup();

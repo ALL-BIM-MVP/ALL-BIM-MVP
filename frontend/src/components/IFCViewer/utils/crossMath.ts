@@ -1,15 +1,5 @@
-// Matemática pura de la herramienta "cruz de ejes" — extraída de
-// ThreeSceneController.raycastFaceCross para poder reutilizarla tal
-// cual desde useFragmentsCrossTool.ts (camino Fragments), que arma su
-// propia malla de un solo elemento con model.getItemsGeometry(...) en
-// vez de sacarla de controller.meshes. Nada acá sabe de expressId,
-// localId, Fragments ni web-ifc — solo recibe triángulos en espacio
-// mundo y devuelve el centro + los 4 extremos de la cruz. El
-// comportamiento (fast/recenter, criterio de coplanaridad, fallback de
-// largo) es EXACTAMENTE el mismo que tenía raycastFaceCross antes de
-// este split — ver ese método para el camino web-ifc, que ahora solo
-// hace el raycast contra controller.meshes y le delega el cálculo a
-// las funciones de acá.
+
+
 import * as THREE from 'three';
 
 export interface Triangle { a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; }
@@ -29,19 +19,21 @@ const PLANE_EPS = 0.01;
 const NORMAL_DOT_EPS = 0.999;
 const FALLBACK_ARM_LEN = 0.3;
 
-/**
- * A partir de una malla indexada (con matrixWorld ya aplicable) y el
- * índice del triángulo golpeado, arma la lista de triángulos
- * coplanares en espacio mundo — mismo criterio (PLANE_EPS/
- * NORMAL_DOT_EPS) que usaba raycastFaceCross original.
- *
- * `vertexRange` filtra a qué triángulos de la malla pertenece el
- * elemento golpeado — hace falta en el camino web-ifc porque una malla
- * ahí junta VARIOS elementos (rangos de índice de vértice por
- * expressId). En el camino Fragments la malla temporal que arma
- * useFragmentsCrossTool.ts ya es de un solo elemento, así que ahí se
- * pasa `null` (considerar todos los triángulos de la malla).
- */
+
+
+export function clipArmTipForScreen(camera: THREE.PerspectiveCamera, center: THREE.Vector3, tip: THREE.Vector3): THREE.Vector3 {
+  camera.updateMatrixWorld();
+  const centerView = center.clone().applyMatrix4(camera.matrixWorldInverse);
+  const tipView = tip.clone().applyMatrix4(camera.matrixWorldInverse);
+  
+  const nearZ = -camera.near - 1e-3;
+  const centerInFront = centerView.z <= nearZ;
+  const tipInFront = tipView.z <= nearZ;
+  if (tipInFront || !centerInFront) return tip.clone();
+  const t = (nearZ - centerView.z) / (tipView.z - centerView.z);
+  return center.clone().lerp(tip, t);
+}
+
 export function coplanarTrianglesFromMesh(
   mesh: THREE.Mesh,
   hitFaceIndex: number,
@@ -92,14 +84,6 @@ export function coplanarTrianglesFromMesh(
   return { triangles, hitTriangle };
 }
 
-/**
- * Dado el triángulo golpeado y el resto de los triángulos coplanares
- * de ese mismo elemento (todos en espacio mundo), calcula el centro y
- * los 4 extremos U/V de la cruz. `origin` es el punto exacto del click
- * (hit.point) — con recenter=false, el centro de la cruz queda ahí
- * mismo; con recenter=true, se recalcula al medio del contorno de la
- * cara (bounding box en 2D u/v).
- */
 export function computeCrossArms(
   hitTriangle: Triangle,
   coplanarTriangles: Triangle[],

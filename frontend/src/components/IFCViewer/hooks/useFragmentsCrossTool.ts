@@ -1,61 +1,7 @@
-// Fase 3 de la migración a ThatOpen/Fragments — cruz de ejes para el
-// camino de Fragments. A diferencia de selección/medición, ACÁ SÍ se
-// reutiliza el algoritmo real de ThreeSceneController.raycastFaceCross
-// (extraído a crossMath.ts) — no una reimplementación aparte. La razón
-// por la que hace falta más que un cableado directo: ese algoritmo
-// necesita un THREE.Mesh de verdad (posiciones + índices) para
-// recorrer los triángulos coplanares y encontrar el contorno real de
-// la cara — un modelo de Fragments no expone eso directo. Entonces:
-//
-//   1. model.raycast(...) (Fragments) para saber QUÉ elemento (localId)
-//      está bajo el mouse.
-//   2. model.getItemsGeometry([localId]) para traer su geometría cruda.
-//   3. Se arma un THREE.Mesh "de un solo uso" con esa geometría (con
-//      cache por localId, para no repedir esto en cada frame mientras
-//      se arrastra sobre el MISMO elemento).
-//   4. Un THREE.Raycaster de verdad contra ESA malla nada más, para
-//      tener un faceIndex/hit.point en el formato que espera
-//      crossMath.ts (el mismo que ya usa el camino web-ifc).
-//   5. coplanarTrianglesFromMesh + computeCrossArms — mismo cálculo,
-//      mismo resultado visual, para los dos caminos.
-//
-// El brazo de profundidad (perfora en dirección opuesta a la normal,
-// busca el próximo elemento detrás) — SIN implementar. Dos intentos
-// reales, cada uno con un motivo concreto y confirmado en vivo por el
-// que no sirve, por si hace falta retomarlo más adelante:
-//
-//   1. model.object (el THREE.Object3D real ya metido en la escena —
-//      ver controller.addExternalObject en useModelLoader.ts): parecía
-//      la salida obvia, geometría de three.js de verdad sin pasar por
-//      la API de Fragments. Pero sus BufferAttribute (position, index)
-//      tienen `.array` undefined — confirmado en vivo — los datos
-//      reales viven en el worker/GPU, no llegan al hilo principal.
-//      Ningún raycast (ni el nativo de three.js, ni uno a mano
-//      recorriendo triángulos) puede leer esa geometría.
-//
-//   2. model.raycastAll(...) de Fragments SÍ tiene acceso real a la
-//      geometría, pero solo acepta cámara+mouse (pantalla), no un
-//      origen/dirección arbitrarios. Se probó el truco de armar una
-//      THREE.PerspectiveCamera temporal parada en el origen del rayo
-//      que hace falta (en el centro de su viewport, NDC 0,0, el rayo
-//      de una perspectiva sale siempre desde su propia posición en la
-//      dirección que mira) — incluso corrigiendo el aspect ratio al
-//      real del canvas, la propia librería (RaycastManager en
-//      index.mjs) arma un frustum chico a partir de esa cámara y
-//      chequea que choque con la caja del modelo ANTES de buscar nada;
-//      con una cámara parada en un lugar tan atípico (adentro de la
-//      geometría, mirando en cualquier dirección) ese chequeo no se
-//      sostiene y no encuentra nada — confirmado en vivo, no una
-//      sospecha.
-//
-// Sin una forma pública de tirar un rayo con origen/dirección
-// arbitrarios contra geometría real, la única vía que quedaría es
-// pedir con getItemsGeometry(...) la geometría de TODO el modelo (no
-// solo el elemento clickeado) para intersectar a mano — impracticable
-// sin un índice espacial para saber qué elementos pedir.
+
 import { useState, useRef, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
-import { coplanarTrianglesFromMesh, computeCrossArms } from '../utils/crossMath';
+import { coplanarTrianglesFromMesh, computeCrossArms, clipArmTipForScreen } from '../utils/crossMath';
 import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
 
 interface Vec3 { x: number; y: number; z: number; }
@@ -65,11 +11,12 @@ export interface FragCrossEntry {
   id: string;
   center: Vec3; normal: Vec3;
   uPos: Vec3; uNeg: Vec3; vPos: Vec3; vNeg: Vec3;
-  depthPos: null; // sin implementar — ver comentario largo al principio del archivo
+  
+  depthPos: Vec3 | null;
   centerScreen: ScreenPos | null;
   uPosScreen: ScreenPos | null; uNegScreen: ScreenPos | null;
   vPosScreen: ScreenPos | null; vNegScreen: ScreenPos | null;
-  depthPosScreen: null;
+  depthPosScreen: ScreenPos | null;
 }
 
 const DRAG_HIT_RADIUS = 14; // mismo radio que useCrossTool.ts
@@ -82,13 +29,7 @@ function dist3D(a: Vec3, b: Vec3): number {
 let idCounter = 0;
 const nextId = () => `fragcross_${++idCounter}`;
 
-// Arma un THREE.Mesh de un solo uso a partir de la geometría cruda que
-// devuelve Fragments para un elemento — puede venir en varias "piezas"
-// (MeshData), cada una con su propia matriz de transformación; se
-// mergea todo en una sola malla con las posiciones ya llevadas a
-// espacio de mundo, así coplanarTrianglesFromMesh puede usarla con
-// matrixWorld identidad, igual que si fuera una malla cualquiera de la
-// escena.
+
 async function buildTempMeshForItem(model: any, localId: number, modelWorldMatrix: THREE.Matrix4): Promise<THREE.Mesh | null> {
   const [pieces] = await model.getItemsGeometry([localId]);
   if (!pieces || pieces.length === 0) return null;
@@ -118,9 +59,7 @@ async function buildTempMeshForItem(model: any, localId: number, modelWorldMatri
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setIndex(indices);
   const mesh = new THREE.Mesh(geometry);
-  // Las posiciones ya están en espacio de mundo (se les aplicó
-  // modelWorldMatrix * piece.transform arriba) — matrixWorld identidad
-  // para que coplanarTrianglesFromMesh no las transforme una segunda vez.
+
   mesh.matrixAutoUpdate = false;
   return mesh;
 }
@@ -173,13 +112,23 @@ export function useFragmentsCrossTool(
     if (draggingIdRef.current === id) setDraggingId(null);
   }, []);
 
-  const projectPoint = useCallback((point: Vec3): ScreenPos | null => {
+ 
+  const projectPoint = useCallback((point: Vec3, center?: Vec3): ScreenPos | null => {
     const renderer = rendererRef.current;
-    const camera = renderer?.getCamera?.();
+    const cameraController = renderer?.getCamera?.();
     const canvas = canvasRef.current;
-    if (!camera || !canvas || typeof camera.projectToScreen !== 'function') return null;
+    if (!cameraController || !canvas || typeof cameraController.projectToScreen !== 'function') return null;
     try {
-      const raw = camera.projectToScreen(point, canvas.width, canvas.height);
+      let target: Vec3 = point;
+      if (center && cameraController.camera instanceof THREE.PerspectiveCamera) {
+        const clipped = clipArmTipForScreen(
+          cameraController.camera,
+          new THREE.Vector3(center.x, center.y, center.z),
+          new THREE.Vector3(point.x, point.y, point.z)
+        );
+        target = { x: clipped.x, y: clipped.y, z: clipped.z };
+      }
+      const raw = cameraController.projectToScreen(target, canvas.width, canvas.height);
       if (!raw) return null;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
@@ -194,16 +143,14 @@ export function useFragmentsCrossTool(
     ...data,
     id,
     centerScreen: projectPoint(data.center),
-    uPosScreen: projectPoint(data.uPos),
-    uNegScreen: projectPoint(data.uNeg),
-    vPosScreen: projectPoint(data.vPos),
-    vNegScreen: projectPoint(data.vNeg),
-    depthPosScreen: null,
+    uPosScreen: projectPoint(data.uPos, data.center),
+    uNegScreen: projectPoint(data.uNeg, data.center),
+    vPosScreen: projectPoint(data.vPos, data.center),
+    vNegScreen: projectPoint(data.vNeg, data.center),
+    depthPosScreen: data.depthPos ? projectPoint(data.depthPos, data.center) : null,
   }), [projectPoint]);
 
-  // Corazón de la herramienta — ver el comentario largo al principio
-  // del archivo para el paso a paso. fast/recenter tienen exactamente
-  // el mismo significado que en useCrossTool.ts/raycastFaceCross.
+
   const computeCrossAt = useCallback(async (
     clientX: number, clientY: number, id: string, fast: boolean, recenter: boolean
   ): Promise<FragCrossEntry | null> => {
@@ -244,13 +191,37 @@ export function useFragmentsCrossTool(
     if (!found) return null;
     const arms = computeCrossArms(found.hitTriangle, found.triangles, hit.point.clone(), raycaster.ray.direction.clone(), recenter);
 
+
+    let depthPos: Vec3 | null = null;
+    if (!fast) {
+      try {
+        const DEPTH_OFFSET = 0.05; // 5cm hacia afuera antes de raycastear — ver comentario arriba
+        const depthOrigin = arms.center.clone().addScaledVector(arms.normal, DEPTH_OFFSET);
+        const fakeCam = new THREE.PerspectiveCamera(camera.fov, canvas.width / canvas.height, 0.01, 1000);
+        fakeCam.position.copy(depthOrigin);
+        fakeCam.lookAt(depthOrigin.clone().add(arms.normal));
+        fakeCam.updateMatrixWorld(true);
+        fakeCam.updateProjectionMatrix();
+       
+        const centerMouse = new THREE.Vector2(rect.left + rect.width / 2, rect.top + rect.height / 2);
+        const depthHits = await model.raycastAll({ camera: fakeCam, mouse: centerMouse, dom: canvas });
+        if (depthHits && depthHits.length > 0) {
+          const rayDist = (h: any) => h.rayDistance ?? h.distance;
+          const closest = [...depthHits].sort((a: any, b: any) => rayDist(a) - rayDist(b))[0];
+          depthPos = { x: closest.point.x, y: closest.point.y, z: closest.point.z };
+        }
+      } catch (err) {
+        console.warn('[useFragmentsCrossTool] error al calcular el brazo de profundidad:', err);
+      }
+    }
+
     const toVec3 = (v: THREE.Vector3): Vec3 => ({ x: v.x, y: v.y, z: v.z });
     return withScreen({
       center: toVec3(arms.center),
       normal: toVec3(arms.normal),
       uPos: toVec3(arms.uPos), uNeg: toVec3(arms.uNeg),
       vPos: toVec3(arms.vPos), vNeg: toVec3(arms.vNeg),
-      depthPos: null, // sin implementar — ver comentario largo al principio del archivo
+      depthPos,
     }, id);
   }, [rendererRef, storeRef, canvasRef, withScreen]);
 
@@ -319,9 +290,7 @@ export function useFragmentsCrossTool(
 
       busyRef.current = true;
       try {
-        // fast=false, recenter=false — mismo motivo que useCrossTool.ts:
-        // sigue al mouse en vivo, y se queda donde se soltó (ver
-        // onWindowMouseUp, que también usa recenter=false).
+       
         const next = await computeCrossAt(e.clientX, e.clientY, id, false, false);
         if (next) setCrosses((prev) => prev.map((c) => (c.id === id ? next : c)));
       } catch (err) {
@@ -337,8 +306,7 @@ export function useFragmentsCrossTool(
       e.stopImmediatePropagation();
       setDraggingId(null);
 
-      // recenter=false, igual que durante el arrastre: la cruz queda
-      // exactamente donde se soltó, no salta al centro de la cara.
+     
       const last = lastDragClient;
       if (!last || busyRef.current) return;
       busyRef.current = true;
@@ -372,11 +340,11 @@ export function useFragmentsCrossTool(
       return {
         ...c,
         centerScreen: projectPoint(c.center),
-        uPosScreen: projectPoint(c.uPos),
-        uNegScreen: projectPoint(c.uNeg),
-        vPosScreen: projectPoint(c.vPos),
-        vNegScreen: projectPoint(c.vNeg),
-        depthPosScreen: null,
+        uPosScreen: projectPoint(c.uPos, c.center),
+        uNegScreen: projectPoint(c.uNeg, c.center),
+        vPosScreen: projectPoint(c.vPos, c.center),
+        vNegScreen: projectPoint(c.vNeg, c.center),
+        depthPosScreen: c.depthPos ? projectPoint(c.depthPos, c.center) : null,
       };
     });
 
@@ -398,9 +366,7 @@ export function useFragmentsCrossTool(
 
   return {
     fragmentsCrossMode: crossMode,
-    // Igual que fragmentsMeasureModeRef en useFragmentsMeasureTool.ts —
-    // para que useFragmentsSelection.ts pueda leerlo sincrónicamente
-    // desde su propio listener nativo de 'click'.
+    
     fragmentsCrossModeRef: crossModeRef,
     fragmentsCrossArmed: armed,
     fragmentsCrosses: crossesWithLengths,

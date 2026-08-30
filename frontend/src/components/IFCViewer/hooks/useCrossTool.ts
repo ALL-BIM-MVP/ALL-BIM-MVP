@@ -1,7 +1,9 @@
 // Herramienta "cruz de ejes": permite tener VARIAS cruces activas a la vez (una
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import * as THREE from 'three';
 import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
+import { clipArmTipForScreen } from '../utils/crossMath';
 
 interface Vec3 { x: number; y: number; z: number; }
 interface ScreenPos { x: number; y: number; }
@@ -32,22 +34,38 @@ function dist3D(a: Vec3, b: Vec3): number {
   return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 }
 
-// Antes vivía en IFCViewer.tsx; se mueve acá para que reprojectOnFrame
-// pueda usarlo también al escribir la posición de las etiquetas directo
-// al DOM (ver más abajo). Empuja la etiqueta un poco más allá de la
-// punta del brazo cuando el brazo es muy corto, para que no quede
-// pegada/superpuesta al centro de la cruz.
+
 export const CROSS_LABEL_MIN_ARM_PX = 55;
 export const CROSS_LABEL_PAST_TIP_PX = 16;
-export function crossLabelPos(center: ScreenPos, tip: ScreenPos): ScreenPos {
+
+export const CROSS_LABEL_MAX_DIST_PX = 100;
+
+export function crossLabelPos(
+  center: ScreenPos,
+  posTip: ScreenPos | null,
+  negTip: ScreenPos | null
+): ScreenPos | null {
+  const posLen = posTip ? Math.hypot(posTip.x - center.x, posTip.y - center.y) : -1;
+  const negLen = negTip ? Math.hypot(negTip.x - center.x, negTip.y - center.y) : -1;
+  const useNeg = negLen > posLen;
+  const tip = useNeg ? negTip : posTip;
+  if (!tip) return null;
   const dx = tip.x - center.x;
   const dy = tip.y - center.y;
-  const armLen = Math.hypot(dx, dy);
-  if (armLen >= CROSS_LABEL_MIN_ARM_PX || armLen === 0) {
-    return { x: (center.x + tip.x) / 2, y: (center.y + tip.y) / 2 };
-  }
-  const ux = dx / armLen, uy = dy / armLen;
-  return { x: tip.x + ux * CROSS_LABEL_PAST_TIP_PX, y: tip.y + uy * CROSS_LABEL_PAST_TIP_PX };
+  const armLen = useNeg ? negLen : posLen;
+  const raw = (armLen >= CROSS_LABEL_MIN_ARM_PX || armLen === 0)
+    ? { x: (center.x + tip.x) / 2, y: (center.y + tip.y) / 2 }
+    : (() => {
+        const ux = dx / armLen, uy = dy / armLen;
+        return { x: tip.x + ux * CROSS_LABEL_PAST_TIP_PX, y: tip.y + uy * CROSS_LABEL_PAST_TIP_PX };
+      })();
+
+  
+  const rdx = raw.x - center.x, rdy = raw.y - center.y;
+  const rawDist = Math.hypot(rdx, rdy);
+  if (rawDist <= CROSS_LABEL_MAX_DIST_PX || rawDist === 0) return raw;
+  const s = CROSS_LABEL_MAX_DIST_PX / rawDist;
+  return { x: center.x + rdx * s, y: center.y + rdy * s };
 }
 
 let crossIdCounter = 0;
@@ -68,14 +86,10 @@ export function useCrossTool(
   const draggingIdRef = useRef<string | null>(null);
   const lastCameraSnapshotRef = useRef<CameraSnapshot | null>(null);
   const lastMoveAtRef = useRef(0);
-  // Última posición de mouse durante un agarre (colocar o arrastrar) —
-  // hace falta para poder recalcular una vez más, ya centrada en la
-  // cara, al soltar (ver handleCrossMouseUp).
+
   const lastDragClientRef = useRef<{ x: number; y: number } | null>(null);
 
-  // DOM de cada pieza que se posiciona en pantalla: centro (manija de
-  // arrastre/borrado) y las 3 etiquetas de longitud (u, v, profundidad).
-  // Clave: `${crossId}:center` | `${crossId}:u` | `${crossId}:v` | `${crossId}:depth`.
+  
   const posElsRef = useRef(new Map<string, HTMLElement>());
   const registerCrossPosEl = useCallback((key: string, el: HTMLElement | null) => {
     if (el) posElsRef.current.set(key, el);
@@ -90,13 +104,22 @@ export function useCrossTool(
     if (!crossMode) { setCrosses([]); setDraggingId(null); setArmed(false); }
   }, [crossMode]);
 
-  const projectPoint = useCallback((point: Vec3): ScreenPos | null => {
+  const projectPoint = useCallback((point: Vec3, center?: Vec3): ScreenPos | null => {
     const renderer = rendererRef.current;
-    const camera = renderer?.getCamera?.();
+    const cameraController = renderer?.getCamera?.();
     const canvas = canvasRef.current;
-    if (!camera || !canvas || typeof camera.projectToScreen !== 'function') return null;
+    if (!cameraController || !canvas || typeof cameraController.projectToScreen !== 'function') return null;
     try {
-      const raw = camera.projectToScreen(point, canvas.width, canvas.height);
+      let target: Vec3 = point;
+      if (center && cameraController.camera instanceof THREE.PerspectiveCamera) {
+        const clipped = clipArmTipForScreen(
+          cameraController.camera,
+          new THREE.Vector3(center.x, center.y, center.z),
+          new THREE.Vector3(point.x, point.y, point.z)
+        );
+        target = { x: clipped.x, y: clipped.y, z: clipped.z };
+      }
+      const raw = cameraController.projectToScreen(target, canvas.width, canvas.height);
       if (!raw) return null;
       const rect = canvas.getBoundingClientRect();
       const scaleX = canvas.width / rect.width;
@@ -118,11 +141,11 @@ export function useCrossTool(
     ...result,
     id,
     centerScreen: projectPoint(result.center),
-    uPosScreen: projectPoint(result.uPos),
-    uNegScreen: projectPoint(result.uNeg),
-    vPosScreen: projectPoint(result.vPos),
-    vNegScreen: projectPoint(result.vNeg),
-    depthPosScreen: result.depthPos ? projectPoint(result.depthPos) : null,
+    uPosScreen: projectPoint(result.uPos, result.center),
+    uNegScreen: projectPoint(result.uNeg, result.center),
+    vPosScreen: projectPoint(result.vPos, result.center),
+    vNegScreen: projectPoint(result.vNeg, result.center),
+    depthPosScreen: result.depthPos ? projectPoint(result.depthPos, result.center) : null,
   }), [projectPoint]);
 
   const computeCrossAt = useCallback((clientX: number, clientY: number, id: string, fast = false, recenter = true): CrossEntry | null => {
@@ -218,13 +241,6 @@ export function useCrossTool(
     if (now - lastMoveAtRef.current < CROSS_THROTTLE_MS) return true;
     lastMoveAtRef.current = now;
 
-    // fast=false (igual que antes): los brazos siguen llegando al borde
-    // real de la cara, no al de un triángulo suelto. recenter=false acá
-    // es lo nuevo: mientras se arrastra, la cruz sigue al mouse en vivo
-    // (dinámico) en vez de quedar pegada al centro de la cara — eso
-    // hacía que arrastrar DENTRO de la misma cara no se sintiera mover,
-    // porque cualquier punto de esa cara recalculaba el mismo centro.
-    // Al soltar (handleCrossMouseUp) se asienta centrada, una sola vez.
     const next = computeCrossAt(clientX, clientY, id, false, false);
     if (next) {
       setCrosses(prev => prev.map(c => (c.id === id ? next : c)));
@@ -236,10 +252,7 @@ export function useCrossTool(
     const id = draggingIdRef.current;
     if (!id) return false;
 
-    // Recalcula una última vez con la posición vista (lastDragClientRef)
-    // por si el throttle del mousemove se saltó el último punto — pero
-    // con recenter=false, igual que durante el arrastre: la cruz queda
-    // exactamente donde se soltó, no salta al centro de la cara.
+   
     const last = lastDragClientRef.current;
     if (last) {
       const settled = computeCrossAt(last.x, last.y, id, false, false);
@@ -272,11 +285,11 @@ export function useCrossTool(
       return {
         ...c,
         centerScreen: projectPoint(c.center),
-        uPosScreen: projectPoint(c.uPos),
-        uNegScreen: projectPoint(c.uNeg),
-        vPosScreen: projectPoint(c.vPos),
-        vNegScreen: projectPoint(c.vNeg),
-        depthPosScreen: c.depthPos ? projectPoint(c.depthPos) : null,
+        uPosScreen: projectPoint(c.uPos, c.center),
+        uNegScreen: projectPoint(c.uNeg, c.center),
+        vPosScreen: projectPoint(c.vPos, c.center),
+        vNegScreen: projectPoint(c.vNeg, c.center),
+        depthPosScreen: c.depthPos ? projectPoint(c.depthPos, c.center) : null,
       };
     });
 
@@ -285,33 +298,24 @@ export function useCrossTool(
       if (centerEl && c.centerScreen) {
         centerEl.style.transform = `translate(${c.centerScreen.x}px, ${c.centerScreen.y}px)`;
       }
-      if (c.centerScreen && c.uPosScreen) {
+      if (c.centerScreen) {
         const uEl = posElsRef.current.get(`${c.id}:u`);
-        if (uEl) {
-          const pos = crossLabelPos(c.centerScreen, c.uPosScreen);
-          uEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
-        }
+        const pos = crossLabelPos(c.centerScreen, c.uPosScreen, c.uNegScreen);
+        if (uEl && pos) uEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
       }
-      if (c.centerScreen && c.vPosScreen) {
+      if (c.centerScreen) {
         const vEl = posElsRef.current.get(`${c.id}:v`);
-        if (vEl) {
-          const pos = crossLabelPos(c.centerScreen, c.vPosScreen);
-          vEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
-        }
+        const pos = crossLabelPos(c.centerScreen, c.vPosScreen, c.vNegScreen);
+        if (vEl && pos) vEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
       }
       if (c.centerScreen && c.depthPosScreen) {
         const depthEl = posElsRef.current.get(`${c.id}:depth`);
-        if (depthEl) {
-          const pos = crossLabelPos(c.centerScreen, c.depthPosScreen);
-          depthEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
-        }
+        const pos = crossLabelPos(c.centerScreen, c.depthPosScreen, null);
+        if (depthEl && pos) depthEl.style.transform = `translate(${pos.x}px, ${pos.y}px)`;
       }
     }
 
-    // Estado de React en cada frame con cámara cambiada, como antes de
-    // este cambio — mantiene las líneas/círculos del SVG (IFCViewer.tsx)
-    // siguiendo suave. La escritura directa de arriba es lo que saca a
-    // las ETIQUETAS de depender de que ese re-render llegue a tiempo.
+
     setCrosses(updated);
   }, [projectPoint, rendererRef, canvasRef]);
 
