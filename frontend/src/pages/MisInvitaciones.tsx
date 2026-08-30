@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Mail, Check, X, Clock, RefreshCw, AlertCircle } from 'lucide-react';
 import { useInvitations } from '../context/InvitationsContext';
 import { useHelpSection } from '../context/HelpContext';
 import PageHeader from '../components/PageHeader';
+import { RoleSummary } from '../components/RoleSummary';
 
 const MisInvitaciones: React.FC = () => {
   useHelpSection('colaboradores');
@@ -16,11 +17,31 @@ const MisInvitaciones: React.FC = () => {
     respondInvitation
   } = useInvitations();
 
+  // Esta lista vive en un Context montado una sola vez a nivel de toda
+  // la app — sin esto, entrar acá después de haber estado en otro
+  // lado (ej. un proyecto) mostraba datos viejos hasta hacer F5 o ir a
+  // la campanita a refrescar a mano.
+  useEffect(() => {
+    loadInvitations();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-50">
       <PageHeader title="Mis Invitaciones" subtitle="Invitaciones pendientes de respuesta" />
 
       <div className="max-w-3xl mx-auto px-4 py-8">
+        <div className="flex items-center justify-end mb-4">
+          <button
+            onClick={loadInvitations}
+            disabled={loading}
+            className="text-sm text-gray-400 hover:text-gray-600 flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Actualizar
+          </button>
+        </div>
+
         {loading ? (
           <div className="text-center py-12">
             <RefreshCw size={28} className="animate-spin mx-auto text-[#0056b3]" />
@@ -54,7 +75,13 @@ const MisInvitaciones: React.FC = () => {
                       {inv.host_name}{inv.host_last_name ? ` ${inv.host_last_name}` : ''}
                     </span>{' '}
                     como{' '}
-                    <span className="font-medium">{inv.project_role_name}</span>
+                    <span className="font-medium">
+                      <RoleSummary
+                        isAdmin={inv.is_admin}
+                        moduleRoles={inv.module_roles}
+                        adminLabel="Administrador del proyecto"
+                      />
+                    </span>
                   </p>
                   <p className="text-xs text-gray-400 mt-1 flex items-center gap-1">
                     <Clock size={12} />

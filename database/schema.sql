@@ -57,7 +57,18 @@ CREATE TABLE users (
     deleted_at TIMESTAMPTZ,
 
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    role_id INT NOT NULL REFERENCES roles(role_id)
+    role_id INT NOT NULL REFERENCES roles(role_id),
+
+    -- Segunda barrera (la primera es el chequeo explícito en
+    -- users.service.ts, deleteUserCore): a nivel de BD, ninguna fila
+    -- con role_id=1 (ADMINISTRADOR, ver system-data.sql) puede quedar
+    -- con is_deleted=true, sin importar por qué camino se intente
+    -- (autogestión, otro administrador, un script suelto). Es la única
+    -- cuenta que puede asignar el resto de los roles
+    -- (is_assignable=false) — perderla deja la plataforma sin forma de
+    -- administrarse.
+    CONSTRAINT chk_users_administrador_no_deletable
+        CHECK (NOT (is_deleted AND role_id = 1))
 );
 
 CREATE TABLE user_invitations (

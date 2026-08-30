@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 // Tour corto, solo para el dashboard de proyectos (ver
-// docs/roadmap/mejoras-orientacion-usuario-frontend.md, punto 1) —
+// docs/roadmap/mejoras-ux-frontend.md, punto 6) —
 // apunta a elementos reales vía data-tour="...", no a coordenadas fijas.
 // Todos los pasos apuntan a elementos que existen SIEMPRE en esta
 // pantalla, sin depender de que el usuario ya tenga proyectos creados.

@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useInvitations } from "../context/InvitationsContext";
 import { useHelp } from "../context/HelpContext";
 import MiPerfilModal from "./MiPerfilModal";
+import { RoleSummary } from "./RoleSummary";
 
 interface PageHeaderProps {
   title: string;
@@ -32,10 +33,17 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (menuRef.current && !menuRef.current.contains(target)) {
         setIsMenuOpen(false);
       }
-      if (notificationsRef.current && !notificationsRef.current.contains(event.target as Node)) {
+      // El panel de detalle de RoleSummary (varios roles a la vez) vive
+      // portado a document.body, NO como descendiente de esta lista —
+      // sin este chequeo, abrirlo se veía como un clic "de afuera" y
+      // cerraba toda la campanita antes de poder leerlo (mismo bug real
+      // ya encontrado y arreglado en RoleDropdown, ColaboradoresTab.tsx).
+      const insideRoleSummaryPanel = target instanceof Element && target.closest('[data-role-summary-panel]');
+      if (notificationsRef.current && !notificationsRef.current.contains(target) && !insideRoleSummaryPanel) {
         setIsNotificationsOpen(false);
       }
     };
@@ -133,7 +141,12 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
                             {inv.project.project_name}
                           </p>
                           <p className="text-xs text-gray-500 mt-1">
-                            Rol: {inv.project_role_name}
+                            Rol:{' '}
+                            <RoleSummary
+                              isAdmin={inv.is_admin}
+                              moduleRoles={inv.module_roles}
+                              adminLabel="Administrador del proyecto"
+                            />
                           </p>
                           <p className="text-xs text-gray-400 mt-2 flex items-center gap-1">
                             <Clock size={12} />

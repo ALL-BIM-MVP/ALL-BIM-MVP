@@ -23,6 +23,25 @@ export interface Invitation {
   };
 }
 
+// Forma en la que le llega una invitación al usuario INVITADO (distinta
+// de Invitation, que es la vista del lado de quien administra el
+// proyecto) — ver ProjectInvitationForUser en el backend.
+export interface MyInvitation {
+  invitation_id: number;
+  status: 'pendiente' | 'aceptado' | 'rechazado' | 'cancelado' | 'expirado';
+  responded_at: string | null;
+  created_at: string;
+  expires_at: string;
+  host_name: string;
+  host_last_name: string | null;
+  is_admin: boolean;
+  module_roles: MemberModuleRole[];
+  project: {
+    project_id: number;
+    project_name: string;
+  };
+}
+
 export interface UserSearchResult {
   user_id: number;
   name: string;
