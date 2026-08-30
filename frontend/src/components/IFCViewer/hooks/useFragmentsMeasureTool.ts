@@ -27,12 +27,29 @@ const SNAP_TYPE_BY_CLASS: Record<number, SnapType> = {
   [SnappingClass.FACE]: 'face',
 };
 
+
+const EDGE_HINT_HALF_LEN = 0.2;
+function shortEdgeSegment(v0: Vec3, v1: Vec3, point: Vec3, halfLen: number): { p0: Vec3; p1: Vec3 } {
+  const dx = v1.x - v0.x, dy = v1.y - v0.y, dz = v1.z - v0.z;
+  const len = Math.hypot(dx, dy, dz);
+  if (len < 1e-6) return { p0: point, p1: point };
+  const ux = dx / len, uy = dy / len, uz = dz / len;
+  const t = (point.x - v0.x) * ux + (point.y - v0.y) * uy + (point.z - v0.z) * uz;
+  const tClamped = Math.max(0, Math.min(len, t));
+  const t0 = Math.max(0, tClamped - halfLen);
+  const t1 = Math.min(len, tClamped + halfLen);
+  return {
+    p0: { x: v0.x + ux * t0, y: v0.y + uy * t0, z: v0.z + uz * t0 },
+    p1: { x: v0.x + ux * t1, y: v0.y + uy * t1, z: v0.z + uz * t1 },
+  };
+}
+
 async function bestSnapPoint(
   model: any,
   camera: any,
   mouse: THREE.Vector2,
   dom: HTMLCanvasElement
-): Promise<{ point: Vec3; snapType: SnapType } | null> {
+): Promise<{ point: Vec3; snapType: SnapType; edge?: { v0: Vec3; v1: Vec3 } } | null> {
   const candidates = await model.raycastWithSnapping({
     camera, mouse, dom,
     snappingClasses: [SnappingClass.POINT, SnappingClass.LINE, SnappingClass.FACE],
@@ -40,7 +57,15 @@ async function bestSnapPoint(
   if (candidates && candidates.length > 0) {
     for (const cls of SNAP_PRIORITY) {
       const hit = candidates.find((r: any) => r.snappingClass === cls);
-      if (hit) return { point: hit.point, snapType: SNAP_TYPE_BY_CLASS[cls] };
+      if (hit) {
+        // snappedEdgeP1/P2 — extremos reales de la arista, solo vienen
+        // cuando el snap es de tipo LINE (confirmado en el .d.ts de la
+        // librería: RaycastResult.snappedEdgeP1/snappedEdgeP2).
+        const edge = hit.snappedEdgeP1 && hit.snappedEdgeP2
+          ? { v0: hit.snappedEdgeP1 as Vec3, v1: hit.snappedEdgeP2 as Vec3 }
+          : undefined;
+        return { point: hit.point, snapType: SNAP_TYPE_BY_CLASS[cls], edge };
+      }
     }
   }
   // Sin candidatos de snap (ej. click en medio de una cara lejos de
@@ -58,20 +83,31 @@ export function useFragmentsMeasureTool(
   const measureModeRef = useRef(false);
   useEffect(() => { measureModeRef.current = measureMode; }, [measureMode]);
 
+  
+  const [measureArmed, setMeasureArmed] = useState(false);
+  const measureArmedRef = useRef(false);
+  useEffect(() => { measureArmedRef.current = measureArmed; }, [measureArmed]);
+
   const [measurements, setMeasurements] = useState<FragMeasureEntry[]>([]);
   const measurementsRef = useRef<FragMeasureEntry[]>([]);
   useEffect(() => { measurementsRef.current = measurements; }, [measurements]);
 
-  // Dónde caería el próximo punto si clickeás ahora — useMeasureTool.ts
-  // (camino viejo) sí tenía esto; acá faltaba del todo, así que activar
-  // "Medición" con un modelo de Fragments no mostraba ninguna señal de
-  // dónde iba a caer el click. Mismo ícono (SnapIcon en IFCViewer.tsx)
-  // que ya usa el camino viejo, reusado tal cual.
+ 
   const [hoverPoint, setHoverPoint] = useState<FragMeasurePoint | null>(null);
 
-  // Mismo motivo que en useFragmentsSelection.ts: raycast/lo que sea son
-  // idas y vueltas asíncronas al worker — un solo click "en vuelo" por
-  // vez, los nuevos se ignoran mientras el anterior resuelve.
+  const [hoverEdge, setHoverEdge] = useState<{ a: ScreenPos; b: ScreenPos } | null>(null);
+  
+  const [hoverColor, setHoverColor] = useState('#0056b3');
+
+  const [draggingPoint, setDraggingPoint] = useState<{ id: string; pointIndex: number } | null>(null);
+
+ 
+  const measureBusyRef = useRef(false);
+  useEffect(() => {
+    measureBusyRef.current = measureArmed || draggingPoint !== null;
+  }, [measureArmed, draggingPoint]);
+
+  
   const busyRef = useRef(false);
 
   const labelElsRef = useRef(new Map<string, HTMLDivElement>());
@@ -86,10 +122,16 @@ export function useFragmentsMeasureTool(
     if (!measureMode) {
       setMeasurements([]);
       setHoverPoint(null);
+      setHoverEdge(null);
+      setMeasureArmed(false);
+      setDraggingPoint(null);
     }
   }, [measureMode]);
 
-  const enableAndArmFragmentsMeasure = useCallback(() => setMeasureMode(true), []);
+  const enableAndArmFragmentsMeasure = useCallback(() => {
+    setMeasureMode(true);
+    setMeasureArmed(true);
+  }, []);
   const exitFragmentsMeasureMode = useCallback(() => setMeasureMode(false), []);
   const clearFragmentsMeasurement = useCallback(() => setMeasurements([]), []);
   const removeFragmentsMeasurement = useCallback((id: string) => {
@@ -118,11 +160,7 @@ export function useFragmentsMeasureTool(
     if (!canvas) return;
 
     let downX = 0, downY = 0;
-    // Punto agarrado para arrastrar — null si este mousedown no cayó
-    // sobre ninguno. wasDragging queda prendido un instante después de
-    // soltar, para que el 'click' nativo que el navegador dispara igual
-    // (mousedown y mouseup en el mismo elemento) no se tome como "poner
-    // un punto nuevo".
+
     const draggingRef: { current: { id: string; pointIndex: number } | null } = { current: null };
     let wasDragging = false;
     let lastDragMoveAt = 0;
@@ -150,12 +188,8 @@ export function useFragmentsMeasureTool(
       const hit = hitTestPoint(e.clientX, e.clientY);
       if (hit) {
         draggingRef.current = hit;
-        // Frena acá mismo a useCameraControls.ts (registrado después,
-        // mismo canvas) para que este mousedown no arranque también un
-        // orbit de cámara — mismo objetivo que el "return true" que usa
-        // el camino de siempre para "consumir" el evento, pero como acá
-        // no pasamos por ese callback compartido, se corta directo la
-        // propagación al resto de los listeners de este mismo evento.
+        setDraggingPoint(hit);
+     
         e.stopImmediatePropagation();
       }
     };
@@ -189,6 +223,19 @@ export function useFragmentsMeasureTool(
             : null;
           return { ...m, points, distance };
         }));
+
+        setHoverPoint({ ...snap.point, screen, snapType: snap.snapType });
+    
+        setHoverColor('#2dd4bf');
+
+        if (snap.snapType === 'edge' && snap.edge) {
+          const { p0, p1 } = shortEdgeSegment(snap.edge.v0, snap.edge.v1, snap.point, EDGE_HINT_HALF_LEN);
+          const screenA = projectPoint(p0);
+          const screenB = projectPoint(p1);
+          setHoverEdge(screenA && screenB ? { a: screenA, b: screenB } : null);
+        } else {
+          setHoverEdge(null);
+        }
       } catch (err) {
         console.warn('[useFragmentsMeasureTool] error al arrastrar el punto:', err);
       } finally {
@@ -196,12 +243,9 @@ export function useFragmentsMeasureTool(
       }
     };
 
-    // Dónde caería el próximo punto si clickearas ahora — corre en
-    // paralelo al arrastre de arriba (guard propio, hoverBusy, para no
-    // competir con él por turno) y se apaga solo mientras se está
-    // arrastrando un punto ya puesto (ahí el hover no aporta nada).
+   
     const onHoverMove = async (e: MouseEvent) => {
-      if (!measureModeRef.current || draggingRef.current) return;
+      if (!measureArmedRef.current || draggingRef.current) return;
       const now = performance.now();
       if (now - lastHoverMoveAt < DRAG_THROTTLE_MS) return;
       lastHoverMoveAt = now;
@@ -215,10 +259,22 @@ export function useFragmentsMeasureTool(
       try {
         const mouse = new THREE.Vector2(e.clientX, e.clientY);
         const snap = await bestSnapPoint(model, camera, mouse, canvas);
-        if (!measureModeRef.current || draggingRef.current) return; // se apagó/empezó a arrastrar mientras esto resolvía
-        if (!snap) { setHoverPoint(null); return; }
+        if (!measureArmedRef.current || draggingRef.current) return; // se desarmó/empezó a arrastrar mientras esto resolvía
+        if (!snap) { setHoverPoint(null); setHoverEdge(null); return; }
         const screen = projectPoint(snap.point);
         setHoverPoint({ ...snap.point, screen, snapType: snap.snapType });
+    
+        const hasPending = measurementsRef.current.some((m) => m.points.length === 1);
+        setHoverColor(hasPending ? '#dc2626' : '#0056b3');
+
+        if (snap.snapType === 'edge' && snap.edge) {
+          const { p0, p1 } = shortEdgeSegment(snap.edge.v0, snap.edge.v1, snap.point, EDGE_HINT_HALF_LEN);
+          const screenA = projectPoint(p0);
+          const screenB = projectPoint(p1);
+          setHoverEdge(screenA && screenB ? { a: screenA, b: screenB } : null);
+        } else {
+          setHoverEdge(null);
+        }
       } catch (err) {
         console.warn('[useFragmentsMeasureTool] error al calcular el punto bajo el mouse:', err);
       } finally {
@@ -226,28 +282,29 @@ export function useFragmentsMeasureTool(
       }
     };
 
-    const onMouseLeave = () => setHoverPoint(null);
+    const onMouseLeave = () => { setHoverPoint(null); setHoverEdge(null); };
 
     const onWindowMouseUp = (e: MouseEvent) => {
       if (draggingRef.current) {
         draggingRef.current = null;
         wasDragging = true;
+        setHoverEdge(null); // se soltó el punto — el resaltado de arista/vértice del arrastre ya no aplica
+        setHoverPoint(null);
+        setDraggingPoint(null);
         e.stopImmediatePropagation();
       }
     };
 
     const onClick = async (e: MouseEvent) => {
       if (wasDragging) { wasDragging = false; return; } // el click que sigue a soltar un arrastre no pone un punto nuevo
-      if (!measureModeRef.current) return;
+      if (!measureArmedRef.current) return; // desarmado (ya se completó una medición) — este click es de cámara, no pone nada
       const model = storeRef.current?.fragmentsModel;
       const camera = rendererRef.current?.getCamera?.()?.camera;
       if (!model || !camera) return; // no hay modelo de Fragments cargado, no hace nada
       if (Math.hypot(e.clientX - downX, e.clientY - downY) >= 4) return; // arrastre de cámara, no click
       if (busyRef.current) return;
 
-      // Mismo cuidado que useFragmentsSelection.ts: coordenadas de página
-      // crudas, sin restar rect.left/top acá — model.raycast(...) ya lo
-      // hace por dentro.
+    
       const mouse = new THREE.Vector2(e.clientX, e.clientY);
 
       busyRef.current = true;
@@ -256,18 +313,26 @@ export function useFragmentsMeasureTool(
         if (!snap) return;
         const screen = projectPoint(snap.point);
 
-        setMeasurements((prev) => {
-          const active = prev.find((m) => m.points.length === 1);
-          if (active) {
-            const points = [...active.points, { ...snap.point, screen, snapType: snap.snapType }];
+        const active = measurementsRef.current.find((m) => m.points.length === 1);
+        if (active) {
+      
+          setMeasurements((prev) => prev.map((m) => {
+            if (m.id !== active.id) return m;
+            const points = [...m.points, { ...snap.point, screen, snapType: snap.snapType }];
             const [p1, p2] = points;
             const distance = Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2 + (p2.z - p1.z) ** 2);
-            return prev.map((m) => (m.id === active.id ? { ...m, points, distance } : m));
-          }
-          // Una sola medición activa a la vez, igual que el camino de
-          // siempre cuando se empieza una nueva estando otra completa.
-          return [{ id: nextId(), points: [{ ...snap.point, screen, snapType: snap.snapType }], distance: null }];
-        });
+            return { ...m, points, distance };
+          }));
+          setMeasureArmed(false);
+          setHoverPoint(null);
+          setHoverEdge(null);
+        } else {
+          
+          setMeasurements((prev) => [
+            ...prev,
+            { id: nextId(), points: [{ ...snap.point, screen, snapType: snap.snapType }], distance: null },
+          ]);
+        }
       } catch (err) {
         console.warn('[useFragmentsMeasureTool] error al medir:', err);
       } finally {
@@ -316,13 +381,14 @@ export function useFragmentsMeasureTool(
 
   return {
     fragmentsMeasureMode: measureMode,
-    // Para que useFragmentsSelection.ts pueda saber, en su propio
-    // listener de 'click' (nativo, fuera de React), si la medición está
-    // activa AHORA MISMO y así cederle el click — un booleano de estado
-    // de React quedaría desactualizado en ese closure.
     fragmentsMeasureModeRef: measureModeRef,
+    
+    fragmentsMeasureBusyRef: measureBusyRef,
     fragmentsMeasurements: measurements,
     fragmentsMeasureHoverPoint: hoverPoint,
+    fragmentsMeasureHoverColor: hoverColor,
+    fragmentsHoverEdge: hoverEdge,
+    fragmentsDraggingPoint: draggingPoint,
     enableAndArmFragmentsMeasure,
     exitFragmentsMeasureMode,
     clearFragmentsMeasurement,

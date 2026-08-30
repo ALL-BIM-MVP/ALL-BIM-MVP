@@ -10,26 +10,16 @@ import { projectService } from '../../services/project.service';
 
 interface IFCViewerProps {
   fileBuffer: ArrayBuffer | null;
-  // Fase 1 real de la migración a ThatOpen/Fragments — cuando viene
-  // seteado, el visor carga ESTE archivo (ya en formato .frag) en vez
-  // de fileBuffer, por un camino nuevo que no pasa por el worker de
-  // web-ifc. Sin herramientas todavía (medir/seleccionar/etc. no
-  // encuentran nada en este camino) — ver useModelLoader.ts.
+
   fragmentsBuffer?: ArrayBuffer | null;
   projectId?: number;
   viewCubeVisible?: boolean;
   onFileUploaded?: () => void;
 
   viewCubeRightOffset?: number;
-  // Cuando es false (el tab del visor no es el que se está mirando, ej.
-  // estás en Inicio/Archivos/Colaboradores), el loop de renderizado 3D
-  // se pausa — sin esto quedaba corriendo para siempre de fondo aunque
-  // el canvas estuviera oculto (display:none no lo frena solo), gastando
-  // CPU/GPU en cada frame y frenando el scroll de las demás pestañas.
+
   isActive?: boolean;
-  // Botón "Ver partida" del popup Ocultar/Aislar/Cortar — Visor3DTab.tsx
-  // es quien tiene acceso al panel de Metrados y al ifcFileId, así que
-  // el viewer solo avisa CUÁL elemento (expressId) se pidió ver.
+
   onViewElementInMetrados?: (expressId: number) => void;
 }
 
@@ -49,12 +39,16 @@ const InfoRow: React.FC<{ label: string; value: string; multiline?: boolean }> =
   </div>
 );
 
-const DistanceLabel: React.FC<{ x: number; y: number; distance: number }> = ({ x, y, distance }) => (
+
+const DistanceLabel: React.FC<{ x: number; y: number; distance: number; color?: string }> = ({ x, y, distance, color = '#0056b3' }) => (
   <div
-    className="absolute z-30 -translate-x-1/2 -translate-y-full pointer-events-none"
+    className="absolute z-50 -translate-x-1/2 -translate-y-full pointer-events-none"
     style={{ left: x, top: y - 10 }}
   >
-    <div className="bg-[#0056b3]/80 text-white text-[9px] font-semibold px-1 py-0.5 rounded shadow-lg whitespace-nowrap">
+    <div
+      className="text-white text-[9px] font-semibold px-1 py-0.5 rounded shadow-lg whitespace-nowrap"
+      style={{ backgroundColor: `${color}cc` }}
+    >
       {distance.toFixed(3)} m
     </div>
   </div>
@@ -62,8 +56,8 @@ const DistanceLabel: React.FC<{ x: number; y: number; distance: number }> = ({ x
 
 const DistanceLabelWithDelete: React.FC<{ x: number; y: number; distance: number; onDelete: () => void }> = ({ x, y, distance, onDelete }) => (
   <div
-    className="absolute z-30 -translate-x-1/2 -translate-y-full"
-    style={{ left: x, top: y - 10 }}
+    className="absolute z-30 -translate-x-1/2 -translate-y-1/2"
+    style={{ left: x, top: y }}
   >
     <div className="relative bg-[#0056b3]/80 text-white text-[9px] font-semibold px-1 py-0.5 rounded shadow-lg whitespace-nowrap">
       {distance.toFixed(3)} m
@@ -116,49 +110,41 @@ const SnapIcon: React.FC<{ x: number; y: number; snapType: string }> = ({ x, y, 
   );
 };
 
-const SNAP_COLORS: Record<string, { fill: string; stroke: string }> = {
-  vertex: { fill: '#facc15', stroke: '#ca8a04' },
-  edge: { fill: '#22d3ee', stroke: '#0891b2' },
-  face: { fill: '#94a3b8', stroke: '#64748b' },
-  face_center: { fill: '#94a3b8', stroke: '#64748b' },
-  none: { fill: 'none', stroke: '#94a3b8' },
+
+const MeasureRingCursor: React.FC<{ x: number; y: number; snapType: string; color?: string }> = ({ x, y, snapType, color = '#0056b3' }) => {
+ 
+  const isDragTurquoise = color === '#2dd4bf';
+  const ringOpacity = isDragTurquoise ? 0.85 : 0.75;
+  const fillAlpha = isDragTurquoise ? '30' : '26';
+  return (
+    <div
+      className="absolute z-30 -translate-x-1/2 -translate-y-1/2 pointer-events-none drop-shadow-md"
+      style={{ left: x, top: y }}
+    >
+      {snapType === 'vertex' && (
+        <div
+          className="absolute rounded-full border-[3px]"
+          style={{ left: -8, top: -8, width: 32, height: 32, borderColor: '#eab308', opacity: 0.6 }}
+        />
+      )}
+      <div
+        className="rounded-full border-[3px]"
+        style={{ width: 16, height: 16, borderColor: color, backgroundColor: `${color}${fillAlpha}`, opacity: ringOpacity }}
+      />
+    </div>
+  );
 };
 
-const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, y, snapType }) => {
-  const type = snapType ?? 'none';
-  const colors = SNAP_COLORS[type] ?? SNAP_COLORS.none;
-
-  if (type === 'vertex') {
-    const s = 6;
-    return (
-      <rect
-        x={x - s} y={y - s} width={s * 2} height={s * 2}
-        fill={colors.fill} stroke={colors.stroke} strokeWidth={1.5}
-        opacity={0.75}
-      />
-    );
-  }
-
-  if (type === 'edge') {
-    const s = 6;
-    return (
-      <rect
-        x={x - s} y={y - s} width={s * 2} height={s * 2}
-        rx={2.5} ry={2.5}
-        fill={colors.fill} stroke={colors.stroke} strokeWidth={1.5}
-        opacity={0.75}
-        transform={`rotate(45 ${x} ${y})`}
-      />
-    );
-  }
-
+const MEASURE_POINT_COLORS = ['#0056b3', '#dc2626'];
+const MeasurePointMarker: React.FC<{ x: number; y: number; index: number }> = ({ x, y, index }) => {
+  const color = MEASURE_POINT_COLORS[index] ?? MEASURE_POINT_COLORS[0];
+ 
   return (
-    <circle
-      cx={x} cy={y}
-      r={type === 'none' ? 5 : 7}
-      fill={colors.fill} stroke={colors.stroke} strokeWidth={2}
-      opacity={0.85}
-    />
+    <>
+      <circle cx={x} cy={y} r={7} fill={color} fillOpacity={0.15} stroke={color} strokeWidth={3} strokeOpacity={0.7} />
+     
+      <circle cx={x} cy={y} r={2} fill={color} />
+    </>
   );
 };
 
@@ -198,6 +184,9 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     exitFragmentsMeasureMode,
     fragmentsMeasurements,
     fragmentsMeasureHoverPoint,
+    fragmentsMeasureHoverColor,
+    fragmentsHoverEdge,
+    fragmentsDraggingPoint,
     clearFragmentsMeasurement,
     removeFragmentsMeasurement,
     registerFragmentsMeasureLabelEl,
@@ -314,20 +303,14 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
       usingFragmentsSelection ? clearFragmentsSelection() : clearSelection(),
   }));
 
-  // Punto de mezcla explícito y chico entre los dos sistemas de selección
-  // (web-ifc y Fragments) — nunca hay selección en los dos a la vez, así
-  // que alcanza con "el que no sea null". El PropertiesPanel es el mismo
-  // componente para los dos; lo que cambia es de dónde sale la data.
+
   const activeEntity = selectedEntity ?? fragmentsSelectedEntity;
   const handleDeselectEntity = useCallback(() => {
     if (selectedEntity) clearSelection();
     else if (fragmentsSelectedEntity) clearFragmentsSelection();
   }, [selectedEntity, clearSelection, fragmentsSelectedEntity, clearFragmentsSelection]);
 
-  // Mismo punto de mezcla para el popup Ocultar/Aislar/Cortar — activeEntity.expressId
-  // ya trae el localId de Fragments reusando ese campo (ver
-  // useFragmentsSelection.ts), así que alcanza con mirar cuál de los
-  // dos sistemas tiene la selección activa para saber a cuál llamar.
+  
   const handleHideActiveEntity = useCallback(() => {
     if (!activeEntity) return;
     if (selectedEntity) hideElementById(activeEntity.expressId);
@@ -341,9 +324,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     else isolateFragmentsElementById(activeEntity.expressId);
   }, [activeEntity, selectedEntity, isolateElementById, isolateFragmentsElementById]);
 
-  // Botón "Ver partida" del popup — activeEntity.expressId sirve para
-  // los dos sistemas por igual (ver el comentario de arriba), así que
-  // no hace falta distinguir cuál está activo acá.
+  
   const handleViewElementInMetrados = useCallback(() => {
     if (!activeEntity) return;
     onViewElementInMetrados?.(activeEntity.expressId);
@@ -360,18 +341,18 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     else dismissFragmentsPopup();
   }, [selectedEntity, dismissPopup, dismissFragmentsPopup]);
 
-  // Mismo punto de mezcla para medición: solo uno de los dos sistemas
-  // llega a tener mediciones puestas (depende de qué modelo está
-  // cargado), así que alcanza con "el que tenga algo".
   const displayMeasurements = measurements.length > 0 ? measurements : fragmentsMeasurements;
   const handleRegisterMeasureLabelEl = useCallback((id: string, el: HTMLDivElement | null) => {
     registerMeasureLabelEl(id, el);
     registerFragmentsMeasureLabelEl(id, el);
   }, [registerMeasureLabelEl, registerFragmentsMeasureLabelEl]);
+
   const handleRemoveMeasurement = useCallback((id: string) => {
     removeMeasurement(id);
     removeFragmentsMeasurement(id);
-  }, [removeMeasurement, removeFragmentsMeasurement]);
+    exitMeasureMode();
+    exitFragmentsMeasureMode();
+  }, [removeMeasurement, removeFragmentsMeasurement, exitMeasureMode, exitFragmentsMeasureMode]);
 
   // Mismo punto de mezcla que medición/selección — solo uno de los dos
   // sistemas llega a tener cruces puestas.
@@ -386,10 +367,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     removeFragmentsCross(id);
   }, [removeCross, removeFragmentsCross]);
 
-  // Mismo criterio que displayCrosses/displayMeasurements/
-  // usingFragmentsSelection (más arriba): solo uno de los dos sistemas
-  // (web-ifc o Fragments) llega a tener categorías/niveles detectados,
-  // según qué camino cargó el archivo actual.
   const usingFragmentsFilter = usingFragmentsSelection;
   const displayTypeGroups = usingFragmentsFilter ? fragmentsTypeGroups : typeGroups;
   const displaySelectedTypes = usingFragmentsFilter ? fragmentsSelectedTypes : selectedTypes;
@@ -411,11 +388,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
   const [rulerMenuOpen, setRulerMenuOpen] = useState(false);
   const rulerMenuRef = useRef<HTMLDivElement>(null);
 
-  // Cerrar el menú de "Herramientas de medición" con la primera
-  // interacción afuera de él — antes solo se cerraba si elegías una de
-  // las 2 opciones (Medición/Cruz de ejes); si clickeabas cualquier
-  // otra cosa (el visor 3D, otro botón de la barra) quedaba abierto
-  // colgado. Mismo patrón que showEntryPopover en Visor3DTab.tsx.
+  
   useEffect(() => {
     if (!rulerMenuOpen) return;
     const handleClickOutside = (event: MouseEvent) => {
@@ -516,12 +489,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     fragmentsSelectedLevels.size > 0 ||
     hiddenFragmentsElementIds.size > 0;
 
-  // Solo la parte de arriba que en verdad atenúa (GHOST_MATERIAL) del
-  // lado Fragments — a diferencia de hasAnyIsolation, deja afuera
-  // "Ocultar" (hiddenFragmentsElementIds, un mecanismo aparte que
-  // esconde de verdad con setVisible, no atenúa) porque el botón de
-  // pausar/reanudar atenuado (ver toggleIsolationPause) solo tiene
-  // sentido cuando hay ALGO atenuado para esconder/volver a mostrar.
+  
   const hasAnyFragmentsDimming =
     isolatedFragmentsElementId !== null ||
     (isolatedFragmentsElementIds !== null && isolatedFragmentsElementIds.size > 0) ||
@@ -732,37 +700,23 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                     const p1 = m.points[0];
                     const p2 = m.points[1];
                     const hasLine = p2 && p1?.screen && p2?.screen;
-                    const tickAngle = hasLine
-                      ? Math.atan2(p2!.screen!.y - p1!.screen!.y, p2!.screen!.x - p1!.screen!.x) + Math.PI / 2
-                      : 0;
-                    const tickLen = 6;
-                    const tickDx = Math.cos(tickAngle) * tickLen;
-                    const tickDy = Math.sin(tickAngle) * tickLen;
 
                     return (
                       <g key={m.id}>
                         {hasLine && (
-                          <>
-                            <line
-                              x1={p1!.screen!.x} y1={p1!.screen!.y}
-                              x2={p2!.screen!.x} y2={p2!.screen!.y}
-                              stroke="#0056b3" strokeWidth={2}
-                            />
-                            <line
-                              x1={p1!.screen!.x - tickDx} y1={p1!.screen!.y - tickDy}
-                              x2={p1!.screen!.x + tickDx} y2={p1!.screen!.y + tickDy}
-                              stroke="#0056b3" strokeWidth={2}
-                            />
-                            <line
-                              x1={p2!.screen!.x - tickDx} y1={p2!.screen!.y - tickDy}
-                              x2={p2!.screen!.x + tickDx} y2={p2!.screen!.y + tickDy}
-                              stroke="#0056b3" strokeWidth={2}
-                            />
-                          </>
+                        
+                          <line
+                            x1={p1!.screen!.x} y1={p1!.screen!.y}
+                            x2={p2!.screen!.x} y2={p2!.screen!.y}
+                            stroke="#0056b3" strokeWidth={2} strokeOpacity={0.6}
+                          />
                         )}
-                        {m.points.map((pt, i) =>
-                          pt.screen ? <SnapMarker key={i} x={pt.screen.x} y={pt.screen.y} snapType={pt.snapType} /> : null
-                        )}
+                        {m.points.map((pt, i) => {
+                         
+                          const isBeingDragged = fragmentsDraggingPoint?.id === m.id && fragmentsDraggingPoint?.pointIndex === i;
+                          if (isBeingDragged || !pt.screen) return null;
+                          return <MeasurePointMarker key={i} x={pt.screen.x} y={pt.screen.y} index={i} />;
+                        })}
                       </g>
                     );
                   })}
@@ -777,13 +731,38 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                       opacity={0.7}
                     />
                   )}
-                  {measureHoverPoint?.screen && (
-                    <SnapIcon x={measureHoverPoint.screen.x} y={measureHoverPoint.screen.y} snapType={measureHoverPoint.snapType ?? 'none'} />
+                  {fragmentsHoverEdge && (
+                    <line
+                      x1={fragmentsHoverEdge.a.x} y1={fragmentsHoverEdge.a.y}
+                      x2={fragmentsHoverEdge.b.x} y2={fragmentsHoverEdge.b.y}
+                      stroke="#2dd4bf"
+                      strokeWidth={4}
+                      strokeLinecap="round"
+                      opacity={0.85}
+                    />
                   )}
-                  {fragmentsMeasureHoverPoint?.screen && (
-                    <SnapIcon x={fragmentsMeasureHoverPoint.screen.x} y={fragmentsMeasureHoverPoint.screen.y} snapType={fragmentsMeasureHoverPoint.snapType ?? 'none'} />
-                  )}
+                  {(() => {
+            
+                    const pending = displayMeasurements.find((m) => m.points.length === 1);
+                    const hover = measurements.length > 0 ? measureHoverPoint : fragmentsMeasureHoverPoint;
+                    if (!pending?.points[0]?.screen || !hover?.screen) return null;
+                    return (
+                      <line
+                        x1={pending.points[0].screen.x} y1={pending.points[0].screen.y}
+                        x2={hover.screen.x} y2={hover.screen.y}
+                        stroke="#0056b3" strokeWidth={2} strokeDasharray="6 4" opacity={0.8}
+                      />
+                    );
+                  })()}
                 </svg>
+
+              
+                {measureHoverPoint?.screen && (
+                  <SnapIcon x={measureHoverPoint.screen.x} y={measureHoverPoint.screen.y} snapType={measureHoverPoint.snapType ?? 'none'} />
+                )}
+                {fragmentsMeasureHoverPoint?.screen && (
+                  <MeasureRingCursor x={fragmentsMeasureHoverPoint.screen.x} y={fragmentsMeasureHoverPoint.screen.y} snapType={fragmentsMeasureHoverPoint.snapType ?? 'none'} color={fragmentsMeasureHoverColor} />
+                )}
 
                 {displayMeasurements.map((m) => {
                   const p1 = m.points[0];
@@ -791,16 +770,12 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                   if (!p2 || !p1?.screen || !p2.screen || m.distance === null) return null;
                   const midX = (p1.screen.x + p2.screen.x) / 2;
                   const midY = (p1.screen.y + p2.screen.y) / 2;
-                  // El wrapper es lo que se mueve (por transform, escrito
-                  // directo por reprojectOnFrame en cada frame — ver
-                  // useMeasureTool.ts). La etiqueta de adentro queda fija
-                  // en (0,0) relativo a él, así su propio -translate-x/y
-                  // de centrado sigue funcionando igual que antes.
+                 
                   return (
                     <div
                       key={m.id}
                       ref={(el) => handleRegisterMeasureLabelEl(m.id, el)}
-                      className="absolute left-0 top-0"
+                      className="absolute left-0 top-0 z-30"
                       style={{ transform: `translate(${midX}px, ${midY}px)`, willChange: 'transform' }}
                     >
                       <DistanceLabelWithDelete
@@ -829,44 +804,45 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
 
             {(crossMode || fragmentsCrossMode) && (
               <>
-                {/* z-40, por encima de las etiquetas de medida (z-30) —
-                    antes el círculo del centro (el punto de arrastre)
-                    podía quedar tapado por una etiqueta que cayera cerca,
-                    sobre todo con medidas cortas. */}
+               
                 <svg
                   className="absolute inset-0 z-40 pointer-events-none"
                   style={{ width: '100%', height: '100%' }}
                 >
                   {displayCrosses.map((c) => {
-                    const ready = c.centerScreen && c.uPosScreen && c.uNegScreen && c.vPosScreen && c.vNegScreen;
-                    if (!ready) return null;
+                    
+                    if (!c.centerScreen) return null;
                     return (
                       <g key={c.id}>
-                        <line
-                          x1={c.uNegScreen!.x} y1={c.uNegScreen!.y}
-                          x2={c.uPosScreen!.x} y2={c.uPosScreen!.y}
-                          stroke="#22c55e" strokeWidth={2}
-                        />
-                        <line
-                          x1={c.vNegScreen!.x} y1={c.vNegScreen!.y}
-                          x2={c.vPosScreen!.x} y2={c.vPosScreen!.y}
-                          stroke="#eab308" strokeWidth={2}
-                        />
-                        {[c.uPosScreen!, c.uNegScreen!, c.vPosScreen!, c.vNegScreen!].map((p, i) => (
-                          <circle key={i} cx={p.x} cy={p.y} r={4} fill="#fff" stroke="#0056b3" strokeWidth={1.5} />
+                        {c.uNegScreen && c.uPosScreen && (
+                          <line
+                            x1={c.uNegScreen.x} y1={c.uNegScreen.y}
+                            x2={c.uPosScreen.x} y2={c.uPosScreen.y}
+                            stroke="#22c55e" strokeWidth={3} strokeOpacity={0.9}
+                          />
+                        )}
+                        {c.vNegScreen && c.vPosScreen && (
+                          <line
+                            x1={c.vNegScreen.x} y1={c.vNegScreen.y}
+                            x2={c.vPosScreen.x} y2={c.vPosScreen.y}
+                            stroke="#0056b3" strokeWidth={3} strokeOpacity={0.9}
+                          />
+                        )}
+                        {[c.uPosScreen, c.uNegScreen, c.vPosScreen, c.vNegScreen].map((p, i) => (
+                          p && <circle key={i} cx={p.x} cy={p.y} r={4} fill="#fff" stroke="#0056b3" strokeWidth={1.5} />
                         ))}
                         {c.depthPosScreen && (
                           <>
                             <line
-                              x1={c.centerScreen!.x} y1={c.centerScreen!.y}
+                              x1={c.centerScreen.x} y1={c.centerScreen.y}
                               x2={c.depthPosScreen.x} y2={c.depthPosScreen.y}
-                              stroke="#ef4444" strokeWidth={2} strokeDasharray="4 3"
+                              stroke="#ef4444" strokeWidth={3} strokeOpacity={0.9}
                             />
                             <circle cx={c.depthPosScreen.x} cy={c.depthPosScreen.y} r={4} fill="#fff" stroke="#ef4444" strokeWidth={1.5} />
                           </>
                         )}
                         <circle
-                          cx={c.centerScreen!.x} cy={c.centerScreen!.y} r={7}
+                          cx={c.centerScreen.x} cy={c.centerScreen.y} r={7}
                           fill={displayDraggingCrossId === c.id ? '#f97316' : '#0056b3'}
                           stroke="#fff" strokeWidth={2}
                         />
@@ -877,10 +853,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
 
                 {displayCrosses.map((c) => {
                   if (!c.centerScreen) return null;
-                  // Mismo patrón que en medición: cada pieza (centro y las
-                  // 3 etiquetas de longitud) vive en su propio wrapper con
-                  // ref, movido por transform desde reprojectOnFrame en
-                  // useCrossTool.ts — no por re-render de React.
+         
                   return (
                     <React.Fragment key={c.id}>
                       <div
@@ -890,39 +863,42 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                       >
                         <CenterDeleteHandle x={0} y={0} onDelete={() => handleRemoveCross(c.id)} />
                       </div>
-                      {c.uPosScreen && (() => {
-                        const pos = crossLabelPos(c.centerScreen!, c.uPosScreen);
+                      {(c.uPosScreen || c.uNegScreen) && (() => {
+                        const pos = crossLabelPos(c.centerScreen!, c.uPosScreen, c.uNegScreen);
+                        if (!pos) return null;
                         return (
                           <div
                             ref={(el) => handleRegisterCrossPosEl(`${c.id}:u`, el)}
-                            className="absolute left-0 top-0"
+                            className="absolute left-0 top-0 z-50"
                             style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
                           >
-                            <DistanceLabel x={0} y={0} distance={c.lengthU} />
+                            <DistanceLabel x={0} y={0} distance={c.lengthU} color="#22c55e" />
                           </div>
                         );
                       })()}
-                      {c.vPosScreen && (() => {
-                        const pos = crossLabelPos(c.centerScreen!, c.vPosScreen);
+                      {(c.vPosScreen || c.vNegScreen) && (() => {
+                        const pos = crossLabelPos(c.centerScreen!, c.vPosScreen, c.vNegScreen);
+                        if (!pos) return null;
                         return (
                           <div
                             ref={(el) => handleRegisterCrossPosEl(`${c.id}:v`, el)}
-                            className="absolute left-0 top-0"
+                            className="absolute left-0 top-0 z-50"
                             style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
                           >
-                            <DistanceLabel x={0} y={0} distance={c.lengthV} />
+                            <DistanceLabel x={0} y={0} distance={c.lengthV} color="#0056b3" />
                           </div>
                         );
                       })()}
                       {c.depthPosScreen && c.lengthDepth !== null && (() => {
-                        const pos = crossLabelPos(c.centerScreen!, c.depthPosScreen);
+                        const pos = crossLabelPos(c.centerScreen!, c.depthPosScreen, null);
+                        if (!pos) return null;
                         return (
                           <div
                             ref={(el) => handleRegisterCrossPosEl(`${c.id}:depth`, el)}
-                            className="absolute left-0 top-0"
+                            className="absolute left-0 top-0 z-50"
                             style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
                           >
-                            <DistanceLabel x={0} y={0} distance={c.lengthDepth!} />
+                            <DistanceLabel x={0} y={0} distance={c.lengthDepth!} color="#ef4444" />
                           </div>
                         );
                       })()}

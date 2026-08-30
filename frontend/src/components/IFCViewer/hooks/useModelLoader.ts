@@ -39,14 +39,7 @@ export function useModelLoader(
   fileBuffer: ArrayBuffer | null,
   refs: ModelLoaderRefs,
   options: UseModelLoaderOptions = {},
-  // Fase 1 real de la migración a ThatOpen/Fragments (ver
-  // docs/roadmap/migracion-visor-thatopen.md) — primer paso: si viene
-  // el .frag ya descargado, se carga por ESTE camino en vez de abrir el
-  // worker de web-ifc. A propósito, el objeto de Fragments NO se agrega
-  // a controller.meshes (ver ThreeSceneController.addExternalObject) —
-  // eso significa que medir/seleccionar/etc. no van a encontrar nada
-  // ahí todavía; esas herramientas se evalúan una por una en Fase 3,
-  // no se migran de una junto con la geometría.
+
   fragmentsBuffer: ArrayBuffer | null = null
 ) {
   const { canvasRef, containerRef, rendererRef, storeRef, modelBoundsRef } = refs;
@@ -88,18 +81,7 @@ export function useModelLoader(
         return;
       }
 
-      // Guarda contra un segundo pase de este mismo efecto llegando acá
-      // con el MISMO fragmentsBuffer ya consumido por un pase anterior
-      // — FragmentsModels.load() transfiere (detach) el buffer que
-      // recibe, así que uno ya detacheado tiene byteLength 0. TIENE que
-      // ir ACÁ, antes de cualquier setState — confirmado en vivo: si
-      // este chequeo vive más abajo (después de setReady(false)), este
-      // pase duplicado deja `ready` en false para siempre (nada más lo
-      // vuelve a poner en true), y eso rompía en silencio cualquier
-      // hook que dependa de `ready` para arrancar (ej. "Aislar" en
-      // useFragmentsEntityVisibility.ts, que se quedaba sin sus
-      // categorías/niveles cargados) — "Ocultar" seguía andando porque
-      // ESE no depende de `ready`, por eso el síntoma era tan puntual.
+
       if (fragmentsBuffer && fragmentsBuffer.byteLength === 0) {
         console.warn('[useModelLoader] fragmentsBuffer ya estaba transferido (detached) — se omite esta carga, ya se hizo antes.');
         return;
@@ -212,8 +194,16 @@ export function useModelLoader(
             const now = performance.now();
             const dt = Math.min((now - lastTime) / 1000, 0.1);
             lastTime = now;
-            onFrame?.(dt);
+            // La cámara se actualiza PRIMERO (avanza cualquier animación de
+            // vuelo en curso) y recién después se reproyectan medidas/
+            // cruces/popup a pantalla — si no, mientras la cámara está en
+            // pleno vuelo, la reproyección usaba la posición VIEJA (de
+            // este mismo tick, antes de avanzar) mientras el modelo se
+            // terminaba dibujando con la posición YA actualizada: quedaban
+            // un frame desincronizados, la medida se veía "despegada" del
+            // modelo durante el movimiento.
             controller.getCamera().update(dt);
+            onFrame?.(dt);
             controller.render({
               clearColor: getClearColor?.() ?? [0.9333, 0.9333, 0.9333, 1],
               sectionPlane: getSectionPlane?.(),
