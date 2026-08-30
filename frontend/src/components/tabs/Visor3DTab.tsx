@@ -828,12 +828,12 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
     }
   };
 
-  const handleSelectAllInViewer = useCallback((expressIds: number[]) => {
-    viewerRef.current?.isolateElementsByIds(expressIds);
+  const handleSelectAllInViewer = useCallback((expressIds: number[], globalIds?: (string | null)[]) => {
+    viewerRef.current?.isolateElementsByIds(expressIds, globalIds);
   }, []);
 
-  const handleSelectGroupInViewer = useCallback((expressIds: number[]) => {
-    viewerRef.current?.selectGroupInViewer(expressIds);
+  const handleSelectGroupInViewer = useCallback((expressIds: number[], globalIds?: (string | null)[]) => {
+    viewerRef.current?.selectGroupInViewer(expressIds, globalIds);
   }, []);
 
   // Botón "Partida" del popup Ocultar/Aislar/Cortar (IFCViewer.tsx) —

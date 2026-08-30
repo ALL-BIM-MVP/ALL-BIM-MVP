@@ -328,6 +328,12 @@ export type OrigenMetrado = 'tipado' | 'geometrico' | 'texto' | 'acero_diametro'
 export interface PartidaElementDetail {
   element_id: string;
   express_id: string;
+  // GUID real del IFC — necesario para aislar este elemento cuando el
+  // modelo cargó por Fragments (ahí los elementos se identifican con
+  // un localId propio, sin relación con express_id, pero sí se puede
+  // traducir GUID -> localId). Puede venir null si el IFC de origen
+  // no lo trae.
+  global_id: string | null;
   name: string;
   length: number;
   run_length: number;

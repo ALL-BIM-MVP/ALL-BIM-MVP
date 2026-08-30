@@ -24,8 +24,8 @@ import MetradosTable from './Templates/MetradosTable';
 interface PartidasTreeProps {
   ifcFileId: string;
   currentUserId?: number;
-  onSelectAllInViewer?: (expressIds: number[]) => void;
-  onSelectGroupInViewer?: (expressIds: number[]) => void;
+  onSelectAllInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
+  onSelectGroupInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
   onClearSelectionInViewer?: () => void;
   // Botón "Ver partida" del popup de selección en el visor 3D (ver
   // Visor3DTab.tsx) — salta directo a la pantalla de detalle de esta
@@ -54,8 +54,12 @@ const PartidaDetailScreen: React.FC<{
   node: PartidaNode;
   currentUserId: number;
   onBack: () => void;
-  onSelectGroupInViewer?: (expressIds: number[]) => void;
-  onSelectAllInViewer?: (expressIds: number[]) => void;
+  // globalIds: paralelo a expressIds (mismo orden, mismo largo) — el
+  // visor lo necesita cuando el modelo cargó por Fragments, donde
+  // express_id no sirve para identificar el elemento (ver comentario
+  // largo en isolatePartidaInViewer más abajo).
+  onSelectGroupInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
+  onSelectAllInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
   onClearSelectionInViewer?: () => void;
   // Elemento puntual que se clickeó en el visor 3D para llegar acá (ver
   // "Ver partida" en IFCViewer.tsx/Visor3DTab.tsx) — una vez que carga
@@ -183,7 +187,8 @@ const PartidaDetailScreen: React.FC<{
       setPartidaIsolated(false);
     } else {
       const expressIds = detail.groups.flatMap((g) => g.elements.map((el) => Number(el.express_id)));
-      onSelectAllInViewer(expressIds);
+      const globalIds = detail.groups.flatMap((g) => g.elements.map((el) => el.global_id));
+      onSelectAllInViewer(expressIds, globalIds);
       setPartidaIsolated(true);
     }
     onClearSelectionInViewer?.();
@@ -209,11 +214,13 @@ const PartidaDetailScreen: React.FC<{
       } else if (onSelectGroupInViewer) {
         if (detail && onSelectAllInViewer) {
           const allIds = detail.groups.flatMap((g) => g.elements.map((el) => Number(el.express_id)));
-          onSelectAllInViewer(allIds);
+          const allGlobalIds = detail.groups.flatMap((g) => g.elements.map((el) => el.global_id));
+          onSelectAllInViewer(allIds, allGlobalIds);
           setPartidaIsolated(true);
         }
         const expressIds = group.elements.map((el) => Number(el.express_id));
-        onSelectGroupInViewer(expressIds);
+        const globalIds = group.elements.map((el) => el.global_id);
+        onSelectGroupInViewer(expressIds, globalIds);
         setSelectedGroupIndex(index);
       }
     },
@@ -618,9 +625,14 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
       try {
         const detail = await getPartidaElements(ifcFileId, node.partida_id);
         const expressIds = detail.groups.flatMap((g) => g.elements.map((el) => Number(el.express_id)));
-        console.log('[DEBUG] PartidasTree va a aislar', expressIds.length, 'elementos:', expressIds);
+        // global_id: paralelo a expressIds — lo necesita el visor
+        // cuando el modelo cargó por Fragments, donde express_id no
+        // identifica nada (numeración propia de Fragments, sin
+        // relación con el IFC original) — ahí sí se puede traducir
+        // GUID -> localId real (ver useFragmentsEntityVisibility.ts).
+        const globalIds = detail.groups.flatMap((g) => g.elements.map((el) => el.global_id));
 
-        onSelectAllInViewer(expressIds);
+        onSelectAllInViewer(expressIds, globalIds);
       } catch (err: any) {
         alert(err.message || 'No se pudieron cargar los elementos de esta partida.');
       } finally {

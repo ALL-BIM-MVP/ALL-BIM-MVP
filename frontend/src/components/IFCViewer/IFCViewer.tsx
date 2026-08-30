@@ -26,8 +26,12 @@ interface IFCViewerProps {
 export interface IFCViewerHandle {
   selectEntityById: (expressId: number) => void;
   selectByIdOrGuid: (value: string) => Promise<boolean>;
-  isolateElementsByIds: (expressIds: number[]) => void;
-  selectGroupInViewer: (expressIds: number[]) => void;
+  // globalIds: paralelo a expressIds — solo lo usa el camino de
+  // Fragments (ver usingFragmentsSelection más abajo), para traducir
+  // GUID -> localId real antes de aislar. El camino viejo (web-ifc)
+  // sigue funcionando igual que siempre con expressIds, lo ignora.
+  isolateElementsByIds: (expressIds: number[], globalIds?: (string | null)[]) => void;
+  selectGroupInViewer: (expressIds: number[], globalIds?: (string | null)[]) => void;
   clearIsolation: () => void;
   clearSelection: () => void; 
 }
@@ -294,10 +298,10 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     selectEntityById: (expressId: number) => selectEntityById(expressId),
     selectByIdOrGuid: (value: string) =>
       usingFragmentsSelection ? selectFragmentsByIdOrGuid(value) : selectByIdOrGuid(value),
-    isolateElementsByIds: (expressIds: number[]) =>
-      usingFragmentsSelection ? isolateFragmentsElementsByIds(expressIds) : isolateElementsByIds(expressIds),
-    selectGroupInViewer: (expressIds: number[]) =>
-      usingFragmentsSelection ? selectFragmentsGroupInViewer(expressIds) : selectGroupInViewer(expressIds),
+    isolateElementsByIds: (expressIds: number[], globalIds?: (string | null)[]) =>
+      usingFragmentsSelection ? isolateFragmentsElementsByIds(expressIds, globalIds) : isolateElementsByIds(expressIds),
+    selectGroupInViewer: (expressIds: number[], globalIds?: (string | null)[]) =>
+      usingFragmentsSelection ? selectFragmentsGroupInViewer(expressIds, globalIds) : selectGroupInViewer(expressIds),
     clearIsolation: () => clearIsolation(),
     clearSelection: () =>
       usingFragmentsSelection ? clearFragmentsSelection() : clearSelection(),

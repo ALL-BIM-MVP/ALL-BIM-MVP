@@ -71,6 +71,13 @@ export const buildPartidaTree = (rows : PartidaTreeRow[]) : PartidaTreeNode[] =>
 export interface PartidaElementRow {
     element_id : number;
     express_id : number;
+    // GUID real del IFC — necesario para que el visor pueda aislar
+    // este elemento cuando el modelo cargó por Fragments (Fase 1 del
+    // visor): ahí los elementos se identifican con un localId PROPIO
+    // de Fragments, sin relación con express_id — pero SÍ se puede
+    // traducir GUID -> localId (model.getLocalIdsByGuids). Ver
+    // docs/roadmap/pendientes-sin-definir-frontend.md, punto 7.
+    global_id : string | null;
     name : string | null;
     level_name : string | null;
     space_name : string | null;
@@ -102,6 +109,7 @@ export interface PartidaElementRow {
 interface PartidaElementItem {
     element_id : number;
     express_id : number;
+    global_id : string | null;
     // "ID del elemento" para el cliente — es lo que de verdad lo
     // identifica (agrupar por tag es justo el criterio de
     // groupPartidaElements más abajo). "name" queda igual, capturado,
@@ -208,6 +216,7 @@ const toElementItem = (
     return {
         element_id: row.element_id,
         express_id: row.express_id,
+        global_id: row.global_id,
         tag: row.tag,
         name: row.name,
         length: toNumberOrNull(row.length),

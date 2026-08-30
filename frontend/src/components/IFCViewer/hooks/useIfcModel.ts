@@ -4,7 +4,7 @@ import type { ModelBounds } from '../types';
 import { useModelLoader } from './useModelLoader';
 import { useEntitySelection } from './useEntitySelection';
 import { useEntityVisibility } from './useEntityVisibility';
-import { useFragmentsEntityVisibility } from './useFragmentsEntityVisibility';
+import { useFragmentsEntityVisibility, resolveFragmentsLocalIds } from './useFragmentsEntityVisibility';
 import { useWalkMode } from './useWalkMode';
 import { useMeasureTool } from './useMeasureTool';
 import { useCrossTool } from './useCrossTool';
@@ -109,16 +109,23 @@ export function useIfcModel(
   }, [storeRef, rendererRef]);
 
 
-  const isolateFragmentsElementsByIdsAndFly = useCallback((ids: number[]) => {
-    fragmentsVisibility.isolateFragmentsElementsByIds(ids);
+  const isolateFragmentsElementsByIdsAndFly = useCallback((expressIds: number[], globalIds?: (string | null)[]) => {
+    fragmentsVisibility.isolateFragmentsElementsByIds(expressIds, globalIds);
   }, [fragmentsVisibility]);
 
 
-  const selectFragmentsGroupInViewer = useCallback(async (ids: number[]) => {
-    if (ids.length === 0) return;
+  // expressIds/globalIds: mismo criterio que isolateFragmentsElementsByIds
+  // en useFragmentsEntityVisibility.ts — acá también hace falta traducir
+  // a localId de Fragments antes de usar getMergedBox/
+  // selectFragmentsGroupByLocalIds (ambas ya piden localId de por sí,
+  // el nombre de la segunda lo deja explícito).
+  const selectFragmentsGroupInViewer = useCallback(async (expressIds: number[], globalIds?: (string | null)[]) => {
+    if (expressIds.length === 0) return;
     if (fragmentsVisibility.fragmentsSelectedTypes.size > 0) fragmentsVisibility.clearFragmentsSelectedTypes();
     if (fragmentsVisibility.fragmentsSelectedLevels.size > 0) fragmentsVisibility.clearFragmentsSelectedLevels();
     const model = storeRef.current?.fragmentsModel;
+    const ids = await resolveFragmentsLocalIds(model, expressIds, globalIds);
+    if (ids.length === 0) return;
     let point = { x: 0, y: 0, z: 0 };
     try {
       const box = await model?.getMergedBox(ids);

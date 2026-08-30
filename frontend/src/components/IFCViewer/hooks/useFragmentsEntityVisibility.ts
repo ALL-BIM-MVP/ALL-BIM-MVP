@@ -49,6 +49,28 @@ type FragIsolationTarget =
   | { kind: 'elements'; value: Set<number> }
   | null;
 
+// Traduce express_id -> localId de Fragments vía global_id (GUID),
+// para cualquier llamador que reciba ids "crudos" del IFC (metrado_elements,
+// PartidasTree.tsx) en vez del localId interno de Fragments — ver el
+// comentario largo junto a isolateFragmentsElementsByIds más abajo.
+// Reutilizado desde useIfcModel.ts (selectFragmentsGroupInViewer).
+export async function resolveFragmentsLocalIds(
+  model: any,
+  expressIds: number[],
+  globalIds?: (string | null)[]
+): Promise<number[]> {
+  if (!globalIds || !model) return expressIds;
+  const guids = globalIds.filter((g): g is string => !!g);
+  if (guids.length === 0) return expressIds;
+  try {
+    const localIds = await model.getLocalIdsByGuids(guids);
+    return localIds.filter((id: number | null): id is number => id != null);
+  } catch (err) {
+    console.warn('[useFragmentsEntityVisibility] error al traducir global_id a localId de Fragments:', err);
+    return expressIds;
+  }
+}
+
 export function useFragmentsEntityVisibility(
   storeRef: React.RefObject<any>,
   ready: boolean
@@ -390,13 +412,26 @@ export function useFragmentsEntityVisibility(
   // (igual que isolateElementsByIds en useEntityVisibility.ts, la
   // versión vieja para web-ifc que esto reemplaza cuando el modelo
   // cargó por Fragments).
-  const isolateFragmentsElementsByIds = useCallback((ids: number[]) => {
+  //
+  // expressIds vienen de metrado_elements (el express_id del IFC crudo)
+  // — NO tienen relación con el localId interno de Fragments (ver punto
+  // 7 de docs/roadmap/pendientes-sin-definir-frontend.md). globalIds es
+  // el global_id (GUID) que el backend ahora manda 1:1 con cada
+  // express_id — se usa acá para traducir a localId vía
+  // model.getLocalIdsByGuids antes de aislar. Sin globalIds (llamador
+  // viejo) se cae al comportamiento anterior, tratando expressIds como
+  // si ya fueran localIds.
+  const isolateFragmentsElementsByIds = useCallback(async (
+    expressIds: number[],
+    globalIds?: (string | null)[]
+  ) => {
+    const ids = await resolveFragmentsLocalIds(storeRef.current?.fragmentsModel, expressIds, globalIds);
     setFragmentsSelectedTypes(new Set());
     setFragmentsSelectedLevels(new Set());
     setIsolatedFragmentsElementId(null);
     setIsolatedFragmentsElementIds(ids.length > 0 ? new Set(ids) : null);
     applyIsolation(ids.length > 0 ? { kind: 'elements', value: new Set(ids) } : null);
-  }, [applyIsolation]);
+  }, [applyIsolation, storeRef]);
 
   // Botón "Ocultar" del popup flotante de selección — a diferencia de
   // aislar, esto NO atenúa: oculta de verdad con model.setVisible (el
