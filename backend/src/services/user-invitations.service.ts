@@ -15,8 +15,12 @@ import {
 
 export const createInvitationService = async ({role_id, email} : InvitationRequest) : Promise<InvitationResponse> => {
 
+    // is_deleted = false a propósito: una cuenta eliminada no debe
+    // bloquear el email para siempre — se puede volver a invitar, y al
+    // aceptar (registerService) retoma esa misma fila en vez de
+    // chocar con USER_ALREADY_EXISTS.
     const userData = await pool.query(
-        `SELECT 1 FROM users WHERE email = $1`,
+        `SELECT 1 FROM users WHERE email = $1 AND is_deleted = false`,
         [email]
     );
 

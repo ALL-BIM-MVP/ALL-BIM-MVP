@@ -112,13 +112,13 @@ const Sidebar: React.FC = () => {
               </h4>
               <ul className="space-y-3.5">
                 <li>
-                  <Link to="/dashboard/projects" className={linkClasses('/dashboard/projects')}>
+                  <Link to="/dashboard/projects" data-tour="sidebar-projects" className={linkClasses('/dashboard/projects')}>
                     <FolderKanban size={18} className={iconClasses('/dashboard/projects')} />
                     <span>Panel de proyectos</span>
                   </Link>
                 </li>
                 <li>
-                  <Link to="/mis-invitaciones" className={linkClasses('/mis-invitaciones')}>
+                  <Link to="/mis-invitaciones" data-tour="sidebar-invitations" className={linkClasses('/mis-invitaciones')}>
                     <Mail size={18} className={iconClasses('/mis-invitaciones')} />
                     <span>Mis invitaciones</span>
                   </Link>

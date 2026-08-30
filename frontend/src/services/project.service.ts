@@ -2,7 +2,7 @@ import { api, BASE_URL } from './api';
 import { Project, NewProjectData, ProjectScope, ProjectFile } from '../types/project.types';
 
 export const projectService = {
-  async getProjects(scope: ProjectScope = 'all'): Promise<Project[]> {
+  async getProjects(scope: ProjectScope = 'mine'): Promise<Project[]> {
     const response = await api.get(`/api/projects?scope=${scope}`);
     return response;
   },

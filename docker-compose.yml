@@ -59,6 +59,14 @@ services:
         condition: service_healthy
     env_file:
       - .env
+    environment:
+      # Fijo acá (no en .env) — correr por Docker Compose SIEMPRE es
+      # una instalación real, no algo que el cliente deba configurar.
+      # Usado por utils/logger.ts (mejoras-backend-post-auditoria.md,
+      # punto 3) para bajar el nivel de log a 'info' — 'debug' (el
+      # default fuera de Docker) generaría demasiado ruido en
+      # `docker compose logs backend`.
+      NODE_ENV: production
     ports:
       # Puerto del HOST configurable (BACKEND_HOST_PORT en el .env,
       # default 4000) — el puerto de ADENTRO del contenedor siempre es

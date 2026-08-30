@@ -19,8 +19,13 @@ export const ProjectUpdateSchema = ProjectCreateSchema.partial();
 
 export type ProjectUpdate = z.infer<typeof ProjectUpdateSchema>;
 
+// "all" (todos los proyectos de la plataforma) se sacó — el rol de
+// cuenta ADMINISTRADOR no da acceso al CONTENIDO de un proyecto ajeno
+// igual (ver project-access.service.ts), así que listarlos ahí era
+// solo ruido, nunca algo navegable de verdad. Mismos 3 scopes para
+// cualquier rol.
 export const GetProjectsSchema = z.object({
-    scope: z.enum(["mine", "owner", "member", "all"]).default("mine")
+    scope: z.enum(["mine", "owner", "member"]).default("mine")
 });
 
 export type GetProjectsQuery = z.infer<typeof GetProjectsSchema>;

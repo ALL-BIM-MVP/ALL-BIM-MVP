@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import {
   Search, FileText, FileSpreadsheet, Trash2, Download, X,
   ArrowUpDown, Check, FolderOpen, AlertCircle, RefreshCw,
-  Image as ImageIcon, File as FileIcon, LayoutGrid, ZoomIn,
+  Image as ImageIcon, File as FileIcon, LayoutGrid, ZoomIn, Upload,
 } from 'lucide-react';
 import { ProjectFile } from '../../types/project.types';
 import { projectService } from '../../services/project.service';
@@ -130,6 +130,8 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // IDs de miniaturas que fallaron al cargar (token vencido, red, etc.)
   // -> mostramos el ícono genérico en su lugar.
   const [thumbErrorIds, setThumbErrorIds] = useState<Set<string>>(new Set());
@@ -230,6 +232,22 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
     }
   };
 
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite volver a elegir el mismo archivo después
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      await projectService.uploadFile(projectId, file);
+      await loadFiles();
+    } catch (err: any) {
+      alert(err.message || 'No se pudo subir el archivo.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleDownload = async (file: ProjectFile) => {
     setDownloadingId(file.file_id);
     try {
@@ -296,6 +314,20 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
               {files.length} archivo{files.length !== 1 ? 's' : ''} en total · {formatSize(totalSize)}
             </p>
           )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            onChange={handleFileSelected}
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0056b3] text-white rounded-md text-xs font-semibold hover:bg-[#004494] disabled:opacity-50"
+          >
+            <Upload size={13} className={uploading ? 'animate-pulse' : ''} />
+            {uploading ? 'Subiendo...' : 'Subir archivo'}
+          </button>
           <button
             onClick={loadFiles}
             disabled={loading}

@@ -174,6 +174,11 @@ export const useProjectInvitations = (projectId: number) => {
         isAdmin,
         checkingOwner,
         userRole,
+        // El propio miembro completo — a diferencia de userRole (solo
+        // el primer rol como texto), esto trae TODOS sus module_roles,
+        // para poder mostrar el detalle completo cuando tiene varios
+        // (ver RoleSummary).
+        myMembership,
         loadInvitations,
         loadMembers,
         searchUsers,

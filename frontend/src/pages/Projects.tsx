@@ -4,15 +4,13 @@ import { MapPin, Plus, Filter, Search, Eye } from 'lucide-react';
 import PageHeader from '../components/PageHeader';
 import NewProjectModal from '../components/NewProjectModal';
 import ProjectDetailsModal from '../components/ProjectDetailsModal';
+import { OnboardingTour } from '../components/OnboardingTour';
 import { Project, ProjectScope } from '../types/project.types';
 import { useProjects } from '../hooks/useProjects';
-import { useAuth } from '../context/AuthContext';
-import { ROLE_IDS } from '../utils/roles';
 import { resolveMediaUrl } from '../utils/media';
 
 const ProjectRegistration: React.FC = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
 
   const { projects, fetchProjects, createProject, filterScope, setFilterScope, error } = useProjects();
 
@@ -21,23 +19,18 @@ const ProjectRegistration: React.FC = () => {
   const [selectedProjectForDetails, setSelectedProjectForDetails] = useState<Project | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const isAdmin = user?.rol_id === ROLE_IDS.ADMINISTRADOR;
-
   // Cargar proyectos respetando el scope actual
   useEffect(() => {
     fetchProjects(filterScope);
   }, [fetchProjects, filterScope]);
 
   const handleScopeChange = (scope: ProjectScope) => {
-    // 'all' solo es válido para Administrador (el backend lo rechaza igual,
-    // esto evita el request innecesario y el error feo)
-    if (scope === 'all' && !isAdmin) return;
     setFilterScope(scope);
   };
 
   const handleCreateProject = async (projectData: any) => {
     try {
-      const newProject = await createProject({
+      await createProject({
         name: projectData.name,
         location: projectData.location,
         startDate: projectData.startDate,
@@ -46,13 +39,10 @@ const ProjectRegistration: React.FC = () => {
         client: projectData.client ?? null,
         contractor: projectData.contractor ?? null
       });
-
-      console.log('Proyecto creado:', newProject);
       setShowNewProject(false);
-
     } catch (error) {
-      console.error('Error al crear proyecto:', error);
-      alert('Error al crear el proyecto');
+      alert(error instanceof Error ? error.message : 'Error al crear el proyecto');
+      throw error; // el modal necesita enterarse para no resetear el form
     }
   };
 
@@ -91,6 +81,7 @@ const ProjectRegistration: React.FC = () => {
           <div className="flex gap-2">
             <button
               onClick={() => setShowNewProject(true)}
+              data-tour="new-project-button"
               className="flex items-center gap-1.5 px-4 py-2 bg-[#0056b3] text-white rounded-lg hover:bg-[#004494] transition-colors font-semibold text-sm"
             >
               <Plus size={16} />
@@ -111,19 +102,7 @@ const ProjectRegistration: React.FC = () => {
         </div>
 
         {/* Filtros rápidos por scope */}
-        <div className="flex gap-2 mb-6 flex-wrap">
-          {isAdmin && (
-            <button
-              onClick={() => handleScopeChange('all')}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
-                filterScope === 'all'
-                  ? 'bg-[#0056b3] text-white'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              }`}
-            >
-              Todos
-            </button>
-          )}
+        <div className="flex gap-2 mb-6 flex-wrap" data-tour="scope-filters">
           <button
             onClick={() => handleScopeChange('mine')}
             className={`px-3 py-1.5 rounded-full text-xs font-medium transition ${
@@ -251,6 +230,8 @@ const ProjectRegistration: React.FC = () => {
           }
         `}</style>
       </div>
+
+      <OnboardingTour />
     </div>
   );
 };
