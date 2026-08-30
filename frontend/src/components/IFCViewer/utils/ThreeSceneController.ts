@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import type { ModelBounds, ViewPreset } from '../types';
+import { coplanarTrianglesFromMesh, computeCrossArms } from './crossMath';
 
 // Acelera el raycast de three.js con una estructura BVH: sin esto,
 // this.raycaster.intersectObjects(...) recorre triángulo por triángulo
@@ -36,6 +37,18 @@ class OrbitCameraController {
     this.camera.position.copy(this.target).add(offset);
     this.camera.up.copy(UP);
     this.camera.lookAt(this.target);
+    // this.camera.matrix/matrixWorld normalmente recién se recalculan
+    // durante el traversal de renderer.render() — hasta hace poco,
+    // cada mousemove/wheel disparaba SU PROPIO render() de inmediato,
+    // así que esa matriz siempre estaba fresca para cuando corría la
+    // reproyección (medición, popup, etc.) del siguiente frame. Al
+    // sacar esos renders redundantes (fix de rendimiento, useCameraControls.ts)
+    // la matriz quedó un frame atrasada respecto a la posición real de
+    // la cámara — se veía como que la medición/el popup "flotaban" o
+    // se atrasaban al mover la cámara. Recalcularla acá (barato, sin
+    // dibujar nada) mantiene el fix de rendimiento sin este efecto
+    // secundario.
+    this.camera.updateMatrixWorld(true);
   }
 
   orbit(deltaX: number, deltaY: number) {
@@ -131,8 +144,19 @@ class OrbitCameraController {
     this.camera.updateProjectionMatrix();
   }
 
-  setPosition(x: number, y: number, z: number) { this.camera.position.set(x, y, z); }
-  setTarget(x: number, y: number, z: number) { this.camera.lookAt(x, y, z); }
+  // Usados por el modo caminar (useWalkMode.ts), que actualiza posición
+  // y mira POR SEPARADO cada frame — sin pasar por syncFromSpherical(),
+  // así que cada uno actualiza la matriz por su cuenta (mismo motivo
+  // que ahí: sin esto, la reproyección del frame usaría la matriz de
+  // un frame atrás, viéndose "atrasada" respecto a la cámara real).
+  setPosition(x: number, y: number, z: number) {
+    this.camera.position.set(x, y, z);
+    this.camera.updateMatrixWorld(true);
+  }
+  setTarget(x: number, y: number, z: number) {
+    this.camera.lookAt(x, y, z);
+    this.camera.updateMatrixWorld(true);
+  }
 
   getDistance() { return this.spherical.radius; }
 
@@ -319,6 +343,21 @@ export class ThreeSceneController {
     this.elementMarker.geometry.dispose();
     (this.elementMarker.material as THREE.Material).dispose();
     this.elementMarker = null;
+  }
+
+  // Fase 1 real de la migración a ThatOpen/Fragments — agrega un objeto
+  // ajeno (por ejemplo, model.object de @thatopen/fragments) a la
+  // escena, SIN pasar por loadGeometry(): a propósito no se registra en
+  // this.meshes, así que pick/raycastSceneMagnetic/etc. no lo van a
+  // encontrar todavía — eso es lo que mantiene las herramientas
+  // "apagadas" para este camino hasta que se evalúen una por una
+  // (Fase 3), sin tener que tocar ninguna de ellas ahora.
+  addExternalObject(object: THREE.Object3D) {
+    this.modelGroup.add(object);
+  }
+
+  removeExternalObject(object: THREE.Object3D) {
+    this.modelGroup.remove(object);
   }
 
   loadGeometry(meshes: THREE.Mesh[]) {
@@ -920,168 +959,27 @@ export class ThreeSceneController {
     if (!hit) return null;
 
     const mesh = hit.object as THREE.Mesh;
-    const geom = mesh.geometry as THREE.BufferGeometry;
-    const index = geom.getIndex();
-    if (!index) return null;
 
-    const hitVIdx = index.getX(hit.faceIndex! * 3);
+    const hitVIdx = (mesh.geometry as THREE.BufferGeometry).getIndex()!.getX(hit.faceIndex! * 3);
     const expressId = this.findExpressIdForVertex(mesh, hitVIdx);
     const range = expressId !== null
       ? (mesh.userData.expressIdRanges as ExpressIdRange[]).find((r) => r.expressId === expressId)
       : null;
     if (!range) return null;
 
-    const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
-    const matrixWorld = mesh.matrixWorld;
-
-    const va0 = index.getX(hit.faceIndex! * 3);
-    const vb0 = index.getX(hit.faceIndex! * 3 + 1);
-    const vc0 = index.getX(hit.faceIndex! * 3 + 2);
-
-    const pA = new THREE.Vector3().fromBufferAttribute(posAttr, va0).applyMatrix4(matrixWorld);
-    const pB = new THREE.Vector3().fromBufferAttribute(posAttr, vb0).applyMatrix4(matrixWorld);
-    const pC = new THREE.Vector3().fromBufferAttribute(posAttr, vc0).applyMatrix4(matrixWorld);
-
-    const normal = new THREE.Vector3().subVectors(pB, pA).cross(new THREE.Vector3().subVectors(pC, pA));
-    if (normal.lengthSq() < 1e-12) return null;
-    normal.normalize();
-
-    if (normal.dot(rayDirection) > 0) normal.negate();
-
-    const origin = hit.point.clone();
-
-    const PLANE_EPS = 0.01;
-    const NORMAL_DOT_EPS = 0.999;
-
-    type Tri = { a: number; b: number; c: number };
-    const coplanarTris: Tri[] = [];
-
-    if (fast) {
-      coplanarTris.push({ a: va0, b: vb0, c: vc0 });
-    } else {
-      const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
-      const tmpNormal = new THREE.Vector3();
-
-      for (let t = 0; t < index.count; t += 3) {
-        const a = index.getX(t), b = index.getX(t + 1), c = index.getX(t + 2);
-        if (a < range.start || a >= range.end) continue;
-
-        tmpA.fromBufferAttribute(posAttr, a).applyMatrix4(matrixWorld);
-        tmpB.fromBufferAttribute(posAttr, b).applyMatrix4(matrixWorld);
-        tmpC.fromBufferAttribute(posAttr, c).applyMatrix4(matrixWorld);
-
-        tmpNormal.subVectors(tmpB, tmpA).cross(new THREE.Vector3().subVectors(tmpC, tmpA));
-        if (tmpNormal.lengthSq() < 1e-12) continue;
-        tmpNormal.normalize();
-
-        if (Math.abs(tmpNormal.dot(normal)) < NORMAL_DOT_EPS) continue;
-        if (Math.abs(normal.dot(tmpA.clone().sub(origin))) > PLANE_EPS) continue;
-
-        coplanarTris.push({ a, b, c });
-      }
-      if (coplanarTris.length === 0) coplanarTris.push({ a: va0, b: vb0, c: vc0 });
-    }
-
-    const edgeCount = new Map<string, { a: THREE.Vector3; b: THREE.Vector3; count: number }>();
-    const posKey = (v: THREE.Vector3) => `${v.x.toFixed(4)}_${v.y.toFixed(4)}_${v.z.toFixed(4)}`;
-
-    const addEdge = (i1: number, i2: number) => {
-      const p1 = new THREE.Vector3().fromBufferAttribute(posAttr, i1).applyMatrix4(matrixWorld);
-      const p2 = new THREE.Vector3().fromBufferAttribute(posAttr, i2).applyMatrix4(matrixWorld);
-      const k1 = posKey(p1), k2 = posKey(p2);
-      const key = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
-      const existing = edgeCount.get(key);
-      if (existing) existing.count++;
-      else edgeCount.set(key, { a: p1, b: p2, count: 1 });
-    };
-
-    for (const tri of coplanarTris) {
-      addEdge(tri.a, tri.b);
-      addEdge(tri.b, tri.c);
-      addEdge(tri.c, tri.a);
-    }
-
-    const boundaryEdges: { a: THREE.Vector3; b: THREE.Vector3 }[] = [];
-    edgeCount.forEach(({ a, b, count }) => { if (count === 1) boundaryEdges.push({ a, b }); });
-
-    let uAxis: THREE.Vector3;
-    if (boundaryEdges.length > 0) {
-      let longest = boundaryEdges[0];
-      let longestLenSq = longest.a.distanceToSquared(longest.b);
-      for (const e of boundaryEdges) {
-        const lenSq = e.a.distanceToSquared(e.b);
-        if (lenSq > longestLenSq) { longest = e; longestLenSq = lenSq; }
-      }
-      const raw = new THREE.Vector3().subVectors(longest.b, longest.a);
-      uAxis = raw.clone().sub(normal.clone().multiplyScalar(raw.dot(normal))).normalize();
-    } else {
-      uAxis = new THREE.Vector3().subVectors(pB, pA).normalize();
-    }
-    const vAxis = new THREE.Vector3().crossVectors(normal, uAxis).normalize();
-
-    const to2D = (p: THREE.Vector3) => ({
-      u: uAxis.dot(p.clone().sub(origin)),
-      v: vAxis.dot(p.clone().sub(origin)),
-    });
-    const edges2D = boundaryEdges.map(({ a, b }) => ({ a: to2D(a), b: to2D(b) }));
-
-    // La cruz puede quedar centrada en la CARA (para que, en un elemento
-    // de 4 lados, cada brazo llegue al medio de su lado) en vez de en el
-    // punto exacto donde clickeaste — pero eso solo cuando recenter=true.
-    // Con recenter=false, faceCenter termina siendo el propio click
-    // (origin): hace falta para poder ARRASTRAR la cruz con el mouse —
-    // si siempre se recentra, cualquier punto dentro de la MISMA cara
-    // da el mismo resultado, y arrastrar dentro de esa cara no mueve
-    // nada. El llamador decide: recenter=false mientras se arrastra
-    // (dinámico, sigue al mouse), recenter=true al soltar (asienta la
-    // cruz centrada) o al colocar una nueva.
-    let faceCenterU = 0;
-    let faceCenterV = 0;
-    if (recenter && edges2D.length > 0) {
-      let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
-      for (const { a, b } of edges2D) {
-        uMin = Math.min(uMin, a.u, b.u); uMax = Math.max(uMax, a.u, b.u);
-        vMin = Math.min(vMin, a.v, b.v); vMax = Math.max(vMax, a.v, b.v);
-      }
-      faceCenterU = (uMin + uMax) / 2;
-      faceCenterV = (vMin + vMax) / 2;
-    }
-    const faceCenter = origin.clone().addScaledVector(uAxis, faceCenterU).addScaledVector(vAxis, faceCenterV);
-    const edges2DFromCenter = edges2D.map(({ a, b }) => ({
-      a: { u: a.u - faceCenterU, v: a.v - faceCenterV },
-      b: { u: b.u - faceCenterU, v: b.v - faceCenterV },
-    }));
-
-    const rayHit2D = (dx: number, dy: number): number | null => {
-      let best: number | null = null;
-      for (const { a, b } of edges2DFromCenter) {
-        const ex = b.u - a.u, ey = b.v - a.v;
-        const D = ex * dy - ey * dx;
-        if (Math.abs(D) < 1e-9) continue;
-        const t = (-ey * a.u + ex * a.v) / D;
-        const s = (dx * a.v - dy * a.u) / D;
-        if (t <= 1e-5 || s < -1e-6 || s > 1 + 1e-6) continue;
-        if (best === null || t < best) best = t;
-      }
-      return best;
-    };
-
-    const tuPos = rayHit2D(1, 0);
-    const tuNeg = rayHit2D(-1, 0);
-    const tvPos = rayHit2D(0, 1);
-    const tvNeg = rayHit2D(0, -1);
-
-    const FALLBACK = 0.3;
-    const endPoint = (axis: THREE.Vector3, dist: number | null, sign: 1 | -1) => {
-      const p = faceCenter.clone().addScaledVector(axis, (dist ?? FALLBACK) * sign);
-      return { x: p.x, y: p.y, z: p.z };
-    };
+    // La matemática de "encontrar el contorno de la cara y calcular los
+    // 4 extremos" vive en crossMath.ts, compartida con
+    // useFragmentsCrossTool.ts (camino Fragments) — ver ese comentario
+    // largo ahí.
+    const found = coplanarTrianglesFromMesh(mesh, hit.faceIndex!, hit.point, range, fast);
+    if (!found) return null;
+    const arms = computeCrossArms(found.hitTriangle, found.triangles, hit.point.clone(), rayDirection, recenter);
 
     let depthPos: { x: number; y: number; z: number } | null = null;
     if (!fast) {
       const DEPTH_EPS = 1e-4;
-      const depthOrigin = faceCenter.clone().addScaledVector(normal, DEPTH_EPS);
-      this.raycaster.set(depthOrigin, normal);
+      const depthOrigin = arms.center.clone().addScaledVector(arms.normal, DEPTH_EPS);
+      this.raycaster.set(depthOrigin, arms.normal);
       const depthHits = this.raycaster.intersectObjects(this.meshes, false);
       const depthHit = depthHits.find((h) => {
         if (!h.object.visible || h.faceIndex === undefined) return false;
@@ -1099,12 +997,12 @@ export class ThreeSceneController {
     }
 
     return {
-      center: { x: faceCenter.x, y: faceCenter.y, z: faceCenter.z },
-      normal: { x: normal.x, y: normal.y, z: normal.z },
-      uPos: endPoint(uAxis, tuPos, 1),
-      uNeg: endPoint(uAxis, tuNeg, -1),
-      vPos: endPoint(vAxis, tvPos, 1),
-      vNeg: endPoint(vAxis, tvNeg, -1),
+      center: { x: arms.center.x, y: arms.center.y, z: arms.center.z },
+      normal: { x: arms.normal.x, y: arms.normal.y, z: arms.normal.z },
+      uPos: { x: arms.uPos.x, y: arms.uPos.y, z: arms.uPos.z },
+      uNeg: { x: arms.uNeg.x, y: arms.uNeg.y, z: arms.uNeg.z },
+      vPos: { x: arms.vPos.x, y: arms.vPos.y, z: arms.vPos.z },
+      vNeg: { x: arms.vNeg.x, y: arms.vNeg.y, z: arms.vNeg.z },
       depthPos,
       expressId,
     };
@@ -1203,19 +1101,35 @@ export class ThreeSceneController {
     this.renderer.render(this.scene, this.cameraController.camera);
   }
 
+  // Fragments arma sus mallas con VARIOS materiales por malla (uno por
+  // cada definición de material distinta que aparece en ella —
+  // obj.material llega como array, no un THREE.Material suelto). El
+  // camino viejo (web-ifc) siempre usa un solo material por malla, así
+  // que "(obj.material as THREE.Material).clippingPlanes = [...]"
+  // funcionaba ahí — pero para un array eso solo le pone la propiedad
+  // AL ARRAY, no a los materiales de adentro: WebGLRenderer nunca lee
+  // esa propiedad puesta sobre el array, así que el corte quedaba sin
+  // ningún efecto visual en el camino de Fragments, sin tirar ningún
+  // error (confirmado en vivo). dispose() más abajo ya distinguía este
+  // caso — acá hacía falta el mismo chequeo.
+  private setClippingPlanes(material: THREE.Material | THREE.Material[], planes: THREE.Plane[] | null) {
+    if (Array.isArray(material)) material.forEach((m) => { m.clippingPlanes = planes; });
+    else material.clippingPlanes = planes;
+  }
+
   private applyClipPlane(newPlane: THREE.Plane | null) {
     if (newPlane && (!this.clipPlane || !this.clipPlane.equals(newPlane))) {
       this.clipPlane = newPlane;
       this.modelGroup.traverse((obj) => {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
-          (obj.material as THREE.Material).clippingPlanes = [this.clipPlane!];
+          this.setClippingPlanes(obj.material, [this.clipPlane!]);
         }
       });
     } else if (!newPlane && this.clipPlane) {
       this.clipPlane = null;
       this.modelGroup.traverse((obj) => {
         if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
-          (obj.material as THREE.Material).clippingPlanes = null;
+          this.setClippingPlanes(obj.material, null);
         }
       });
     }

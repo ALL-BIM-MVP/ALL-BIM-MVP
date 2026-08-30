@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import * as THREE from 'three';
 import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
 
 interface Vec3 { x: number; y: number; z: number; }
@@ -7,9 +8,21 @@ interface ScreenPos { x: number; y: number; }
 const GRAB_HIT_RADIUS = 18;
 const MAX_OFFSET = 20;
 
+// El punto de origen + normal para armar el corte es lo ÚNICO que
+// depende de qué camino cargó el modelo (web-ifc vs Fragments) — todo
+// lo demás acá (arrastrar, calcular el offset, el plano de recorte)
+// es matemática genérica sobre esos dos vectores, y
+// ThreeSceneController.applyClipPlane ya recorre TODO modelGroup (que
+// incluye tanto las mallas de siempre como el model.object de
+// Fragments — ver controller.addExternalObject en useModelLoader.ts),
+// así que el recorte visual funciona para los dos caminos sin tocar
+// nada de renderizado. Por eso este hook, a diferencia de los otros de
+// Fase 3, NO tiene un "useFragmentsElementCutTool" aparte — alcanza con
+// que armCutAt sepa de dónde sacar el punto+normal.
 export function useElementCutTool(
   rendererRef: React.RefObject<any>,
-  canvasRef: React.RefObject<HTMLCanvasElement | null>
+  canvasRef: React.RefObject<HTMLCanvasElement | null>,
+  storeRef?: React.RefObject<any>
 ) {
   const [armed, setArmed] = useState(false);
   const [enabled, setEnabled] = useState(false);
@@ -62,10 +75,34 @@ export function useElementCutTool(
     return { x: clientX - rect.left, y: clientY - rect.top };
   }, [canvasRef]);
 
-  const armCutAt = useCallback((cssX: number, cssY: number) => {
+  const armCutAt = useCallback(async (cssX: number, cssY: number) => {
     const renderer = rendererRef.current;
-    if (!renderer?.raycastSurfacePoint) return;
-    const hit = renderer.raycastSurfacePoint(cssX, cssY);
+    const model = storeRef?.current?.fragmentsModel;
+    const canvas = canvasRef.current;
+
+    let hit: { point: Vec3; normal: Vec3 } | null = null;
+    if (model && canvas) {
+   
+      const cameraController = renderer?.getCamera?.();
+      const camera = cameraController?.camera;
+      if (camera) {
+        const rect = canvas.getBoundingClientRect();
+        const mouse = new THREE.Vector2(rect.left + cssX, rect.top + cssY);
+        try {
+          const result = await model.raycast({ camera, mouse, dom: canvas });
+          if (result?.point && result?.normal) {
+            hit = {
+              point: { x: result.point.x, y: result.point.y, z: result.point.z },
+              normal: { x: result.normal.x, y: result.normal.y, z: result.normal.z },
+            };
+          }
+        } catch (err) {
+          console.warn('[useElementCutTool] error en raycast de Fragments:', err);
+        }
+      }
+    } else if (renderer?.raycastSurfacePoint) {
+      hit = renderer.raycastSurfacePoint(cssX, cssY);
+    }
     if (!hit) return;
 
     setOrigin(hit.point);
@@ -76,7 +113,7 @@ export function useElementCutTool(
     const screenPos = projectPoint(hit.point);
     setScissorsScreen(screenPos);
     scissorsScreenRef.current = screenPos;
-  }, [rendererRef, projectPoint]);
+  }, [rendererRef, canvasRef, storeRef, projectPoint]);
 
   const exitCut = useCallback(() => {
     setArmed(false);

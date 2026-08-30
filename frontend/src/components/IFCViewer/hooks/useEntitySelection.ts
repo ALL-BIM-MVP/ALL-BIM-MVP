@@ -168,7 +168,7 @@ export function useEntitySelection(
       await selectEntityById(expressId);
       return true;
     }
-
+   
     if (guidMapClientRef.current !== client || !guidMapRef.current) {
       guidMapRef.current = await client.buildGuidMap();
       guidMapClientRef.current = client;

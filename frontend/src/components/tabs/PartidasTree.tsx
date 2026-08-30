@@ -1,6 +1,6 @@
 // src/components/tabs/PartidasTree.tsx
 import React, { useEffect, useState, useCallback } from 'react';
-import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, Save, Trash2 } from 'lucide-react';
+import { ChevronRight, ChevronDown, ChevronLeft, Loader2, AlertTriangle, Folder, FolderOpen, Ruler, SlidersHorizontal, Save, Trash2, Focus } from 'lucide-react';
 import {
   PartidaNode,
   getPartidasTree,
@@ -24,7 +24,21 @@ interface PartidasTreeProps {
   currentUserId?: number;
   onSelectAllInViewer?: (expressIds: number[]) => void;
   onSelectGroupInViewer?: (expressIds: number[]) => void;
-  onClearSelectionInViewer?: () => void; 
+  onClearSelectionInViewer?: () => void;
+  // Botón "Ver partida" del popup de selección en el visor 3D (ver
+  // Visor3DTab.tsx) — salta directo a la pantalla de detalle de esta
+  // partida, sin pasar por el árbol. Trae code/description/unit propios
+  // (de la búsqueda inversa por elemento) porque eso es lo único que
+  // necesita PartidaDetailScreen — no hace falta el nodo completo del
+  // árbol (parent_id/sort_order/element_count/total/children no se usan
+  // ahí, solo en las filas del árbol). expressId es el elemento que se
+  // clickeó en el visor — sirve para señalar en la tabla exactamente
+  // cuál fila/grupo es ese elemento (ver focusExpressId más abajo).
+  // onFocusPartidaHandled avisa que ya se consumió el pedido, para que
+  // un segundo click en el MISMO elemento (mismo partida_id) dispare el
+  // efecto de nuevo.
+  focusPartida?: { partida_id: number; code: string; description: string; unit: string | null; expressId: number } | null;
+  onFocusPartidaHandled?: () => void;
 }
 
 function formatNumber(value: number | null | undefined): string {
@@ -39,8 +53,26 @@ const PartidaDetailScreen: React.FC<{
   currentUserId: number;
   onBack: () => void;
   onSelectGroupInViewer?: (expressIds: number[]) => void;
-}> = ({ ifcFileId, node, currentUserId, onBack, onSelectGroupInViewer }) => {
+  onSelectAllInViewer?: (expressIds: number[]) => void;
+  onClearSelectionInViewer?: () => void;
+  // Elemento puntual que se clickeó en el visor 3D para llegar acá (ver
+  // "Ver partida" en IFCViewer.tsx/Visor3DTab.tsx) — una vez que carga
+  // el detalle, se busca en qué grupo cae y se lo señala en la tabla
+  // (mismo resaltado azul que clickear una fila a mano).
+  focusExpressId?: number | null;
+}> = ({ ifcFileId, node, currentUserId, onBack, onSelectGroupInViewer, onSelectAllInViewer, onClearSelectionInViewer, focusExpressId }) => {
   const [detail, setDetail] = useState<PartidaDetail | null>(null);
+  // Si el botón "Aislar toda la partida" del encabezado está activo —
+  // se entra siempre con esto en true, porque isolatePartidaInViewer en
+  // el árbol ya aisló todo antes de llegar acá.
+  const [partidaIsolated, setPartidaIsolated] = useState(true);
+  // Qué fila de MetradosTable está resaltada como "seleccionada" ahora
+  // mismo — INDEPENDIENTE de partidaIsolated: clickear un elemento/grupo
+  // puntual ya NO atenúa el resto de la partida (pedido explícito del
+  // usuario, "los otros elementos... no deberian estar transparente"),
+  // solo resalta ese grupo y muestra sus propiedades — el aislado de
+  // toda la partida (o no) sigue como estaba, sin tocarlo.
+  const [selectedGroupIndex, setSelectedGroupIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -126,14 +158,84 @@ const PartidaDetailScreen: React.FC<{
     [effectiveSets]
   );
 
-  const handleSelectGroupInViewer = useCallback(
-    (group: PartidaGroup) => {
-      if (!onSelectGroupInViewer) return;
-      const expressIds = group.elements.map((el) => Number(el.express_id));
-      onSelectGroupInViewer(expressIds);
+  // Al entrar a una partida nueva, el árbol (isolatePartidaInViewer) ya
+  // aisló todos sus elementos ANTES de mostrar esta pantalla — así que
+  // el estado inicial acá siempre refleja eso, sea cual sea el que haya
+  // quedado en la partida anterior. Tampoco hay ninguna fila
+  // seleccionada todavía.
+  useEffect(() => {
+    setPartidaIsolated(true);
+    setSelectedGroupIndex(null);
+  }, [node.partida_id]);
+
+  // Botón "Aislar toda la partida" del encabezado — toggle: si ya está
+  // aislada la partida completa, tocarlo de nuevo la destilda (manda
+  // una lista vacía, que tanto isolateElementsByIds como
+  // isolateFragmentsElementsByIds interpretan como "mostrar todo").
+  // También limpia cualquier fila seleccionada (highlight/popup en el
+  // visor), para no dejar un resaltado de selección colgado.
+  const handleToggleIsolatePartida = useCallback(() => {
+    if (!detail || !onSelectAllInViewer) return;
+    if (partidaIsolated) {
+      onSelectAllInViewer([]);
+      setPartidaIsolated(false);
+    } else {
+      const expressIds = detail.groups.flatMap((g) => g.elements.map((el) => Number(el.express_id)));
+      onSelectAllInViewer(expressIds);
+      setPartidaIsolated(true);
+    }
+    onClearSelectionInViewer?.();
+    setSelectedGroupIndex(null);
+  }, [detail, partidaIsolated, onSelectAllInViewer, onClearSelectionInViewer]);
+
+  // Fila de MetradosTable — click: resalta ese grupo (highlight +
+  // popup de propiedades del primer elemento). Antes de eso, se
+  // reasegura que TODA la partida esté aislada/atenuada (mismo
+  // isolateAllInViewer que dispara isolatePartidaInViewer al entrar) —
+  // pedido explícito del usuario: si mientras tanto se tocó "Mostrar
+  // todo el modelo", la geometría de alrededor deja de estar atenuada y
+  // el elemento clickeado puede quedar tapado por ella; reaislar
+  // primero garantiza que siempre se vea igual que la primera vez,
+  // pase lo que pase antes. Click de nuevo sobre la fila ya
+  // seleccionada: solo limpia esa selección puntual (highlight/popup),
+  // sin tocar el aislamiento de la partida.
+  const handleToggleSelectGroup = useCallback(
+    (group: PartidaGroup, index: number) => {
+      if (selectedGroupIndex === index) {
+        onClearSelectionInViewer?.();
+        setSelectedGroupIndex(null);
+      } else if (onSelectGroupInViewer) {
+        if (detail && onSelectAllInViewer) {
+          const allIds = detail.groups.flatMap((g) => g.elements.map((el) => Number(el.express_id)));
+          onSelectAllInViewer(allIds);
+          setPartidaIsolated(true);
+        }
+        const expressIds = group.elements.map((el) => Number(el.express_id));
+        onSelectGroupInViewer(expressIds);
+        setSelectedGroupIndex(index);
+      }
     },
-    [onSelectGroupInViewer]
+    [detail, selectedGroupIndex, onSelectGroupInViewer, onSelectAllInViewer, onClearSelectionInViewer]
   );
+
+  // "Ver partida" desde el visor 3D (focusExpressId) — una vez que
+  // carga el detalle, buscar en qué grupo cae ese elemento puntual y
+  // señalarlo en la TABLA (mismo resaltado azul que clickear una fila a
+  // mano) y hacer scroll hasta esa fila. A propósito NO se llama acá a
+  // onSelectGroupInViewer — el elemento ya está resaltado en el visor
+  // desde el click original que trajo hasta acá, y ese grupo podría
+  // tener MÁS de un elemento (el primero no necesariamente es el que se
+  // clickeó) — recargar la selección del visor podría terminar
+  // mostrando el popup de propiedades de OTRO elemento del mismo grupo.
+  useEffect(() => {
+    if (!detail || focusExpressId == null) return;
+    const index = detail.groups.findIndex((g) =>
+      g.elements.some((el) => Number(el.express_id) === focusExpressId)
+    );
+    if (index === -1) return;
+    setSelectedGroupIndex(index);
+    document.getElementById(`metrado-row-${index}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [detail, focusExpressId]);
 
   const loadDetail = useCallback(
     (sets: TemplateSet[]) => {
@@ -184,6 +286,24 @@ const PartidaDetailScreen: React.FC<{
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0 mr-3">
+          {onSelectAllInViewer && (
+            <button
+              onClick={handleToggleIsolatePartida}
+              disabled={!detail}
+              title={
+                partidaIsolated
+                  ? 'Mostrar todo el modelo de nuevo (quitar aislamiento de esta partida)'
+                  : 'Aislar toda la partida en el visor 3D'
+              }
+              className={`w-6 h-6 flex items-center justify-center rounded border transition-colors flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed ${
+                partidaIsolated
+                  ? 'bg-[#0056b3] border-[#0056b3] text-white'
+                  : 'border-gray-300 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+              }`}
+            >
+              <Focus size={13} />
+            </button>
+          )}
           <TemplateSelector
             templates={templates}
             activeTemplateId={activeTemplate?.template_id ?? null}
@@ -238,7 +358,8 @@ const PartidaDetailScreen: React.FC<{
           description={node.description}
           unit={node.unit}
           onReorderColumn={handleReorderColumn}
-          onSelectGroupInViewer={handleSelectGroupInViewer}
+          onToggleGroupSelect={handleToggleSelectGroup}
+          selectedGroupIndex={selectedGroupIndex}
         />
       ) : (
         <div className="flex-1 min-h-0 py-10 text-center text-gray-400">
@@ -395,6 +516,8 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   onSelectAllInViewer,
   onSelectGroupInViewer,
   onClearSelectionInViewer,
+  focusPartida,
+  onFocusPartidaHandled,
 }) => {
   const [tree, setTree] = useState<PartidaNode[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -419,6 +542,38 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   // volver del detalle. A diferencia de selectedNode, esta NO se limpia
   // en handleBack, para que el resaltado sobreviva.
   const [lastSelectedPartidaId, setLastSelectedPartidaId] = useState<number | null>(null);
+
+  // Qué elemento puntual hay que señalar en la tabla al entrar por
+  // "Ver partida" (ver focusPartida más abajo) — se lo pasa a
+  // PartidaDetailScreen, que busca en qué grupo cae y lo resalta ahí
+  // (mismo mecanismo que clickear una fila a mano).
+  const [focusExpressId, setFocusExpressId] = useState<number | null>(null);
+
+  // Botón "Ver partida" del popup de selección en el visor 3D (ver
+  // Visor3DTab.tsx) — salta directo a la pantalla de detalle de
+  // focusPartida, sin pasar por el árbol. Arma un PartidaNode "de
+  // mentira" con solo los 4 campos que trae la búsqueda inversa por
+  // elemento; el resto son placeholders porque PartidaDetailScreen no
+  // los toca (parent_id/sort_order/element_count/total/children son
+  // solo para las filas del árbol).
+  useEffect(() => {
+    if (!focusPartida) return;
+    setSelectedNode({
+      partida_id: focusPartida.partida_id,
+      parent_id: null,
+      code: focusPartida.code,
+      description: focusPartida.description,
+      unit: focusPartida.unit,
+      sort_order: 0,
+      element_count: 0,
+      total: null,
+      children: [],
+    });
+    setLastSelectedPartidaId(focusPartida.partida_id);
+    setFocusExpressId(focusPartida.expressId);
+    onFocusPartidaHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusPartida]);
 
   useEffect(() => {
     let cancelled = false;
@@ -466,6 +621,7 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
     (node: PartidaNode) => {
       setSelectedNode(node);
       setLastSelectedPartidaId(node.partida_id);
+      setFocusExpressId(null); // entrando por el árbol, ningún elemento puntual que señalar
       isolatePartidaInViewer(node);
     },
     [isolatePartidaInViewer]
@@ -483,6 +639,9 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
         currentUserId={currentUserId}
         onBack={handleBack}
         onSelectGroupInViewer={onSelectGroupInViewer}
+        onSelectAllInViewer={onSelectAllInViewer}
+        onClearSelectionInViewer={onClearSelectionInViewer}
+        focusExpressId={focusExpressId}
       />
     );
   }

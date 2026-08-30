@@ -1,5 +1,5 @@
-import React, { forwardRef, useImperativeHandle, useState, useEffect } from 'react';
-import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, Search, Crosshair, Paintbrush, Layers, Download, FolderOpen, RefreshCw, SeparatorHorizontal } from 'lucide-react';
+import React, { forwardRef, useImperativeHandle, useState, useEffect, useCallback, useRef } from 'react';
+import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, Search, Crosshair, Paintbrush, Layers, Download, FolderOpen, RefreshCw, SeparatorHorizontal, Table2 } from 'lucide-react';
 import { useIfcModel } from './hooks/useIfcModel';
 import { crossLabelPos } from './hooks/useCrossTool';
 import { ViewPreset } from './types';
@@ -10,6 +10,12 @@ import { projectService } from '../../services/project.service';
 
 interface IFCViewerProps {
   fileBuffer: ArrayBuffer | null;
+  // Fase 1 real de la migración a ThatOpen/Fragments — cuando viene
+  // seteado, el visor carga ESTE archivo (ya en formato .frag) en vez
+  // de fileBuffer, por un camino nuevo que no pasa por el worker de
+  // web-ifc. Sin herramientas todavía (medir/seleccionar/etc. no
+  // encuentran nada en este camino) — ver useModelLoader.ts.
+  fragmentsBuffer?: ArrayBuffer | null;
   projectId?: number;
   viewCubeVisible?: boolean;
   onFileUploaded?: () => void;
@@ -21,6 +27,10 @@ interface IFCViewerProps {
   // el canvas estuviera oculto (display:none no lo frena solo), gastando
   // CPU/GPU en cada frame y frenando el scroll de las demás pestañas.
   isActive?: boolean;
+  // Botón "Ver partida" del popup Ocultar/Aislar/Cortar — Visor3DTab.tsx
+  // es quien tiene acceso al panel de Metrados y al ifcFileId, así que
+  // el viewer solo avisa CUÁL elemento (expressId) se pidió ver.
+  onViewElementInMetrados?: (expressId: number) => void;
 }
 
 export interface IFCViewerHandle {
@@ -153,7 +163,7 @@ const SnapMarker: React.FC<{ x: number; y: number; snapType?: string }> = ({ x, 
 };
 
 const PAINT_COLORS = ['#ff3b30', '#34c759', '#0056b3', '#ffcc00', '#ffffff'];
-const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, projectId, onFileUploaded, viewCubeRightOffset = 0, viewCubeVisible = true, isActive = true }, ref) => {
+const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fragmentsBuffer = null, projectId, onFileUploaded, viewCubeRightOffset = 0, viewCubeVisible = true, isActive = true, onViewElementInMetrados }, ref) => {
   const {
     canvasRef,
     containerRef,
@@ -183,6 +193,14 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     measureHoverPoint,
     hoverEdge,
     registerMeasureLabelEl,
+    fragmentsMeasureMode,
+    enableAndArmFragmentsMeasure,
+    exitFragmentsMeasureMode,
+    fragmentsMeasurements,
+    fragmentsMeasureHoverPoint,
+    clearFragmentsMeasurement,
+    removeFragmentsMeasurement,
+    registerFragmentsMeasureLabelEl,
     crossMode,
     enableAndArm,
     exitCrossMode,
@@ -191,6 +209,14 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     removeCross,
     draggingId: draggingCrossId,
     registerCrossPosEl,
+    fragmentsCrossMode,
+    enableAndArmFragmentsCross,
+    exitFragmentsCrossMode,
+    fragmentsCrosses,
+    clearFragmentsCross,
+    removeFragmentsCross,
+    draggingFragmentsCrossId,
+    registerFragmentsCrossPosEl,
     paintMode,
     togglePaintMode,
     exitPaintMode,
@@ -210,6 +236,11 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     resetSection,
     selectedEntity,
     clearSelection,
+    fragmentsSelectedEntity,
+    clearFragmentsSelection,
+    fragmentsPopupVisible,
+    fragmentsPopupScreenPos,
+    dismissFragmentsPopup,
     hideElementById,
     isolateElementById,
     isolatedElementId,
@@ -229,6 +260,22 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     selectedLevels,
     toggleSelectLevel,
     clearSelectedLevels,
+    fragmentsTypeGroups,
+    fragmentsSelectedTypes,
+    toggleFragmentsSelectType,
+    clearFragmentsSelectedTypes,
+    fragmentsLevelGroups,
+    fragmentsSelectedLevels,
+    toggleFragmentsSelectLevel,
+    clearFragmentsSelectedLevels,
+    isolatedFragmentsElementId,
+    isolatedFragmentsElementIds,
+    hiddenFragmentsElementIds,
+    isolateFragmentsElementById,
+    hideFragmentsElementById,
+    clearFragmentsAll,
+    isolationPaused,
+    toggleIsolationPause,
 
     hiddenTypes,
     hiddenElementIds,
@@ -246,42 +293,163 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     exitCut,
     dismissPopup,
     handleCutMouseDown,
-} = useIfcModel(fileBuffer, viewCubeRightOffset, isActive);
+    selectFragmentsByIdOrGuid,
+    isolateFragmentsElementsByIds,
+    selectFragmentsGroupInViewer,
+} = useIfcModel(fileBuffer, viewCubeRightOffset, isActive, fragmentsBuffer);
+  // Mismo criterio que usingFragmentsFilter más abajo (categorías/
+  // niveles) — si el camino viejo no detectó nada, es porque el
+  // archivo cargó por Fragments.
+  const usingFragmentsSelection = typeGroups.length === 0 && fragmentsTypeGroups.length > 0;
   useImperativeHandle(ref, () => ({
     selectEntityById: (expressId: number) => selectEntityById(expressId),
-    selectByIdOrGuid: (value: string) => selectByIdOrGuid(value),
-    isolateElementsByIds: (expressIds: number[]) => isolateElementsByIds(expressIds),
-    selectGroupInViewer: (expressIds: number[]) => selectGroupInViewer(expressIds),
+    selectByIdOrGuid: (value: string) =>
+      usingFragmentsSelection ? selectFragmentsByIdOrGuid(value) : selectByIdOrGuid(value),
+    isolateElementsByIds: (expressIds: number[]) =>
+      usingFragmentsSelection ? isolateFragmentsElementsByIds(expressIds) : isolateElementsByIds(expressIds),
+    selectGroupInViewer: (expressIds: number[]) =>
+      usingFragmentsSelection ? selectFragmentsGroupInViewer(expressIds) : selectGroupInViewer(expressIds),
     clearIsolation: () => clearIsolation(),
-     clearSelection: () => clearSelection(), 
+    clearSelection: () =>
+      usingFragmentsSelection ? clearFragmentsSelection() : clearSelection(),
   }));
+
+  // Punto de mezcla explícito y chico entre los dos sistemas de selección
+  // (web-ifc y Fragments) — nunca hay selección en los dos a la vez, así
+  // que alcanza con "el que no sea null". El PropertiesPanel es el mismo
+  // componente para los dos; lo que cambia es de dónde sale la data.
+  const activeEntity = selectedEntity ?? fragmentsSelectedEntity;
+  const handleDeselectEntity = useCallback(() => {
+    if (selectedEntity) clearSelection();
+    else if (fragmentsSelectedEntity) clearFragmentsSelection();
+  }, [selectedEntity, clearSelection, fragmentsSelectedEntity, clearFragmentsSelection]);
+
+  // Mismo punto de mezcla para el popup Ocultar/Aislar/Cortar — activeEntity.expressId
+  // ya trae el localId de Fragments reusando ese campo (ver
+  // useFragmentsSelection.ts), así que alcanza con mirar cuál de los
+  // dos sistemas tiene la selección activa para saber a cuál llamar.
+  const handleHideActiveEntity = useCallback(() => {
+    if (!activeEntity) return;
+    if (selectedEntity) hideElementById(activeEntity.expressId);
+    else hideFragmentsElementById(activeEntity.expressId);
+    handleDeselectEntity();
+  }, [activeEntity, selectedEntity, hideElementById, hideFragmentsElementById, handleDeselectEntity]);
+
+  const handleIsolateActiveEntity = useCallback(() => {
+    if (!activeEntity) return;
+    if (selectedEntity) isolateElementById(activeEntity.expressId);
+    else isolateFragmentsElementById(activeEntity.expressId);
+  }, [activeEntity, selectedEntity, isolateElementById, isolateFragmentsElementById]);
+
+  // Botón "Ver partida" del popup — activeEntity.expressId sirve para
+  // los dos sistemas por igual (ver el comentario de arriba), así que
+  // no hace falta distinguir cuál está activo acá.
+  const handleViewElementInMetrados = useCallback(() => {
+    if (!activeEntity) return;
+    onViewElementInMetrados?.(activeEntity.expressId);
+  }, [activeEntity, onViewElementInMetrados]);
+
+  const isActiveEntityIsolated = selectedEntity
+    ? isolatedElementId === activeEntity?.expressId
+    : isolatedFragmentsElementId === activeEntity?.expressId;
+
+  const displayPopupVisible = selectedEntity ? popupVisible : fragmentsPopupVisible;
+  const displayPopupScreenPos = selectedEntity ? popupScreenPos : fragmentsPopupScreenPos;
+  const handleDismissPopup = useCallback(() => {
+    if (selectedEntity) dismissPopup();
+    else dismissFragmentsPopup();
+  }, [selectedEntity, dismissPopup, dismissFragmentsPopup]);
+
+  // Mismo punto de mezcla para medición: solo uno de los dos sistemas
+  // llega a tener mediciones puestas (depende de qué modelo está
+  // cargado), así que alcanza con "el que tenga algo".
+  const displayMeasurements = measurements.length > 0 ? measurements : fragmentsMeasurements;
+  const handleRegisterMeasureLabelEl = useCallback((id: string, el: HTMLDivElement | null) => {
+    registerMeasureLabelEl(id, el);
+    registerFragmentsMeasureLabelEl(id, el);
+  }, [registerMeasureLabelEl, registerFragmentsMeasureLabelEl]);
+  const handleRemoveMeasurement = useCallback((id: string) => {
+    removeMeasurement(id);
+    removeFragmentsMeasurement(id);
+  }, [removeMeasurement, removeFragmentsMeasurement]);
+
+  // Mismo punto de mezcla que medición/selección — solo uno de los dos
+  // sistemas llega a tener cruces puestas.
+  const displayCrosses = crosses.length > 0 ? crosses : fragmentsCrosses;
+  const displayDraggingCrossId = draggingCrossId ?? draggingFragmentsCrossId;
+  const handleRegisterCrossPosEl = useCallback((key: string, el: HTMLElement | null) => {
+    registerCrossPosEl(key, el);
+    registerFragmentsCrossPosEl(key, el);
+  }, [registerCrossPosEl, registerFragmentsCrossPosEl]);
+  const handleRemoveCross = useCallback((id: string) => {
+    removeCross(id);
+    removeFragmentsCross(id);
+  }, [removeCross, removeFragmentsCross]);
+
+  // Mismo criterio que displayCrosses/displayMeasurements/
+  // usingFragmentsSelection (más arriba): solo uno de los dos sistemas
+  // (web-ifc o Fragments) llega a tener categorías/niveles detectados,
+  // según qué camino cargó el archivo actual.
+  const usingFragmentsFilter = usingFragmentsSelection;
+  const displayTypeGroups = usingFragmentsFilter ? fragmentsTypeGroups : typeGroups;
+  const displaySelectedTypes = usingFragmentsFilter ? fragmentsSelectedTypes : selectedTypes;
+  const handleToggleSelectType = usingFragmentsFilter ? toggleFragmentsSelectType : toggleSelectType;
+  const handleClearSelectedTypes = usingFragmentsFilter ? clearFragmentsSelectedTypes : clearSelectedTypes;
+  const displayLevelGroups = usingFragmentsFilter ? fragmentsLevelGroups : levelGroups;
+  const displaySelectedLevels = usingFragmentsFilter ? fragmentsSelectedLevels : selectedLevels;
+  const handleToggleSelectLevel = usingFragmentsFilter ? toggleFragmentsSelectLevel : toggleSelectLevel;
+  const handleClearSelectedLevels = usingFragmentsFilter ? clearFragmentsSelectedLevels : clearSelectedLevels;
 
   const [panelOpen, setPanelOpen] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
-  
+
   useEffect(() => {
-    setPanelOpen(!!selectedEntity);
+    setPanelOpen(!!activeEntity);
     setCategoryPanelOpen(false);
-  }, [selectedEntity]);
+  }, [activeEntity]);
 
   const [rulerMenuOpen, setRulerMenuOpen] = useState(false);
+  const rulerMenuRef = useRef<HTMLDivElement>(null);
+
+  // Cerrar el menú de "Herramientas de medición" con la primera
+  // interacción afuera de él — antes solo se cerraba si elegías una de
+  // las 2 opciones (Medición/Cruz de ejes); si clickeabas cualquier
+  // otra cosa (el visor 3D, otro botón de la barra) quedaba abierto
+  // colgado. Mismo patrón que showEntryPopover en Visor3DTab.tsx.
+  useEffect(() => {
+    if (!rulerMenuOpen) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (rulerMenuRef.current && !rulerMenuRef.current.contains(event.target as Node)) {
+        setRulerMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [rulerMenuOpen]);
 
   const [savingScreenshot, setSavingScreenshot] = useState(false);
   const [saveScreenshotError, setSaveScreenshotError] = useState<string | null>(null);
 
   const handleSelectMeasure = () => {
     if (crossMode) exitCrossMode();
+    if (fragmentsCrossMode) exitFragmentsCrossMode();
     if (paintMode) exitPaintMode();
     if (sectionEnabled) toggleSectionEnabled();
+    // Arma los dos sistemas — el que no aplica (según si el modelo activo
+    // es web-ifc o Fragments) no encuentra nada bajo el click y no hace
+    // nada, mismo criterio que useFragmentsSelection.ts.
     enableAndArmMeasure();
+    enableAndArmFragmentsMeasure();
     setRulerMenuOpen(false);
   };
 
   const handleSelectCross = () => {
     if (measureMode) exitMeasureMode();
+    if (fragmentsMeasureMode) exitFragmentsMeasureMode();
     if (paintMode) exitPaintMode();
     if (sectionEnabled) toggleSectionEnabled();
     enableAndArm();
+    enableAndArmFragmentsCross();
     setRulerMenuOpen(false);
   };
 
@@ -291,7 +459,9 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
       return;
     }
     if (measureMode) exitMeasureMode();
+    if (fragmentsMeasureMode) exitFragmentsMeasureMode();
     if (crossMode) exitCrossMode();
+    if (fragmentsCrossMode) exitFragmentsCrossMode();
     if (sectionEnabled) toggleSectionEnabled();
     togglePaintMode();
   };
@@ -303,7 +473,9 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
       return;
     }
     if (measureMode) exitMeasureMode();
+    if (fragmentsMeasureMode) exitFragmentsMeasureMode();
     if (crossMode) exitCrossMode();
+    if (fragmentsCrossMode) exitFragmentsCrossMode();
     if (paintMode) exitPaintMode();
     toggleSectionEnabled();
   };
@@ -337,7 +509,29 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     (isolatedElementIds !== null && isolatedElementIds.size > 0) ||
     selectedTypes.size > 0 ||
     hiddenElementIds.size > 0 ||
-    hiddenTypes.size > 0;
+    hiddenTypes.size > 0 ||
+    isolatedFragmentsElementId !== null ||
+    (isolatedFragmentsElementIds !== null && isolatedFragmentsElementIds.size > 0) ||
+    fragmentsSelectedTypes.size > 0 ||
+    fragmentsSelectedLevels.size > 0 ||
+    hiddenFragmentsElementIds.size > 0;
+
+  // Solo la parte de arriba que en verdad atenúa (GHOST_MATERIAL) del
+  // lado Fragments — a diferencia de hasAnyIsolation, deja afuera
+  // "Ocultar" (hiddenFragmentsElementIds, un mecanismo aparte que
+  // esconde de verdad con setVisible, no atenúa) porque el botón de
+  // pausar/reanudar atenuado (ver toggleIsolationPause) solo tiene
+  // sentido cuando hay ALGO atenuado para esconder/volver a mostrar.
+  const hasAnyFragmentsDimming =
+    isolatedFragmentsElementId !== null ||
+    (isolatedFragmentsElementIds !== null && isolatedFragmentsElementIds.size > 0) ||
+    fragmentsSelectedTypes.size > 0 ||
+    fragmentsSelectedLevels.size > 0;
+
+  const handleClearAllIsolation = useCallback(() => {
+    clearAll();
+    clearFragmentsAll();
+  }, [clearAll, clearFragmentsAll]);
 
   return (
     <div className="flex h-full w-full">
@@ -393,7 +587,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                 <Footprints size={16} />
               </button>
 
-              <div className="relative">
+              <div className="relative" ref={rulerMenuRef}>
                 <button
                   onClick={() => setRulerMenuOpen((prev) => !prev)}
                   className="w-9 h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
@@ -462,9 +656,28 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                 <Camera size={16} />
               </button>
 
+              {hasAnyFragmentsDimming && (
+                <button
+                  onClick={toggleIsolationPause}
+                  className={`flex flex-col items-center justify-center gap-0.5 px-1.5 h-9 rounded-lg bg-white shadow transition-colors ${
+                    isolationPaused ? 'text-[#0056b3]' : 'text-gray-600 hover:text-[#0056b3]'
+                  }`}
+                  title={
+                    isolationPaused
+                      ? 'Mostrar de nuevo lo atenuado (mismo aislamiento de antes)'
+                      : 'Ocultar del todo lo atenuado (sin perder qué está aislado)'
+                  }
+                >
+                  {isolationPaused ? <EyeOff size={14} /> : <Eye size={14} />}
+                  <span className="text-[9px] font-medium leading-none">
+                    {isolationPaused ? 'Mostrar' : 'Ocultar'}
+                  </span>
+                </button>
+              )}
+
               {hasAnyIsolation && (
                 <button
-                  onClick={clearAll}
+                  onClick={handleClearAllIsolation}
                   className="w-9 h-9 flex items-center justify-center rounded-lg bg-[#0056b3] hover:bg-[#004494] text-white transition-colors"
                   title="Mostrar todo el modelo (deshacer aislamiento y elementos ocultos)"
                 >
@@ -480,9 +693,9 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   isOpen={panelOpen}
                   onClose={() => setPanelOpen(false)}
                   paramIndex={paramIndex}
-                  entity={selectedEntity}
+                  entity={activeEntity}
                   onSelectResult={(id) => selectEntityById(id)}
-                  onDeselect={clearSelection}
+                  onDeselect={handleDeselectEntity}
                 />
               </div>
             )}
@@ -492,14 +705,14 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     <CategoryFilterPanel
       isOpen={categoryPanelOpen}
       onClose={() => setCategoryPanelOpen(false)}
-      typeGroups={typeGroups}
-      selectedTypes={selectedTypes}
-      toggleSelectType={toggleSelectType}
-      clearSelectedTypes={clearSelectedTypes}
-      levelGroups={levelGroups}
-      selectedLevels={selectedLevels}
-      toggleSelectLevel={toggleSelectLevel}
-      clearSelectedLevels={clearSelectedLevels}
+      typeGroups={displayTypeGroups}
+      selectedTypes={displaySelectedTypes}
+      toggleSelectType={handleToggleSelectType}
+      clearSelectedTypes={handleClearSelectedTypes}
+      levelGroups={displayLevelGroups}
+      selectedLevels={displaySelectedLevels}
+      toggleSelectLevel={handleToggleSelectLevel}
+      clearSelectedLevels={handleClearSelectedLevels}
     />
   </div>
 )}
@@ -509,13 +722,13 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
     Modo caminar: <span className="font-semibold">W A S D</span> para moverte · arrastrá el mouse para mirar
   </div>
 )}
-            {measureMode && (
+            {(measureMode || fragmentsMeasureMode) && (
               <>
                 <svg
                   className="absolute inset-0 z-20 pointer-events-none"
                   style={{ width: '100%', height: '100%' }}
                 >
-                  {measurements.map((m) => {
+                  {displayMeasurements.map((m) => {
                     const p1 = m.points[0];
                     const p2 = m.points[1];
                     const hasLine = p2 && p1?.screen && p2?.screen;
@@ -567,9 +780,12 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   {measureHoverPoint?.screen && (
                     <SnapIcon x={measureHoverPoint.screen.x} y={measureHoverPoint.screen.y} snapType={measureHoverPoint.snapType ?? 'none'} />
                   )}
+                  {fragmentsMeasureHoverPoint?.screen && (
+                    <SnapIcon x={fragmentsMeasureHoverPoint.screen.x} y={fragmentsMeasureHoverPoint.screen.y} snapType={fragmentsMeasureHoverPoint.snapType ?? 'none'} />
+                  )}
                 </svg>
 
-                {measurements.map((m) => {
+                {displayMeasurements.map((m) => {
                   const p1 = m.points[0];
                   const p2 = m.points[1];
                   if (!p2 || !p1?.screen || !p2.screen || m.distance === null) return null;
@@ -583,7 +799,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   return (
                     <div
                       key={m.id}
-                      ref={(el) => registerMeasureLabelEl(m.id, el)}
+                      ref={(el) => handleRegisterMeasureLabelEl(m.id, el)}
                       className="absolute left-0 top-0"
                       style={{ transform: `translate(${midX}px, ${midY}px)`, willChange: 'transform' }}
                     >
@@ -591,17 +807,17 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                         x={0}
                         y={0}
                         distance={m.distance}
-                        onDelete={() => removeMeasurement(m.id)}
+                        onDelete={() => handleRemoveMeasurement(m.id)}
                       />
                     </div>
                   );
                 })}
 
-                {measurements.length > 0 && (
+                {displayMeasurements.length > 0 && (
   <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
     <Ruler size={13} className="text-[#0056b3] flex-shrink-0" />
     <button
-      onClick={() => { clearMeasurement(); exitMeasureMode(); }}
+      onClick={() => { clearMeasurement(); exitMeasureMode(); clearFragmentsMeasurement(); exitFragmentsMeasureMode(); }}
       className="text-[11px] text-[#0056b3] hover:text-[#004494] font-medium"
     >
       Eliminar medida
@@ -611,7 +827,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
               </>
             )}
 
-            {crossMode && (
+            {(crossMode || fragmentsCrossMode) && (
               <>
                 {/* z-40, por encima de las etiquetas de medida (z-30) —
                     antes el círculo del centro (el punto de arrastre)
@@ -621,7 +837,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   className="absolute inset-0 z-40 pointer-events-none"
                   style={{ width: '100%', height: '100%' }}
                 >
-                  {crosses.map((c) => {
+                  {displayCrosses.map((c) => {
                     const ready = c.centerScreen && c.uPosScreen && c.uNegScreen && c.vPosScreen && c.vNegScreen;
                     if (!ready) return null;
                     return (
@@ -651,7 +867,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                         )}
                         <circle
                           cx={c.centerScreen!.x} cy={c.centerScreen!.y} r={7}
-                          fill={draggingCrossId === c.id ? '#f97316' : '#0056b3'}
+                          fill={displayDraggingCrossId === c.id ? '#f97316' : '#0056b3'}
                           stroke="#fff" strokeWidth={2}
                         />
                       </g>
@@ -659,7 +875,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   })}
                 </svg>
 
-                {crosses.map((c) => {
+                {displayCrosses.map((c) => {
                   if (!c.centerScreen) return null;
                   // Mismo patrón que en medición: cada pieza (centro y las
                   // 3 etiquetas de longitud) vive en su propio wrapper con
@@ -668,17 +884,17 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   return (
                     <React.Fragment key={c.id}>
                       <div
-                        ref={(el) => registerCrossPosEl(`${c.id}:center`, el)}
+                        ref={(el) => handleRegisterCrossPosEl(`${c.id}:center`, el)}
                         className="absolute left-0 top-0"
                         style={{ transform: `translate(${c.centerScreen.x}px, ${c.centerScreen.y}px)`, willChange: 'transform' }}
                       >
-                        <CenterDeleteHandle x={0} y={0} onDelete={() => removeCross(c.id)} />
+                        <CenterDeleteHandle x={0} y={0} onDelete={() => handleRemoveCross(c.id)} />
                       </div>
                       {c.uPosScreen && (() => {
                         const pos = crossLabelPos(c.centerScreen!, c.uPosScreen);
                         return (
                           <div
-                            ref={(el) => registerCrossPosEl(`${c.id}:u`, el)}
+                            ref={(el) => handleRegisterCrossPosEl(`${c.id}:u`, el)}
                             className="absolute left-0 top-0"
                             style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
                           >
@@ -690,7 +906,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                         const pos = crossLabelPos(c.centerScreen!, c.vPosScreen);
                         return (
                           <div
-                            ref={(el) => registerCrossPosEl(`${c.id}:v`, el)}
+                            ref={(el) => handleRegisterCrossPosEl(`${c.id}:v`, el)}
                             className="absolute left-0 top-0"
                             style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
                           >
@@ -702,7 +918,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                         const pos = crossLabelPos(c.centerScreen!, c.depthPosScreen);
                         return (
                           <div
-                            ref={(el) => registerCrossPosEl(`${c.id}:depth`, el)}
+                            ref={(el) => handleRegisterCrossPosEl(`${c.id}:depth`, el)}
                             className="absolute left-0 top-0"
                             style={{ transform: `translate(${pos.x}px, ${pos.y}px)`, willChange: 'transform' }}
                           >
@@ -714,11 +930,11 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                   );
                 })}
 
-                {crosses.length > 0 && (
+                {displayCrosses.length > 0 && (
   <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
     <Crosshair size={13} className="text-[#0056b3] flex-shrink-0" />
     <button
-      onClick={() => { clearCross(); exitCrossMode(); }}
+      onClick={() => { clearCross(); exitCrossMode(); clearFragmentsCross(); exitFragmentsCrossMode(); }}
       className="text-[11px] text-[#0056b3] hover:text-[#004494] font-medium"
     >
       Eliminar medida
@@ -827,14 +1043,14 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
               </div>
             )}
 
-            {selectedEntity && popupVisible && popupScreenPos && (
+            {activeEntity && displayPopupVisible && displayPopupScreenPos && (
               <div
                 className="absolute z-40 -translate-x-1/2 -translate-y-full"
-                style={{ left: popupScreenPos.x, top: popupScreenPos.y - 10 }}
+                style={{ left: displayPopupScreenPos.x, top: displayPopupScreenPos.y - 10 }}
               >
                 <div className="bg-white rounded-xl shadow-2xl px-2 py-2 relative">
                   <button
-                    onClick={clearSelection}
+                    onClick={handleDeselectEntity}
                     className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-white rounded-full shadow flex items-center justify-center text-gray-500 hover:text-gray-800"
                   >
                     <XIcon size={9} />
@@ -842,7 +1058,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
 
                   <div className="flex items-center gap-3">
                     <button
-                      onClick={() => { hideElementById(selectedEntity.expressId); clearSelection(); }}
+                      onClick={handleHideActiveEntity}
                       className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#0056b3]"
                     >
                       <EyeOff size={14} />
@@ -850,9 +1066,9 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                     </button>
 
                     <button
-                      onClick={() => isolateElementById(selectedEntity.expressId)}
+                      onClick={handleIsolateActiveEntity}
                       className={`flex flex-col items-center gap-0.5 ${
-                        isolatedElementId === selectedEntity.expressId ? 'text-[#0056b3]' : 'text-gray-600 hover:text-[#0056b3]'
+                        isActiveEntityIsolated ? 'text-[#0056b3]' : 'text-gray-600 hover:text-[#0056b3]'
                       }`}
                     >
                       <Focus size={14} />
@@ -861,8 +1077,8 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
 
                                   <button
   onClick={() => {
-    if (popupScreenPos) armCutAt(popupScreenPos.x, popupScreenPos.y);
-    dismissPopup(); // saca el popup Ocultar/Aislar/Cortar al empezar a cortar
+    if (displayPopupScreenPos) armCutAt(displayPopupScreenPos.x, displayPopupScreenPos.y);
+    handleDismissPopup(); // saca el popup Ocultar/Aislar/Cortar al empezar a cortar
   }}
   className={`flex flex-col items-center gap-0.5 ${
     cutArmed ? 'text-[#0056b3]' : 'text-gray-600 hover:text-[#0056b3]'
@@ -871,6 +1087,16 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, pro
                       <Scissors size={14} />
                       <span className="text-[10px] font-medium">Cortar</span>
                     </button>
+
+                    {onViewElementInMetrados && (
+                      <button
+                        onClick={handleViewElementInMetrados}
+                        className="flex flex-col items-center gap-0.5 text-gray-600 hover:text-[#0056b3]"
+                      >
+                        <Table2 size={14} />
+                        <span className="text-[10px] font-medium">Partida</span>
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="w-2 h-2 bg-white rotate-45 mx-auto -mt-1 shadow-sm" />

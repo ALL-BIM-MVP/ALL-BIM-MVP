@@ -99,6 +99,14 @@ export interface IfcProcessStatus {
   version_number?: number;
   is_current?: boolean;
 
+  // Fase 1 de la migración a ThatOpen (ver docs/roadmap/migracion-visor-thatopen.md):
+  // el backend genera este archivo .frag solo, sin que nadie lo pida.
+  // null puede significar "es de antes de este cambio" O "la generación
+  // todavía no terminó" — la API no distingue los dos casos a propósito
+  // (ver resumen-nuevas-funcionalidades-frontend.txt). Se descarga con
+  // el mismo getFileContentArrayBuffer de siempre, pasándole este id.
+  fragments_file_id?: string | null;
+
   classification_config_used: ClassificationSnapshot;
 }
 
@@ -389,6 +397,39 @@ export const getPartidaElements = async (
     `/api/ifc-files/${ifcFileId}/partidas/${partidaId}/elements`,
     options || {}
   );
+  return response;
+};
+
+// Búsqueda inversa: dado un elemento (por su express_id), a qué
+// partida pertenece (si pertenece a alguna) — usado por el botón "Ver
+// partida" del popup de selección en el visor 3D. partida y metrado
+// vienen null los DOS a la vez tanto si el elemento no existe en este
+// archivo como si existe pero no está clasificado en ninguna partida —
+// el backend no distingue esos dos casos con esta forma de respuesta,
+// así que el frontend tampoco puede.
+export interface ElementMetradoResult {
+  express_id: number;
+  tag: string | null;
+  partida: { partida_id: number; code: string; description: string; unit: string | null } | null;
+  metrado: {
+    length: number | null;
+    run_length: number | null;
+    width: number | null;
+    height: number | null;
+    diameter: number | null;
+    quantity: number | null;
+    area: number | null;
+    volume: number | null;
+    weight: number | null;
+    origen_metrado: string | null;
+  } | null;
+}
+
+export const getElementMetrado = async (
+  ifcFileId: string,
+  expressId: number
+): Promise<ElementMetradoResult> => {
+  const response = await api.get(`/api/ifc-files/${ifcFileId}/elements/${expressId}/metrado`);
   return response;
 };
 

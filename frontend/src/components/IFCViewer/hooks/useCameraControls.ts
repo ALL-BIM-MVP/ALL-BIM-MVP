@@ -114,7 +114,15 @@ export function useCameraControls(params: UseCameraControlsParams) {
 
       if (isPanning) camera.pan(deltaX, deltaY);
       else camera.orbit(deltaX, deltaY);
-      renderer.render();
+      // Sin renderer.render() acá a propósito — el loop continuo en
+      // useModelLoader.ts (requestAnimationFrame) YA redibuja la escena
+      // en cada frame sin condición, así que esto era puro trabajo
+      // redundante: con archivos grandes, cada evento de mousemove
+      // (varios por frame en mouses/trackpads de alto polling) disparaba
+      // SU PROPIO render() completo además del que ya iba a pasar en el
+      // próximo tick del loop — el costo se duplicaba (o más) mientras
+      // durara el arrastre, viéndose como que "se pone cada vez más
+      // lento" cuanto más se sigue interactuando.
     };
 
     const handleMouseUp = async (e: MouseEvent) => {
@@ -160,7 +168,7 @@ export function useCameraControls(params: UseCameraControlsParams) {
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
       camera.zoom(e.deltaY, false, mouseX, mouseY, canvas.width, canvas.height);
-      renderer.render();
+   
 
       onZoom?.();
       if (wheelEndTimeout !== null) clearTimeout(wheelEndTimeout);
