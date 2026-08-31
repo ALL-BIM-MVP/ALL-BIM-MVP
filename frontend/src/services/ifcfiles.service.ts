@@ -2,7 +2,7 @@
 //
 
 
-import { api } from './api';
+import { api, BASE_URL } from './api';
 
 export type IfcStatus = 'processing' | 'done' | 'error' | null;
 
@@ -135,7 +135,7 @@ export const listProjectIfcFiles = async (
 
 export const getFileContentArrayBuffer = async (fileId: string): Promise<ArrayBuffer> => {
   const token = localStorage.getItem('accessToken');
-  const res = await fetch(`http://localhost:4000/api/files/${fileId}/content`, {
+  const res = await fetch(`${BASE_URL}/api/files/${fileId}/content`, {
     headers: {
       Authorization: token ? `Bearer ${token}` : '',
     },

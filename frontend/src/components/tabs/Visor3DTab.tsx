@@ -37,6 +37,7 @@ import type { PartidaNode, ClassificationDryRunResult } from '../../services/ifc
 import { projectService } from '../../services/project.service';
 import { getMyModuleAccess } from '../../services/module.service';
 import type { ModuleAccess } from '../../services/module.service';
+import { BASE_URL } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 
 interface Visor3DTabProps {
@@ -632,7 +633,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   const handleDownloadFile = async (fileId: string, fileName: string) => {
     try {
       const token = localStorage.getItem('accessToken');
-      const res = await fetch(`http://localhost:4000/api/files/${fileId}/content?download=true`, {
+      const res = await fetch(`${BASE_URL}/api/files/${fileId}/content?download=true`, {
         headers: {
           Authorization: token ? `Bearer ${token}` : '',
         },
