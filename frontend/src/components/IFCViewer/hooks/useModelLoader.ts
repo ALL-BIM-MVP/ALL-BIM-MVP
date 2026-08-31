@@ -194,14 +194,7 @@ export function useModelLoader(
             const now = performance.now();
             const dt = Math.min((now - lastTime) / 1000, 0.1);
             lastTime = now;
-            // La cámara se actualiza PRIMERO (avanza cualquier animación de
-            // vuelo en curso) y recién después se reproyectan medidas/
-            // cruces/popup a pantalla — si no, mientras la cámara está en
-            // pleno vuelo, la reproyección usaba la posición VIEJA (de
-            // este mismo tick, antes de avanzar) mientras el modelo se
-            // terminaba dibujando con la posición YA actualizada: quedaban
-            // un frame desincronizados, la medida se veía "despegada" del
-            // modelo durante el movimiento.
+           
             controller.getCamera().update(dt);
             onFrame?.(dt);
             controller.render({
@@ -228,6 +221,53 @@ export function useModelLoader(
           setLoading(false);
           setProgress(100);
           setReady(true);
+
+          // Índice de parámetros para "Buscar en el modelo" — equivalente
+          // Fragments de client.indexAllParams() (camino web-ifc, más abajo).
+          setTimeout(async () => {
+            try {
+              const byCategory: Record<string, number[]> = await model.getItemsOfCategories([/.*/]);
+              const allIds: number[] = [];
+              for (const ids of Object.values(byCategory)) for (const id of ids) allIds.push(id);
+
+              const index: ParamIndexEntry[] = [];
+              const BATCH = 500;
+              for (let i = 0; i < allIds.length; i += BATCH) {
+                if (!isMounted) return;
+                const batch = allIds.slice(i, i + BATCH);
+                const dataList: Record<string, any>[] = await model.getItemsData(batch, {
+                  attributesDefault: true,
+                  relations: {
+                    IsDefinedBy: { attributes: true, relations: true },
+                    DefinesOccurrence: { attributes: false, relations: false },
+                    ObjectTypeOf: { attributes: false, relations: false },
+                  },
+                } as any);
+                dataList.forEach((data, j) => {
+                  const expressId = batch[j];
+                  const elementName = data?.Name?.value ?? `#${expressId}`;
+                  const typeName = data?._category?.value ?? '';
+                  const psets = Array.isArray(data?.IsDefinedBy) ? data.IsDefinedBy : [];
+                  for (const pset of psets) {
+                    if (!Array.isArray(pset?.HasProperties)) continue;
+                    const category = pset?.Name?.value ?? 'General';
+                    for (const prop of pset.HasProperties) {
+                      index.push({
+                        expressId, elementName, typeName, category,
+                        paramName: prop?.Name?.value ?? '',
+                        paramValue: String(prop?.NominalValue?.value ?? ''),
+                      });
+                    }
+                  }
+                });
+                await new Promise((r) => setTimeout(r, 0));
+              }
+              if (isMounted) setParamIndex(index);
+            } catch (err) {
+              console.warn('[useModelLoader] error indexando parámetros (Fragments):', err);
+            }
+          }, 1000);
+
           return;
         }
 
