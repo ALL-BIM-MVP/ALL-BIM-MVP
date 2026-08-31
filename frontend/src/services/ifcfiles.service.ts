@@ -54,7 +54,12 @@ export interface ClassificationConfigInput {
 }
 
 export interface ClassificationOverrideInput {
-  mode?: 'manual';
+  // 'norma' — pisa hacia la norma técnica del sistema para esta subida
+  // puntual, sin necesidad de ningún campo de propiedad. Antes solo se
+  // podía pisar hacia 'manual' — si el proyecto por defecto ya era
+  // 'manual', no había forma de procesar un archivo puntual con la
+  // norma técnica (bug real, encontrado con uso).
+  mode?: 'norma' | 'manual';
   code_property_set?: string;
   code_property_name?: string;
   description_property_set?: string;

@@ -17,7 +17,11 @@ interface CategoryFilterPanelProps {
 
 type FilterMode = 'categorias' | 'niveles';
 
-function formatTypeName(type: string): string {
+// Exportada para que PropertiesPanel.tsx la reuse en los resultados de
+// búsqueda (antes mostraban el tipo IFC crudo, ej. "WALLSTANDARDCASE" —
+// punto 6 de pendientes-sin-definir-frontend.md) en vez de duplicar
+// esta misma lógica ahí.
+export function formatTypeName(type: string): string {
   const stripped = type.replace(/^IFC/i, '');
   const spaced = stripped.replace(/([a-z])([A-Z])/g, '$1 $2');
   return spaced

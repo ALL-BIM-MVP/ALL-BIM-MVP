@@ -181,6 +181,15 @@ export const resolveClassificationForProcessing = async (
         descName = override.description_property_name ?? null;
         unitSet = override.unit_property_set ?? null;
         unitName = override.unit_property_name ?? null;
+    } else if (override?.mode === "norma") {
+        // Antes solo se podía pisar el modo HACIA "manual" — si el
+        // proyecto por defecto ya era "manual", no existía forma de
+        // procesar un archivo puntual contra la norma técnica del
+        // sistema (bug real, encontrado con uso). "norma" no necesita
+        // ningún campo de propiedad — mode ya queda así, codeSet/etc.
+        // se quedan en null (sin clasificación manual para esta subida).
+        if (config?.mode_locked) throw new AppError(IFC_CLASSIFICATION_ERRORS.MODE_LOCKED);
+        mode = "norma";
     } else if (mode === "manual") {
         const { rows: fields } = await pool.query<IfcClassificationFieldRow>(
             `SELECT code_property_set, code_property_name,

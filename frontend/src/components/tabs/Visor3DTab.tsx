@@ -266,7 +266,17 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
 
   // Fase 4 — overrides de clasificación en el modal de subida
   const [projectConfig, setProjectConfig] = useState<Awaited<ReturnType<typeof getClassificationConfig>> | null>(null);
-  const [overrideMode, setOverrideMode] = useState<'project' | 'manual'>('project');
+  // "Usar la del proyecto (Manual)" no decía QUÉ propiedades usa eso —
+  // antes había que cerrar este modal e ir a "Configuración de
+  // clasificación" aparte para saberlo. En vez de mostrarlo siempre
+  // (agranda el formulario para el caso común, que es 'norma'), queda
+  // oculto detrás de este toggle — cero espacio de más hasta que se pide.
+  const [showProjectManualDetail, setShowProjectManualDetail] = useState(false);
+  // 'norma' — antes no existía esta opción: si el proyecto por defecto
+  // era 'manual', no había forma de pisarlo hacia la norma técnica del
+  // sistema para una subida/reproceso puntual (bug real, encontrado
+  // con uso — ver ClassificationOverrideInput en ifcfiles.service.ts).
+  const [overrideMode, setOverrideMode] = useState<'project' | 'norma' | 'manual'>('project');
   const [overrideManualFields, setOverrideManualFields] = useState({
     code_property_set: '',
     code_property_name: '',
@@ -353,6 +363,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
     setShowDocumentModal(false);
     setFileAwaitingContext(null);
     setIsReprocessFlow(false);
+    setShowProjectManualDetail(false);
     setDocumentMode('new');
     setSelectedSpecialtyId(null);
     setNewDocumentName('');
@@ -747,6 +758,10 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
         unit_property_set: overrideManualFields.unit_property_set || undefined,
         unit_property_name: overrideManualFields.unit_property_name || undefined,
       };
+    } else if (overrideMode === 'norma') {
+      // No necesita ningún campo de propiedad — el backend lo resuelve
+      // solo con el mode.
+      classificationOverride = { mode: 'norma' };
     }
 
     if (overridePrefixMode === 'custom') {
@@ -1700,9 +1715,17 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
               </>
               )}
 
-              {/* Fase 4 — Paso 2: Override de clasificación */}
+              {/* Fase 4 — Paso 2: Override de clasificación — mismos
+                  textos de ayuda que ya tiene ClassificationConfigModal.tsx
+                  (punto 5 de pendientes-sin-definir-frontend.md), copiados
+                  tal cual: es la misma configuración vista desde acá. */}
               <div className={isReprocessFlow ? 'space-y-4' : 'border-t border-gray-200 pt-4 space-y-4'}>
-                <p className="text-sm font-semibold text-slate-800">Clasificación (opcional)</p>
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Clasificación (opcional)</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Define cómo el sistema identifica a qué partida pertenece cada elemento al subir un IFC.
+                  </p>
+                </div>
 
                 {/* Override de modo */}
                 <div className={`rounded border p-3 ${projectConfig?.mode_locked ? 'bg-gray-50 opacity-60' : 'bg-white'}`}>
@@ -1714,10 +1737,38 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                       disabled={projectConfig?.mode_locked}
                       className="text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
                     />
-                    <span className="text-sm text-slate-700">
+                    <span className="text-sm text-slate-700 flex items-center gap-1.5 flex-wrap">
                       Usar la del proyecto ({projectConfig?.mode === 'manual' ? 'Manual' : 'Norma técnica'})
+                      {projectConfig?.mode === 'manual' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowProjectManualDetail((v) => !v)}
+                          className="text-[11px] text-[#0056b3] hover:underline font-medium"
+                        >
+                          {showProjectManualDetail ? 'ocultar' : 'ver qué usa'}
+                        </button>
+                      )}
                     </span>
                   </div>
+                  {/* Antes esta opción no existía — si el proyecto por
+                      defecto era Manual, no había forma de procesar UN
+                      archivo puntual con la norma técnica del sistema
+                      (bug real, encontrado con uso). Solo se muestra
+                      cuando de verdad agrega algo — si el proyecto ya
+                      es Norma técnica, "Usar la del proyecto" de arriba
+                      ya cubre este caso. */}
+                  {projectConfig?.mode === 'manual' && (
+                    <div className="flex items-center gap-2.5">
+                      <input
+                        type="radio"
+                        checked={overrideMode === 'norma'}
+                        onChange={() => setOverrideMode('norma')}
+                        disabled={projectConfig?.mode_locked}
+                        className="text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
+                      />
+                      <span className="text-sm text-slate-700">Norma técnica, solo para esta subida</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2.5">
                     <input
                       type="radio"
@@ -1728,6 +1779,39 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                     />
                     <span className="text-sm text-slate-700">Manual, solo para esta subida</span>
                   </div>
+
+                  {/* "Ver qué usa" — antes, para saber qué propiedades
+                      busca "la del proyecto" en modo Manual, había que
+                      cerrar este modal e ir a Configuración de
+                      clasificación aparte. Colapsado por defecto para
+                      no agrandar el formulario en el caso común (mode
+                      'norma', esto ni siquiera se renderiza). */}
+                  {projectConfig?.mode === 'manual' && showProjectManualDetail && (
+                    <div className="mt-2 ml-6 space-y-0.5 text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded px-2.5 py-1.5">
+                      {projectConfig.fields[0] ? (
+                        <>
+                          <p>
+                            <span className="text-slate-400">Código:</span>{' '}
+                            {[projectConfig.fields[0].code_property_set, projectConfig.fields[0].code_property_name].filter(Boolean).join(' — ')}
+                          </p>
+                          {projectConfig.fields[0].description_property_name && (
+                            <p>
+                              <span className="text-slate-400">Descripción:</span>{' '}
+                              {[projectConfig.fields[0].description_property_set, projectConfig.fields[0].description_property_name].filter(Boolean).join(' — ')}
+                            </p>
+                          )}
+                          {projectConfig.fields[0].unit_property_name && (
+                            <p>
+                              <span className="text-slate-400">Unidad:</span>{' '}
+                              {[projectConfig.fields[0].unit_property_set, projectConfig.fields[0].unit_property_name].filter(Boolean).join(' — ')}
+                            </p>
+                          )}
+                        </>
+                      ) : (
+                        <p className="italic">Sin propiedades configuradas todavía.</p>
+                      )}
+                    </div>
+                  )}
 
                   {projectConfig?.mode_locked && (
                     <p className="mt-2 text-xs text-slate-400 flex items-center gap-1.5">
@@ -1896,6 +1980,10 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                     </div>
                   )}
                 </div>
+                <p className="text-xs text-slate-500 -mt-2">
+                  Sirve para diferenciar las propiedades que alguien completó a mano en el IFC de las
+                  que Revit genera automáticamente. Se aplica sin importar qué opción elegiste arriba.
+                </p>
               </div>
             </div>
 

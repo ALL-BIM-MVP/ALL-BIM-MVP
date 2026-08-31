@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   Search, ChevronDown, ChevronUp, ChevronRight, X as XIcon,
-  Info, History, Box, Layers, Tag, ListTree, Shapes, Link2,
+  Info, History, Box, Layers, Tag, ListTree, Shapes, Link2, Copy, Check,
 } from 'lucide-react';
 import type { ParamIndexEntry } from '../hooks/useModelLoader';
 import type { SelectedEntity } from '../types';
+import { formatTypeName } from '../CategoryFilterPanel';
 
 interface PropertiesPanelProps {
   isOpen: boolean;
@@ -32,6 +33,34 @@ const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
     <span className="text-[#0056b3] text-right truncate max-w-[160px] font-medium">{value || '—'}</span>
   </div>
 );
+
+// Botón chiquito de copiar — usado en el header para GUID/ID interno
+// (punto 6 de pendientes-sin-definir-frontend.md: antes se mostraban
+// crudos, sin ninguna etiqueta ni forma fácil de copiarlos).
+const CopyIdButton: React.FC<{ value: string }> = ({ value }) => {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async (e) => {
+        e.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1200);
+        } catch {
+          // El portapapeles puede fallar (permiso denegado, contexto no
+          // seguro) — no es crítico, el valor sigue visible para
+          // seleccionarlo a mano.
+        }
+      }}
+      title="Copiar"
+      className="text-gray-300 hover:text-[#0056b3] transition-colors flex-shrink-0"
+    >
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+    </button>
+  );
+};
 
 const SectionHeader: React.FC<{
   id: string;
@@ -143,7 +172,22 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         {entity ? (
           <div className="min-w-0">
             <p className="text-sm font-semibold text-gray-800 truncate">{entity.name}</p>
-            <p className="text-[11px] text-gray-400">{entity.globalId} · #{entity.expressId}</p>
+            {/* GUID primero — es el identificador que se conoce desde
+                Revit, más familiar que el ID interno del IFC. Los dos
+                etiquetados y copiables (antes se mostraban crudos, uno
+                al lado del otro, sin decir cuál era cuál). */}
+            {entity.globalId && (
+              <p className="text-[11px] text-gray-400 flex items-center gap-1 min-w-0">
+                <span className="text-gray-300 flex-shrink-0">GUID:</span>
+                <span className="font-mono truncate">{entity.globalId}</span>
+                <CopyIdButton value={entity.globalId} />
+              </p>
+            )}
+            <p className="text-[11px] text-gray-400 flex items-center gap-1 min-w-0">
+              <span className="text-gray-300 flex-shrink-0">ID interno:</span>
+              <span className="font-mono truncate">#{entity.expressId}</span>
+              <CopyIdButton value={String(entity.expressId)} />
+            </p>
           </div>
         ) : (
           <p className="text-sm font-semibold text-gray-800">Buscar en el modelo</p>
@@ -200,7 +244,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 className="w-full text-left px-4 py-2.5 hover:bg-gray-50 border-b border-gray-100 transition-colors"
               >
                 <p className="text-xs font-semibold text-gray-700 truncate">{r.elementName}</p>
-                <p className="text-[10px] text-gray-400">{r.typeName.replace(/^IFC/i, '')}</p>
+                <p className="text-[10px] text-gray-400">{formatTypeName(r.typeName)}</p>
                 {r.matches.slice(0, 2).map((m, i) => (
                   <p key={i} className="text-[10px] text-[#0056b3] mt-0.5 truncate">
                     {m.paramName}: {m.paramValue}

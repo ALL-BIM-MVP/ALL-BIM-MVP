@@ -27,15 +27,21 @@ export type IfcClassificationConfigBody = z.infer<typeof IfcClassificationConfig
 // Override puntual al procesar UN archivo (ver ProcessIfcMetradosBodySchema
 // en ifc-metrados.schema.ts) — DOS partes independientes, cualquiera de
 // las dos (o las dos juntas) se puede mandar en el mismo request:
-//   - mode: "manual" — pisa el modo de clasificación para esta subida
-//     puntual (requiere code_property_name). Rechazado con 409 si
-//     mode_locked=true en la config del proyecto.
+//   - mode: "manual" | "norma" — pisa el modo de clasificación para
+//     esta subida puntual (requiere code_property_name si es
+//     "manual", "norma" no necesita nada más). Antes SOLO se podía
+//     pisar hacia "manual" — si el proyecto por defecto era "manual",
+//     no había forma de procesar UN archivo puntual con la norma
+//     técnica del sistema en vez de manual, ni con el candado
+//     destildado (bug real, encontrado con uso). Rechazado con 409 si
+//     mode_locked=true en la config del proyecto, sea cual sea el
+//     valor al que se quiera pisar.
 //   - property_prefix — pisa el prefijo para esta subida puntual,
 //     independiente de si también se pisó el modo. Rechazado con 409
 //     si property_prefix_locked=true. "" es un valor válido (= sin
 //     filtro para esta subida).
 const ClassificationOverrideSchema = z.object({
-    mode: z.literal("manual").optional(),
+    mode: z.enum(["norma", "manual"]).optional(),
     code_property_set: z.string().trim().max(255).optional(),
     code_property_name: z.string().trim().min(1).max(255).optional(),
     description_property_set: z.string().trim().max(255).optional(),
