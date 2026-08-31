@@ -290,14 +290,27 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
   // niveles) — si el camino viejo no detectó nada, es porque el
   // archivo cargó por Fragments.
   const usingFragmentsSelection = typeGroups.length === 0 && fragmentsTypeGroups.length > 0;
+  // Cambiar esto remonta PropertiesPanel (key más abajo), reiniciando su
+  // búsqueda/query — clickear una partida/grupo desde fuera del visor
+  // no debería dejar la búsqueda general con lo último que se escribió.
+  const [searchResetKey, setSearchResetKey] = useState(0);
+  // Deseleccionar normalmente cierra el panel de búsqueda entero (ver el
+  // efecto de activeEntity más abajo) — este ref lo suprime para los dos
+  // casos que quieren dejarlo abierto mostrando la búsqueda general:
+  // "volver a la búsqueda general" y la lupa (al abrir).
+  const suppressPanelCloseOnDeselectRef = useRef(false);
   useImperativeHandle(ref, () => ({
     selectEntityById: (expressId: number) => selectEntityById(expressId),
     selectByIdOrGuid: (value: string) =>
       usingFragmentsSelection ? selectFragmentsByIdOrGuid(value) : selectByIdOrGuid(value),
-    isolateElementsByIds: (expressIds: number[]) =>
-      usingFragmentsSelection ? isolateFragmentsElementsByIds(expressIds) : isolateElementsByIds(expressIds),
-    selectGroupInViewer: (expressIds: number[]) =>
-      usingFragmentsSelection ? selectFragmentsGroupInViewer(expressIds) : selectGroupInViewer(expressIds),
+    isolateElementsByIds: (expressIds: number[]) => {
+      setSearchResetKey((k) => k + 1);
+      return usingFragmentsSelection ? isolateFragmentsElementsByIds(expressIds) : isolateElementsByIds(expressIds);
+    },
+    selectGroupInViewer: (expressIds: number[]) => {
+      setSearchResetKey((k) => k + 1);
+      return usingFragmentsSelection ? selectFragmentsGroupInViewer(expressIds) : selectGroupInViewer(expressIds);
+    },
     clearIsolation: () => clearIsolation(),
     clearSelection: () =>
       usingFragmentsSelection ? clearFragmentsSelection() : clearSelection(),
@@ -378,11 +391,30 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
   const handleClearSelectedLevels = usingFragmentsFilter ? clearFragmentsSelectedLevels : clearSelectedLevels;
 
   const [panelOpen, setPanelOpen] = useState(false);
+  // Aparte de panelOpen (que también se abre solo, al seleccionar un
+  // elemento en 3D) — el ícono de la lupa solo se pinta activo cuando
+  // VOS lo clickeaste, no cuando el panel está abierto por otro motivo.
+  const [searchIconActive, setSearchIconActive] = useState(false);
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
 
   useEffect(() => {
-    setPanelOpen(!!activeEntity);
-    setCategoryPanelOpen(false);
+    if (activeEntity) {
+      setPanelOpen(true);
+      setCategoryPanelOpen(false);
+      setSearchIconActive(false); // seleccionar algo (3D o resultado de búsqueda) saca la marca de la lupa
+    } else if (suppressPanelCloseOnDeselectRef.current) {
+      // "Volver a la búsqueda general" (y la lupa, al abrir) pasan por
+      // acá — quieren dejar el panel abierto mostrando la búsqueda, no
+      // cerrarlo.
+      suppressPanelCloseOnDeselectRef.current = false;
+    } else {
+      // Cualquier otra forma de deseleccionar (X del popup, click en
+      // vacío, Escape, etc.) sí cierra el panel entero — si no, quedaba
+      // abierto de fondo mostrando la búsqueda general apenas se
+      // deseleccionaba el elemento.
+      setPanelOpen(false);
+      setSearchIconActive(false);
+    }
   }, [activeEntity]);
 
   const [rulerMenuOpen, setRulerMenuOpen] = useState(false);
@@ -518,16 +550,29 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
               
             <div className="absolute top-2 left-24 z-20 flex flex-row gap-1.5">
               <button
-                onClick={() => { setPanelOpen((p) => !p); setCategoryPanelOpen(false); }}
+                onClick={() => {
+                  // Contra searchIconActive, no panelOpen: panelOpen puede
+                  // estar en true solo porque hay un elemento seleccionado
+                  // (no porque se clickeó acá) — comparar contra eso hacía
+                  // falta un segundo click para que surtiera efecto.
+                  const next = !searchIconActive;
+                  if (next) {
+                    suppressPanelCloseOnDeselectRef.current = true;
+                    handleDeselectEntity(); // abre siempre en la búsqueda general, no en el elemento que estuviera seleccionado
+                  }
+                  setPanelOpen(next);
+                  setSearchIconActive(next);
+                  setCategoryPanelOpen(false);
+                }}
                 className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
-                  panelOpen ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
+                  searchIconActive ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
                 }`}
                 title="Buscar / propiedades"
               >
                 <Search size={16} />
               </button>
                 <button
-  onClick={() => { setCategoryPanelOpen((p) => !p); setPanelOpen(false); }}
+  onClick={() => { setCategoryPanelOpen((p) => !p); setPanelOpen(false); setSearchIconActive(false); }}
   className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
     categoryPanelOpen ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
   }`}
@@ -658,12 +703,15 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
             {panelOpen && (
               <div className="absolute top-14 left-2 z-50">
                 <PropertiesPanel
+                  key={searchResetKey}
                   isOpen={panelOpen}
-                  onClose={() => setPanelOpen(false)}
+                  onClose={() => { setPanelOpen(false); setSearchIconActive(false); }}
                   paramIndex={paramIndex}
                   entity={activeEntity}
-                  onSelectResult={(id) => selectEntityById(id)}
-                  onDeselect={handleDeselectEntity}
+                  onSelectResult={(id) =>
+                    usingFragmentsSelection ? selectFragmentsByIdOrGuid(String(id)) : selectEntityById(id)
+                  }
+                  onDeselect={() => { suppressPanelCloseOnDeselectRef.current = true; handleDeselectEntity(); }}
                 />
               </div>
             )}
