@@ -4,7 +4,7 @@ import {
   Upload, FileText, X, Maximize2, Minimize2, FileSearch, Box,
   ChevronLeft, ChevronRight, Search, RefreshCw, FileDown,
   HardDrive, CloudDownload, Eye, Cpu, CheckCircle2, AlertTriangle, Loader2, Info,
-  FileStack, Layers, Settings, FileSpreadsheet, Building2, FlaskConical
+  FileStack, Layers, Settings, FileSpreadsheet, Building2, FlaskConical, RotateCcw, Lock
 } from 'lucide-react';
 import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
@@ -88,6 +88,12 @@ function flattenPartidaTree(nodes: PartidaNode[], depth = 0): { node: PartidaNod
 function formatTotal(value: number | null): string {
   if (value === null || value === undefined) return '';
   return value.toLocaleString('es-PE', { maximumFractionDigits: 2 });
+}
+
+function formatElapsed(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 function ifcStatusToPanelStatus(status: IfcStatus): PanelStatus {
@@ -199,6 +205,23 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   const [panelStatus, setPanelStatus] = useState<PanelStatus>('unprocessed');
   const [panelErrorMessage, setPanelErrorMessage] = useState<string | null>(null);
 
+  // Cronómetro del cartel "Procesando archivo..." — el backend no manda
+  // ningún porcentaje de avance (agregarlo tocaría todo el pipeline de
+  // procesamiento), así que en vez de prometer una duración que no se
+  // cumple para archivos grandes, se muestra cuánto tiempo real lleva.
+  const [processingElapsed, setProcessingElapsed] = useState(0);
+  useEffect(() => {
+    if (panelStatus !== 'processing') {
+      setProcessingElapsed(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const id = setInterval(() => {
+      setProcessingElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [panelStatus]);
+
   // "Reanudar": recuerda (por proyecto, en este navegador) cuál fue el
   // último archivo que quedó cargado, y lo vuelve a cargar solo la
   // próxima vez que se entra a esta pestaña — sin esto, cada vez había
@@ -225,6 +248,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   const [showDocumentModal, setShowDocumentModal] = useState(false);
   const [fileAwaitingContext, setFileAwaitingContext] = useState<File | null>(null);
   const [documentMode, setDocumentMode] = useState<'new' | 'version'>('new');
+  // "Reprocesar" (force=true) reusa este mismo modal — pero solo el
+  // paso de clasificación (abajo), sin el paso de "documento nuevo vs
+  // versión" (no aplica: el service ignora esos campos en un reproceso,
+  // ver ProcessIfcMetradosBodySchema). Así la persona puede elegir la
+  // configuración antes de reprocesar, respetando los candados del
+  // proyecto (mode_locked/property_prefix_locked) igual que al subir.
+  const [isReprocessFlow, setIsReprocessFlow] = useState(false);
   const [specialties, setSpecialties] = useState<IfcSpecialty[]>([]);
   const [specialtiesLoading, setSpecialtiesLoading] = useState(false);
   const [selectedSpecialtyId, setSelectedSpecialtyId] = useState<number | null>(null);
@@ -294,21 +324,26 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   useEffect(() => {
     if (!showDocumentModal) return;
     let cancelled = false;
-    setSpecialtiesLoading(true);
-    setDocumentsLoading(true);
-    listIfcSpecialties()
-      .then((list) => { if (!cancelled) setSpecialties(list); })
-      .catch((err) => console.error('Error al cargar especialidades:', err))
-      .finally(() => { if (!cancelled) setSpecialtiesLoading(false); });
-    listIfcDocuments(projectId)
-      .then((list) => { if (!cancelled) setDocuments(list); })
-      .catch((err) => console.error('Error al cargar documentos IFC:', err))
-      .finally(() => { if (!cancelled) setDocumentsLoading(false); });
+    // Reprocesar no usa el paso "documento nuevo vs versión" (ver
+    // isReprocessFlow más arriba) — no hace falta gastar estos dos
+    // requests en ese caso.
+    if (!isReprocessFlow) {
+      setSpecialtiesLoading(true);
+      setDocumentsLoading(true);
+      listIfcSpecialties()
+        .then((list) => { if (!cancelled) setSpecialties(list); })
+        .catch((err) => console.error('Error al cargar especialidades:', err))
+        .finally(() => { if (!cancelled) setSpecialtiesLoading(false); });
+      listIfcDocuments(projectId)
+        .then((list) => { if (!cancelled) setDocuments(list); })
+        .catch((err) => console.error('Error al cargar documentos IFC:', err))
+        .finally(() => { if (!cancelled) setDocumentsLoading(false); });
+    }
     getClassificationConfig(projectId)
       .then((config) => { if (!cancelled) setProjectConfig(config); })
       .catch((err) => console.error('Error al cargar config de clasificación:', err));
     return () => { cancelled = true; };
-  }, [showDocumentModal, projectId]);
+  }, [showDocumentModal, projectId, isReprocessFlow]);
 
   const filteredDocuments = documents.filter((d) =>
     d.name.toLowerCase().includes(documentSearch.trim().toLowerCase())
@@ -317,6 +352,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
   const closeDocumentModal = () => {
     setShowDocumentModal(false);
     setFileAwaitingContext(null);
+    setIsReprocessFlow(false);
     setDocumentMode('new');
     setSelectedSpecialtyId(null);
     setNewDocumentName('');
@@ -537,18 +573,20 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
       existingFileId,
       documentContext,
       classificationOverride,
+      force,
     }: {
       file: File | null;
       existingFileId: string | null;
       documentContext?: IfcDocumentContext;
       classificationOverride?: ClassificationOverrideInput;
+      force?: boolean;
     }) => {
       setPanelStatus('processing');
       setPanelErrorMessage(null);
       try {
         let ifcFileId: string;
         if (existingFileId) {
-          const initial = await processExistingIfcFile(projectId, existingFileId);
+          const initial = await processExistingIfcFile(projectId, existingFileId, force, classificationOverride);
           ifcFileId = String(initial.ifc_file_id ?? existingFileId);
         } else if (file && documentContext) {
           const initial = await uploadAndProcessIfcFile(projectId, file, documentContext, classificationOverride);
@@ -562,6 +600,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
         setPanelStatus(final.status === 'done' ? 'done' : 'error');
         if (final.status === 'error') {
           setPanelErrorMessage(final.error_message || 'Error al procesar el archivo.');
+        }
+        // Reprocesar (force=true) mantiene el mismo ifcFileId de
+        // siempre — el key de PartidasTree (más abajo) no cambia solo,
+        // así que sin esto el árbol se quedaría mostrando las partidas
+        // viejas hasta salir y volver a entrar.
+        if (final.status === 'done' && force) {
+          setPartidasRefreshKey(prev => prev + 1);
         }
       } catch (err: any) {
         console.error('Error al procesar el archivo IFC:', err);
@@ -685,16 +730,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
     setShowDocumentModal(true);
   };
 
-  const handleConfirmDocumentContext = async () => {
-    if (!fileAwaitingContext || !isDocumentContextReady) return;
-
-    const documentContext: IfcDocumentContext =
-      documentMode === 'new'
-        ? { specialtyId: selectedSpecialtyId!, documentName: newDocumentName.trim() || undefined }
-        : { replacesIfcDocumentId: selectedDocumentId! };
-
+  // Compartido entre el flujo de subida (handleConfirmDocumentContext)
+  // y el de reprocesar (handleConfirmReprocess) — las dos partes del
+  // override son independientes entre sí (ver el comentario largo en
+  // ifc-classification.schema.ts, backend).
+  const buildClassificationOverride = (): ClassificationOverrideInput | undefined => {
     let classificationOverride: ClassificationOverrideInput | undefined;
-    
+
     if (overrideMode === 'manual') {
       classificationOverride = {
         mode: 'manual',
@@ -706,21 +748,45 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
         unit_property_name: overrideManualFields.unit_property_name || undefined,
       };
     }
-    
+
     if (overridePrefixMode === 'custom') {
       if (!classificationOverride) classificationOverride = {};
       classificationOverride.property_prefix = overridePrefix;
     }
 
+    return classificationOverride;
+  };
+
+  const handleConfirmDocumentContext = async () => {
+    if (!fileAwaitingContext || !isDocumentContextReady) return;
+
+    const documentContext: IfcDocumentContext =
+      documentMode === 'new'
+        ? { specialtyId: selectedSpecialtyId!, documentName: newDocumentName.trim() || undefined }
+        : { replacesIfcDocumentId: selectedDocumentId! };
+
+    const classificationOverride = buildClassificationOverride();
     const fileToProcess = fileAwaitingContext;
     closeDocumentModal();
 
-    await runProcessing({ 
-      file: fileToProcess, 
-      existingFileId: null, 
+    await runProcessing({
+      file: fileToProcess,
+      existingFileId: null,
       documentContext,
       classificationOverride,
     });
+  };
+
+  // "Reprocesar" — a diferencia de handleConfirmDocumentContext, no
+  // manda documentContext: el service lo ignora en un reproceso (el
+  // ifc_files/ifc_documents ya existe, ver ProcessIfcMetradosBodySchema
+  // en el backend), la única parte que de verdad aplica es el override
+  // de clasificación.
+  const handleConfirmReprocess = async () => {
+    if (!currentFileId) return;
+    const classificationOverride = buildClassificationOverride();
+    closeDocumentModal();
+    await runProcessing({ file: null, existingFileId: currentFileId, force: true, classificationOverride });
   };
 
   const cancelPendingLocal = () => {
@@ -735,6 +801,34 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
       setFileAwaitingContext(ifcFile);
       setShowDocumentModal(true);
     }
+  };
+
+  // "Reprocesar" (force=true) — el service ya lo soportaba, faltaba el
+  // control en la UI. A diferencia de "Procesar archivo"/"Reintentar"
+  // (que solo aplican si todavía no está en 'done'), esto vuelve a
+  // correr el pipeline entero sobre un archivo ya procesado — por eso
+  // abre el mismo modal de clasificación que usa la subida (en modo
+  // reproceso, sin el paso de documento nuevo/versión), así se puede
+  // ajustar la configuración antes de reprocesar en vez de repetir a
+  // ciegas la de la última vez. El propio botón "Reprocesar" del modal
+  // ya funciona como confirmación — no hace falta un window.confirm
+  // encima.
+  const handleReprocesar = () => {
+    if (!currentFileId) return;
+    if (!ifcFile) {
+      // No debería pasar (ifcFile se completa al cargar cualquier
+      // archivo, ver loadBufferIntoViewer) — por las dudas, reprocesa
+      // con la config del proyecto tal cual, sin mostrar el modal.
+      const confirmed = window.confirm(
+        '¿Volver a procesar este archivo con la configuración del proyecto? Puede tardar varios minutos.'
+      );
+      if (!confirmed) return;
+      runProcessing({ file: null, existingFileId: currentFileId, force: true });
+      return;
+    }
+    setFileAwaitingContext(ifcFile);
+    setIsReprocessFlow(true);
+    setShowDocumentModal(true);
   };
 
   const fetchLoadedFiles = useCallback(async () => {
@@ -941,8 +1035,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
 
                 <div className="relative">
                   <button
-                    onClick={() => setShowEntryPopover(showEntryPopover === 'center' ? null : 'center')}
-                    className="cursor-pointer flex items-center gap-2 px-5 py-2.5 bg-[#0056b3] text-white rounded hover:bg-[#004494] transition-colors font-medium text-sm"
+                    onClick={() => {
+                      if (panelStatus === 'processing') return;
+                      setShowEntryPopover(showEntryPopover === 'center' ? null : 'center');
+                    }}
+                    disabled={panelStatus === 'processing'}
+                    title={panelStatus === 'processing' ? 'Esperá a que termine de procesar el archivo actual' : undefined}
+                    className="cursor-pointer flex items-center gap-2 px-5 py-2.5 bg-[#0056b3] text-white rounded hover:bg-[#004494] transition-colors font-medium text-sm disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Upload size={16} />
                     Cargar archivo IFC
@@ -991,6 +1090,19 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                   </div>
                 )}
                 <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
+                  {/* BOTÓN REPROCESAR — vuelve a correr el pipeline sobre
+                      el mismo archivo (force=true), útil si cambió la
+                      configuración de clasificación después de procesarlo. */}
+                  {panelStatus === 'done' && canProcess && (
+                    <button
+                      onClick={handleReprocesar}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 text-xs font-semibold hover:border-[#0056b3] hover:text-[#0056b3] hover:bg-blue-50 transition-colors flex-shrink-0 whitespace-nowrap"
+                      title="Volver a procesar este archivo"
+                    >
+                      <RotateCcw size={13} />
+                      Reprocesar
+                    </button>
+                  )}
                   {/* BOTÓN EXPORTAR EXCEL */}
                   {panelStatus === 'done' && canExport && (
                     <button
@@ -1114,8 +1226,12 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                 <div className="rounded bg-slate-200 text-slate-800 p-6 flex flex-col items-center text-center gap-3">
                   <Loader2 size={22} className="animate-spin" />
                   <p className="text-sm font-bold tracking-wide">Procesando archivo...</p>
+                  <p className="text-sm font-mono tabular-nums bg-white border border-slate-300 rounded px-2 py-0.5">
+                    {formatElapsed(processingElapsed)}
+                  </p>
                   <p className="text-xs text-slate-600">
-                    Esto puede tardar unos segundos, dependiendo del tamaño del modelo.
+                    Puede tardar varios minutos en archivos grandes — no
+                    hace falta cerrar ni recargar la pestaña.
                   </p>
                 </div>
               ) : panelStatus === 'error' ? (
@@ -1170,8 +1286,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
 
             <div className="relative">
               <button
-                onClick={() => setShowEntryPopover(showEntryPopover === 'floating' ? null : 'floating')}
-                className="flex flex-col items-center gap-0.5 px-2 py-1 rounded text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200"
+                onClick={() => {
+                  if (panelStatus === 'processing') return;
+                  setShowEntryPopover(showEntryPopover === 'floating' ? null : 'floating');
+                }}
+                disabled={panelStatus === 'processing'}
+                title={panelStatus === 'processing' ? 'Esperá a que termine de procesar el archivo actual' : undefined}
+                className="flex flex-col items-center gap-0.5 px-2 py-1 rounded text-gray-700 hover:bg-gray-100 hover:text-[#0056b3] transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-700"
               >
                 <UploadSimple size={14} weight="regular" />
                 <span className="text-[9px] font-medium whitespace-nowrap">
@@ -1261,6 +1382,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
         <ClassificationConfigModal
           projectId={projectId}
           readOnly={!canConfigure}
+          canManageLocks={metradosAccess?.is_owner || metradosAccess?.is_admin || false}
           onClose={() => setShowConfigModal(false)}
           onSaved={() => {
             setShowConfigModal(false);
@@ -1435,16 +1557,32 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
           <div className="bg-white rounded-lg w-[520px] max-h-[85vh] shadow-2xl border border-gray-200 overflow-hidden flex flex-col">
             <div className="px-5 py-4 border-b border-gray-100 flex items-start gap-3 flex-shrink-0">
               <div className="w-10 h-10 rounded bg-blue-50 flex items-center justify-center flex-shrink-0">
-                <FileStack size={18} className="text-[#0056b3]" />
+                {isReprocessFlow ? (
+                  <RotateCcw size={18} className="text-[#0056b3]" />
+                ) : (
+                  <FileStack size={18} className="text-[#0056b3]" />
+                )}
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-semibold text-slate-800">¿Qué es este archivo?</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {isReprocessFlow ? 'Reprocesar archivo' : '¿Qué es este archivo?'}
+                </p>
                 <p className="text-xs text-slate-500 truncate">{fileAwaitingContext.name}</p>
               </div>
             </div>
 
             <div className="p-5 overflow-y-auto space-y-4">
-              {/* Paso 1: Documento nuevo vs versión */}
+              {isReprocessFlow && (
+                <p className="text-xs text-slate-500">
+                  Se va a volver a generar todo — metrados, partidas y
+                  elementos — con la clasificación que elijas abajo.
+                </p>
+              )}
+
+              {/* Paso 1: Documento nuevo vs versión — no aplica al
+                  reprocesar un archivo que ya existe. */}
+              {!isReprocessFlow && (
+              <>
               <label
                 className={`block rounded border p-3.5 cursor-pointer transition-colors ${
                   documentMode === 'new' ? 'border-[#0056b3] bg-blue-50/40' : 'border-gray-200 hover:border-gray-300'
@@ -1559,9 +1697,11 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                   </div>
                 )}
               </label>
+              </>
+              )}
 
               {/* Fase 4 — Paso 2: Override de clasificación */}
-              <div className="border-t border-gray-200 pt-4 space-y-4">
+              <div className={isReprocessFlow ? 'space-y-4' : 'border-t border-gray-200 pt-4 space-y-4'}>
                 <p className="text-sm font-semibold text-slate-800">Clasificación (opcional)</p>
 
                 {/* Override de modo */}
@@ -1588,6 +1728,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                     />
                     <span className="text-sm text-slate-700">Manual, solo para esta subida</span>
                   </div>
+
+                  {projectConfig?.mode_locked && (
+                    <p className="mt-2 text-xs text-slate-400 flex items-center gap-1.5">
+                      <Lock size={11} className="flex-shrink-0" />
+                      Bloqueado por el dueño o los administradores del proyecto.
+                    </p>
+                  )}
 
                   {overrideMode === 'manual' && (
                     <div className="mt-3 pl-6 space-y-2">
@@ -1730,6 +1877,13 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                     <span className="text-sm text-slate-700">Otro, solo para esta subida</span>
                   </div>
 
+                  {projectConfig?.property_prefix_locked && (
+                    <p className="mt-2 text-xs text-slate-400 flex items-center gap-1.5">
+                      <Lock size={11} className="flex-shrink-0" />
+                      Bloqueado por el dueño o los administradores del proyecto.
+                    </p>
+                  )}
+
                   {overridePrefixMode === 'custom' && (
                     <div className="mt-3 pl-6">
                       <input
@@ -1753,15 +1907,15 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                 Cancelar
               </button>
               <button
-                onClick={handleConfirmDocumentContext}
-                disabled={!isDocumentContextReady || (overrideMode === 'manual' && !overrideManualFields.code_property_name)}
+                onClick={isReprocessFlow ? handleConfirmReprocess : handleConfirmDocumentContext}
+                disabled={(!isReprocessFlow && !isDocumentContextReady) || (overrideMode === 'manual' && !overrideManualFields.code_property_name)}
                 className={`px-5 py-1.5 rounded text-sm font-semibold transition-colors ${
-                  isDocumentContextReady && !(overrideMode === 'manual' && !overrideManualFields.code_property_name)
+                  (isReprocessFlow || isDocumentContextReady) && !(overrideMode === 'manual' && !overrideManualFields.code_property_name)
                     ? 'bg-[#0056b3] text-white hover:bg-[#004494]'
                     : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                 }`}
               >
-                Continuar
+                {isReprocessFlow ? 'Reprocesar' : 'Continuar'}
               </button>
             </div>
           </div>

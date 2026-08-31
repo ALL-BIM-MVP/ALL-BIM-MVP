@@ -8,7 +8,7 @@ import type {
     IfcClassificationConfigFull, IfcClassificationConfigRow, IfcClassificationFieldRow,
     IfcClassificationMode, IfcClassificationSnapshot,
 } from "../models/ifc-classification.models.js";
-import { assertModulePermission } from "./project-access.service.js";
+import { assertModulePermission, assertProjectAdmin } from "./project-access.service.js";
 
 // Mismo criterio que el resto del módulo Metrados — único módulo
 // funcional hoy (ver ifc-metrados.service.ts).
@@ -56,10 +56,15 @@ export const getIfcClassificationConfigService = async (
     return { ...config, fields };
 };
 
-// Solo owner/admin (permiso 'configure', sembrado en Fase 2 justo para
-// esto) — reemplaza TODA la config de una (no es un PATCH parcial):
-// mode/mode_locked/property_prefix/property_prefix_locked + el único
-// slot=1 soportado hoy.
+// El permiso 'configure' se puede asignar a cualquier miembro del
+// proyecto (module_role, no necesariamente owner/admin — ver el
+// comentario largo junto a LOCK_PERMISSION_REQUIRED) — alcanza para
+// editar mode/property_prefix/campos, pero mode_locked/
+// property_prefix_locked (los candados) están reservados a
+// owner/admin real: se verifica más abajo, comparando contra lo que
+// ya había guardado, ANTES de tocar nada — reemplaza TODA la config de
+// una (no es un PATCH parcial), pero eso no incluye colarse un cambio
+// de candado sin permiso.
 export const upsertIfcClassificationConfigService = async (
     user: DecodedToken, { projectId }: ProjectIdParam, body: IfcClassificationConfigBody
 ): Promise<IfcClassificationConfigFull> => {
@@ -68,6 +73,22 @@ export const upsertIfcClassificationConfigService = async (
 
     if (body.mode === "manual" && !body.code_property_name) {
         throw new AppError(IFC_CLASSIFICATION_ERRORS.FIELDS_REQUIRED);
+    }
+
+    const { rows: currentRows } = await pool.query<{ mode_locked: boolean; property_prefix_locked: boolean }>(
+        `SELECT mode_locked, property_prefix_locked FROM ifc_classification_configs WHERE project_id = $1`,
+        [projectId]
+    );
+    const currentModeLocked = currentRows[0]?.mode_locked ?? false;
+    const currentPrefixLocked = currentRows[0]?.property_prefix_locked ?? false;
+    const wantsLockChange =
+        (body.mode_locked ?? false) !== currentModeLocked ||
+        (body.property_prefix_locked ?? false) !== currentPrefixLocked;
+
+    if (wantsLockChange) {
+        await assertProjectAdmin(projectId, user.user_id).catch(() => {
+            throw new AppError(IFC_CLASSIFICATION_ERRORS.LOCK_PERMISSION_REQUIRED);
+        });
     }
 
     const client = await pool.connect();

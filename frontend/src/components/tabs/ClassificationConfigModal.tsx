@@ -13,8 +13,17 @@ interface ClassificationConfigModalProps {
   projectId: number;
   onClose: () => void;
   onSaved?: () => void;
- 
+
   readOnly?: boolean;
+  // El permiso "configure" del módulo Metrados se le puede asignar a
+  // cualquier miembro (no solo al dueño/administradores del proyecto)
+  // — alcanza para editar la configuración, pero los candados
+  // (mode_locked/property_prefix_locked) están reservados a
+  // dueño/administrador real, ver el comentario largo en
+  // ifc-classification.service.ts (backend). Sin este permiso, los
+  // candados se muestran de solo lectura (con el motivo), no ocultos —
+  // así la persona entiende por qué no puede tocarlos.
+  canManageLocks?: boolean;
 }
 
 const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
@@ -22,6 +31,7 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
   onClose,
   onSaved,
   readOnly = false,
+  canManageLocks = false,
 }) => {
   const [config, setConfig] = useState<ClassificationConfig | null>(null);
   const [loading, setLoading] = useState(true);
@@ -221,6 +231,22 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
               </label>
             </div>
 
+            {/* Por qué están grises los radios de arriba — mismo caso
+                que el candado, pero acá aplica ANTES de llegar al
+                casillero (config.mode_locked deshabilita esto sin
+                pasar por canManageLocks, ver el disabled de los radios
+                arriba). Sin este texto era el mismo problema original
+                que ya se había arreglado en el modal de subir/
+                reprocesar (Visor3DTab.tsx), pero acá seguía faltando. */}
+            {config.mode_locked && (
+              <p className="text-xs text-slate-400 flex items-center gap-1.5">
+                <Lock size={11} className="flex-shrink-0" />
+                {canManageLocks
+                  ? 'Para cambiar esto, primero destildá "Bloquear cómo se agrupa" más abajo.'
+                  : 'Bloqueado por el dueño o los administradores del proyecto.'}
+              </p>
+            )}
+
             {/* Campos de propiedades manuales */}
             {config.mode === 'manual' && (
               <div className="ml-6 space-y-3 border-l-2 border-blue-200 pl-4">
@@ -298,13 +324,14 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
               </div>
             )}
 
-            {/* Candado de modo */}
-            <label className="flex items-center gap-2 cursor-pointer">
+            {/* Candado de modo — solo dueño/administrador real puede
+                tocarlo, ver canManageLocks arriba. */}
+            <label className={`flex items-center gap-2 ${canManageLocks && !readOnly ? 'cursor-pointer' : 'cursor-default'}`}>
               <input
                 type="checkbox"
                 checked={config.mode_locked}
                 onChange={(e) => updateConfig({ mode_locked: e.target.checked })}
-                disabled={readOnly}
+                disabled={readOnly || !canManageLocks}
                 className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
               />
               <span className="text-xs text-slate-600 flex items-center gap-1">
@@ -312,6 +339,11 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                 Bloquear cómo se agrupa
               </span>
             </label>
+            {!readOnly && !canManageLocks && (
+              <p className="text-[11px] text-slate-400 pl-6 -mt-1">
+                Solo el dueño o los administradores del proyecto pueden bloquear o desbloquear esto.
+              </p>
+            )}
           </div>
 
           {/* Separador */}
@@ -329,23 +361,36 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                 type="text"
                 value={config.property_prefix || ''}
                 onChange={(e) => updateConfig({ property_prefix: e.target.value || null })}
-                disabled={readOnly}
+                disabled={readOnly || config.property_prefix_locked}
                 placeholder="p.ej. CSRT-"
-                className="w-full px-3 py-2 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3]"
+                className="w-full px-3 py-2 border border-gray-200 rounded text-sm outline-none focus:ring-2 focus:ring-[#0056b3] disabled:bg-gray-50 disabled:opacity-60"
               />
               <p className="text-xs text-slate-500 mt-1">
                 Sirve para diferenciar las propiedades que alguien completó a mano en el IFC de las
                 que Revit genera automáticamente. Se aplica sin importar qué opción elegiste arriba.
               </p>
+              {/* Antes el candado no impedía tocar este campo — solo
+                  frenaba el casillero. Mismo criterio que se agregó
+                  arriba para el modo: bloqueado de verdad, con texto
+                  explicando por qué. */}
+              {config.property_prefix_locked && (
+                <p className="text-xs text-slate-400 flex items-center gap-1.5 mt-1.5">
+                  <Lock size={11} className="flex-shrink-0" />
+                  {canManageLocks
+                    ? 'Para cambiar esto, primero destildá "Bloquear el prefijo" más abajo.'
+                    : 'Bloqueado por el dueño o los administradores del proyecto.'}
+                </p>
+              )}
             </div>
 
-            {/* Candado de prefijo */}
-            <label className="flex items-center gap-2 cursor-pointer">
+            {/* Candado de prefijo — mismo criterio que el candado de
+                modo de arriba: solo dueño/administrador real. */}
+            <label className={`flex items-center gap-2 ${canManageLocks && !readOnly ? 'cursor-pointer' : 'cursor-default'}`}>
               <input
                 type="checkbox"
                 checked={config.property_prefix_locked}
                 onChange={(e) => updateConfig({ property_prefix_locked: e.target.checked })}
-                disabled={readOnly}
+                disabled={readOnly || !canManageLocks}
                 className="rounded border-gray-300 text-[#0056b3] focus:ring-[#0056b3] disabled:opacity-50"
               />
               <span className="text-xs text-slate-600 flex items-center gap-1">
@@ -353,6 +398,11 @@ const ClassificationConfigModal: React.FC<ClassificationConfigModalProps> = ({
                 Bloquear el prefijo
               </span>
             </label>
+            {!readOnly && !canManageLocks && (
+              <p className="text-[11px] text-slate-400 pl-6 -mt-1">
+                Solo el dueño o los administradores del proyecto pueden bloquear o desbloquear esto.
+              </p>
+            )}
           </div>
 
           {/* Error */}

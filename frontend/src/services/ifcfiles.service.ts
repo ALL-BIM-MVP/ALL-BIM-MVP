@@ -144,12 +144,20 @@ export const getFileContentArrayBuffer = async (fileId: string): Promise<ArrayBu
 export const processExistingIfcFile = async (
   projectId: number,
   fileId: string,
-  force = false
+  force = false,
+  classificationOverride?: ClassificationOverrideInput
 ): Promise<IfcProcessStatus> => {
   const qs = force ? '?force=true' : '';
   const response = await api.post(
     `/api/projects/${projectId}/ifc-metrados/process${qs}`,
-    { file_id: Number(fileId) }
+    {
+      file_id: Number(fileId),
+      // El backend lo acepta también al reprocesar (force=true) — solo
+      // ignora document_name/specialty_id/replaces_ifc_document_id en
+      // ese caso, no esto (ver el comentario largo en
+      // ProcessIfcMetradosBodySchema, backend).
+      ...(classificationOverride ? { classification_override: classificationOverride } : {}),
+    }
   );
   return response;
 };
