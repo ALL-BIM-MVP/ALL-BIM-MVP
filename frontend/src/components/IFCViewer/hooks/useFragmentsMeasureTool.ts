@@ -3,6 +3,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
 import { SnappingClass } from '@thatopen/fragments';
 import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
+import { buildTempMeshForItem, planeMeshIntersectionSegments } from '../utils/crossMath';
 
 interface Vec3 { x: number; y: number; z: number; }
 interface ScreenPos { x: number; y: number; }
@@ -20,7 +21,6 @@ const nextId = () => `fragmeasure_${++idCounter}`;
 const DRAG_HIT_RADIUS = 10; // px — agarrar un punto ya puesto, mismo radio que useMeasureTool.ts
 const DRAG_THROTTLE_MS = 32; // mismo criterio que SNAP_THROTTLE_MS en useMeasureTool.ts
 
-const SNAP_PRIORITY = [SnappingClass.POINT, SnappingClass.LINE, SnappingClass.FACE];
 const SNAP_TYPE_BY_CLASS: Record<number, SnapType> = {
   [SnappingClass.POINT]: 'vertex',
   [SnappingClass.LINE]: 'edge',
@@ -44,32 +44,119 @@ function shortEdgeSegment(v0: Vec3, v1: Vec3, point: Vec3, halfLen: number): { p
   };
 }
 
+// Con un corte activo, model.raycast/raycastWithSnapping siguen viendo
+// la geometría del lado invisible (el recorte es solo visual, a nivel
+// GPU) — un punto ahí es un fantasma, no algo que el usuario ve en pantalla.
+function isVisiblePoint(p: Vec3, clipPlane: THREE.Plane | null): boolean {
+  return !clipPlane || clipPlane.distanceToPoint(new THREE.Vector3(p.x, p.y, p.z)) >= 0;
+}
+
+function worldToClientPx(camera: THREE.Camera, dom: HTMLCanvasElement, p: THREE.Vector3): ScreenPos {
+  const v = p.clone().project(camera);
+  const rect = dom.getBoundingClientRect();
+  return { x: rect.left + (v.x * 0.5 + 0.5) * rect.width, y: rect.top + (1 - (v.y * 0.5 + 0.5)) * rect.height };
+}
+
+const CUT_EDGE_SNAP_PX = 12;
+
+// El contorno del corte (donde el plano atraviesa el elemento) no es
+// geometría real — clippingPlanes solo oculta triángulos al dibujar, así
+// que hay que calcularlo acá para poder engancharse a él.
+async function snapToCutBoundary(
+  model: any,
+  localId: number,
+  clipPlane: THREE.Plane,
+  camera: THREE.Camera,
+  dom: HTMLCanvasElement,
+  meshCache: Map<number, THREE.Mesh>,
+  mousePx: ScreenPos
+): Promise<{ point: Vec3; edge: { v0: Vec3; v1: Vec3 } } | null> {
+  let mesh = meshCache.get(localId);
+  if (!mesh) {
+    const built = await buildTempMeshForItem(model, localId, (model.object as THREE.Object3D).matrixWorld);
+    if (!built) return null;
+    mesh = built;
+    meshCache.set(localId, mesh);
+  }
+
+  let best: { point: Vec3; edge: { v0: Vec3; v1: Vec3 } } | null = null;
+  let bestDist = CUT_EDGE_SNAP_PX;
+  for (const seg of planeMeshIntersectionSegments(mesh, clipPlane)) {
+    const pa = worldToClientPx(camera, dom, seg.a);
+    const pb = worldToClientPx(camera, dom, seg.b);
+    const dx = pb.x - pa.x, dy = pb.y - pa.y;
+    const lenSq = dx * dx + dy * dy;
+    const t = lenSq < 1e-9 ? 0 : Math.max(0, Math.min(1, ((mousePx.x - pa.x) * dx + (mousePx.y - pa.y) * dy) / lenSq));
+    const screenX = pa.x + dx * t, screenY = pa.y + dy * t;
+    const dist = Math.hypot(mousePx.x - screenX, mousePx.y - screenY);
+    if (dist < bestDist) {
+      bestDist = dist;
+      const point = seg.a.clone().lerp(seg.b, t);
+      best = {
+        point: { x: point.x, y: point.y, z: point.z },
+        edge: { v0: { x: seg.a.x, y: seg.a.y, z: seg.a.z }, v1: { x: seg.b.x, y: seg.b.y, z: seg.b.z } },
+      };
+    }
+  }
+  return best;
+}
+
 async function bestSnapPoint(
   model: any,
   camera: any,
   mouse: THREE.Vector2,
-  dom: HTMLCanvasElement
+  dom: HTMLCanvasElement,
+  clipPlane: THREE.Plane | null,
+  meshCache: Map<number, THREE.Mesh>
 ): Promise<{ point: Vec3; snapType: SnapType; edge?: { v0: Vec3; v1: Vec3 } } | null> {
   const candidates = await model.raycastWithSnapping({
     camera, mouse, dom,
     snappingClasses: [SnappingClass.POINT, SnappingClass.LINE, SnappingClass.FACE],
   });
-  if (candidates && candidates.length > 0) {
-    for (const cls of SNAP_PRIORITY) {
-      const hit = candidates.find((r: any) => r.snappingClass === cls);
-      if (hit) {
-        // snappedEdgeP1/P2 — extremos reales de la arista, solo vienen
-        // cuando el snap es de tipo LINE (confirmado en el .d.ts de la
-        // librería: RaycastResult.snappedEdgeP1/snappedEdgeP2).
-        const edge = hit.snappedEdgeP1 && hit.snappedEdgeP2
-          ? { v0: hit.snappedEdgeP1 as Vec3, v1: hit.snappedEdgeP2 as Vec3 }
-          : undefined;
-        return { point: hit.point, snapType: SNAP_TYPE_BY_CLASS[cls], edge };
+  const visibleCandidates = (candidates ?? []).filter((r: any) => isVisiblePoint(r.point, clipPlane));
+
+  // Punto/arista reales ganan siempre — el contorno del corte solo
+  // compite con la cara (ver más abajo), nunca los pisa.
+  const pointOrLine = [SnappingClass.POINT, SnappingClass.LINE]
+    .map((cls) => visibleCandidates.find((r: any) => r.snappingClass === cls))
+    .find(Boolean);
+  if (pointOrLine) {
+    const edge = pointOrLine.snappedEdgeP1 && pointOrLine.snappedEdgeP2
+      ? { v0: pointOrLine.snappedEdgeP1 as Vec3, v1: pointOrLine.snappedEdgeP2 as Vec3 }
+      : undefined;
+    return { point: pointOrLine.point, snapType: SNAP_TYPE_BY_CLASS[pointOrLine.snappingClass], edge };
+  }
+
+  const faceCandidate = visibleCandidates.find((r: any) => r.snappingClass === SnappingClass.FACE);
+
+  if (clipPlane) {
+    // El contorno del corte (arista sintética, no viene de Fragments) se
+    // prueba SIEMPRE que hay un corte activo, junto con la cara — no solo
+    // cuando no hay ningún candidato — para que gane si estás más cerca
+    // de esa arista que del resto de la cara.
+    let localId: number | null = faceCandidate?.localId ?? candidates?.[0]?.localId ?? null;
+    let facePoint: Vec3 | null = faceCandidate?.point ?? null;
+
+    if (localId == null || !facePoint) {
+      const hits = await model.raycastAll({ camera, mouse, dom });
+      const visible = (hits ?? [])
+        .filter((h: any) => isVisiblePoint(h.point, clipPlane))
+        .sort((a: any, b: any) => (a.rayDistance ?? a.distance) - (b.rayDistance ?? b.distance));
+      const nearest = visible[0];
+      if (nearest) {
+        localId = localId ?? nearest.localId;
+        facePoint = facePoint ?? nearest.point;
       }
     }
+
+    const boundary = localId != null
+      ? await snapToCutBoundary(model, localId, clipPlane, camera, dom, meshCache, { x: mouse.x, y: mouse.y })
+      : null;
+    if (boundary) return { point: boundary.point, snapType: 'edge', edge: boundary.edge };
+    return facePoint ? { point: facePoint, snapType: 'face' } : null;
   }
-  // Sin candidatos de snap (ej. click en medio de una cara lejos de
-  // cualquier borde) — el raycast simple sigue encontrando el punto.
+
+  if (faceCandidate) return { point: faceCandidate.point, snapType: 'face' };
   const plain = await model.raycast({ camera, mouse, dom });
   return plain ? { point: plain.point, snapType: 'face' } : null;
 }
@@ -82,6 +169,8 @@ export function useFragmentsMeasureTool(
   const [measureMode, setMeasureMode] = useState(false);
   const measureModeRef = useRef(false);
   useEffect(() => { measureModeRef.current = measureMode; }, [measureMode]);
+
+  const cutBoundaryMeshCacheRef = useRef(new Map<number, THREE.Mesh>());
 
   
   const [measureArmed, setMeasureArmed] = useState(false);
@@ -211,7 +300,8 @@ export function useFragmentsMeasureTool(
       busyRef.current = true;
       try {
         const mouse = new THREE.Vector2(e.clientX, e.clientY);
-        const snap = await bestSnapPoint(model, camera, mouse, canvas);
+        const clipPlane = rendererRef.current?.getClipPlane?.() ?? null;
+        const snap = await bestSnapPoint(model, camera, mouse, canvas, clipPlane, cutBoundaryMeshCacheRef.current);
         if (!snap) return;
         const screen = projectPoint(snap.point);
 
@@ -258,7 +348,8 @@ export function useFragmentsMeasureTool(
       hoverBusy = true;
       try {
         const mouse = new THREE.Vector2(e.clientX, e.clientY);
-        const snap = await bestSnapPoint(model, camera, mouse, canvas);
+        const clipPlane = rendererRef.current?.getClipPlane?.() ?? null;
+        const snap = await bestSnapPoint(model, camera, mouse, canvas, clipPlane, cutBoundaryMeshCacheRef.current);
         if (!measureArmedRef.current || draggingRef.current) return; // se desarmó/empezó a arrastrar mientras esto resolvía
         if (!snap) { setHoverPoint(null); setHoverEdge(null); return; }
         const screen = projectPoint(snap.point);
@@ -309,7 +400,8 @@ export function useFragmentsMeasureTool(
 
       busyRef.current = true;
       try {
-        const snap = await bestSnapPoint(model, camera, mouse, canvas);
+        const clipPlane = rendererRef.current?.getClipPlane?.() ?? null;
+        const snap = await bestSnapPoint(model, camera, mouse, canvas, clipPlane, cutBoundaryMeshCacheRef.current);
         if (!snap) return;
         const screen = projectPoint(snap.point);
 

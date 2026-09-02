@@ -190,6 +190,7 @@ export function useIfcModel(
     ready: loader.ready,
     canvasRef,
     rendererRef,
+    storeRef,
     isWalkModeRef: walk.isWalkModeRef,
     walkStateRef: walk.walkStateRef,
     measureModeRef: measure.measureModeRef,

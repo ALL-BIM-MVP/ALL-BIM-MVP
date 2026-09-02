@@ -1012,7 +1012,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
             : "w-full h-full bg-[#2D3B4E] flex flex-col overflow-hidden relative"
         }
       >
-        <div className="flex-1 min-h-0 flex relative overflow-hidden">
+        <div className="flex-1 min-h-0 flex relative overflow-hidden @container">
 
           <div
             className="flex-1 flex flex-col items-center justify-center text-gray-700 relative overflow-hidden bg-[#EEEEEE]"
@@ -1036,6 +1036,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
                 viewCubeVisible={isActive}
                 isActive={isActive}
                 onViewElementInMetrados={handleViewElementInMetrados}
+                fileName={ifcFile?.name}
               />
             ) : (
               <div className="relative z-10 text-center flex flex-col items-center gap-4 px-6">
@@ -1081,7 +1082,7 @@ const Visor3DTab: React.FC<Visor3DTabProps> = ({ projectId, isActive = true }) =
           </button>
 
           <div
-            className={`absolute top-0 bottom-3 right-0 flex-shrink-0 flex flex-col p-5 text-slate-700 overflow-hidden bg-[#FFFFFF] shadow-2xl border-l border-slate-400/40 rounded z-[9500] ${
+            className={`absolute top-0 bottom-3 right-0 flex-shrink-0 flex flex-col p-5 text-slate-700 overflow-hidden bg-[#FFFFFF] shadow-2xl border-l border-slate-400/40 rounded z-[9500] max-w-[90cqw] ${
               panelOpen ? 'translate-x-0' : 'translate-x-full'
             } ${isResizing ? '' : 'transition-transform duration-300 ease-in-out'}`}
             style={{ width: `${panelWidth}px` }}

@@ -33,11 +33,7 @@ const TAB_TO_HELP_SECTION: Record<string, string> = {
   visor3d: 'visor-3d',
 };
 
-// El Provider tiene que estar POR ENCIMA del componente que lo usa
-// (ver useProjectInvitationsContext más abajo) — de ahí el wrapper.
-// No se puede envolver solo el JSX final: los hooks se llaman
-// incondicionalmente arriba del todo, antes de cualquier return
-// temprano (loading/error).
+
 const DashboardProjects: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   return (
@@ -60,21 +56,10 @@ const DashboardProjectsInner: React.FC = () => {
   const { fetchProjectById, uploadIFC, updateProject, loading, error } = useProjects();
 
   const [project, setProject] = useState<Project | null>(null);
-  // "Verificación de elementos" (Inicio) — Consolidación punto 1.a.
-  // null = todavía no cargó, o el usuario no tiene acceso 'view' al
-  // módulo Metrados en este proyecto (403 esperado, ej. el módulo no
-  // está activo acá), o el proyecto no tiene ningún elemento cargado
-  // todavía. Ninguno de esos casos es un error visible — InicioTab ya
-  // oculta la sección entera cuando esto es null.
+
   const [estadoElementos, setEstadoElementos] = useState<EstadoElementosResult | null>(null);
   const [ifcFiles, setIfcFiles] = useState<IFCFile[]>([]);
 
-  // Lee el tab desde la URL una sola vez, al montar — si hay un
-  // ?tab=... válido, arranca ahí directo (y con el módulo ya dado por
-  // confirmado, ver confirmedModuloId más abajo) en vez de siempre
-  // volver a la pantalla de elegir módulo. Único módulo real hoy es
-  // "metrados" (ver el mismo supuesto ya usado en el botón SIGUIENTE
-  // de abajo, esMetrados).
   const tabFromUrl = searchParams.get('tab') as TabType | null;
   const initialTab: TabType = tabFromUrl && URL_TABS.includes(tabFromUrl) ? tabFromUrl : 'modulos';
 
@@ -112,11 +97,7 @@ const DashboardProjectsInner: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
-  // Visor3DTab NO debe desmontarse al cambiar de tab (perdería el IFC
-  // cargado, la escena de Three.js, la cámara, etc. — ver el render más
-  // abajo). Se monta recién la primera vez que el usuario entra al tab
-  // 'visor3d', y a partir de ahí queda montado para siempre (solo se
-  // oculta con CSS cuando no está activo).
+  
   const [hasEnteredVisor3D, setHasEnteredVisor3D] = useState(false);
   useEffect(() => {
     if (activeTab === 'visor3d') setHasEnteredVisor3D(true);
@@ -125,17 +106,12 @@ const DashboardProjectsInner: React.FC = () => {
   const [sidebarVisible, setSidebarVisible] = useState(false);
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
-  // Cierra el menú de usuario al hacer click en cualquier otro lado de la
-  // página — antes solo se cerraba tocando "Cerrar sesión" adentro del
-  // propio menú, así que quedaba abierto para siempre si clickeabas afuera.
+
   const userMenuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
-      // El panel de detalle de RoleSummary vive portado a
-      // document.body — sin este chequeo, abrirlo cierra el menú
-      // entero antes de poder leerlo (mismo bug ya encontrado en
-      // RoleDropdown, ColaboradoresTab.tsx).
+
       if (target instanceof Element && target.closest('[data-role-summary-panel]')) return;
       if (userMenuRef.current && !userMenuRef.current.contains(target)) {
         setIsUserMenuOpen(false);
@@ -186,11 +162,7 @@ const DashboardProjectsInner: React.FC = () => {
     loadProject();
   }, [id, fetchProjectById]);
 
-  // Independiente de loadProject de arriba a propósito: si esto falla
-  // (403 por no tener acceso al módulo Metrados, proyecto sin ese
-  // módulo activo, etc.) no debe tumbar la carga del proyecto en sí —
-  // solo la sección "Verificación de elementos" de Inicio queda
-  // oculta.
+  
   const refreshEstadoElementos = useCallback(() => {
     if (!id) {
       setEstadoElementos(null);
@@ -258,19 +230,7 @@ const DashboardProjectsInner: React.FC = () => {
     }
   };
 
-  // NOTA: todavía no existe un endpoint en el backend para activar/
-  // desactivar especialidades del proyecto. Mientras tanto, InicioTab
-  // no recibe onToggleSpecialty y muestra los chips de especialidad en
-  // modo solo lectura. Cuando exista el endpoint, agregar acá un
-  // handler que llame a projectService y pasarlo como
-  // onToggleSpecialty={handleToggleSpecialty} más abajo.
 
-  // El tab de Colaboradores es visible para TODOS los miembros del
-  // proyecto (owner e invitados) — quién puede invitar/gestionar vs. solo
-  // ver la lista de miembros ya lo resuelve ColaboradoresTab por dentro
-  // (según isOwner). Antes este array excluía el tab entero para
-  // no-owners con un ternario condicional, dejando a los invitados sin
-  // forma de ver ni siquiera la lista de miembros — por eso no aparecía.
   const tabs: { id: TabType; label: string; icon: any; shortcut?: string }[] = [
     { id: 'inicio', label: 'Inicio', icon: House },
     { id: 'archivos', label: 'Archivos', icon: FolderOpen, shortcut: 'Alt' },
@@ -278,15 +238,7 @@ const DashboardProjectsInner: React.FC = () => {
     { id: 'visor3d', label: 'Visor 3D', icon: Cube },
   ];
 
-  // "loading" (de useProjects) arranca en false — en el primerísimo
-  // render de esta pantalla, ANTES de que el useEffect de más arriba
-  // llegue siquiera a llamar fetchProjectById, loading=false Y
-  // project=null a la vez (todavía no hay ni pedido en curso ni
-  // resultado). Sin el "&& !error" de abajo, esa combinación
-  // calificaba como "error/no encontrado" — un parpadeo real del
-  // cartel de error antes de que aparezca el proyecto de verdad, en
-  // CADA entrada a un proyecto (bug real reportado por el usuario el
-  // 2026-08-30, casi imperceptible pero a veces se nota).
+ 
   if (loading || (!project && !error)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -332,22 +284,23 @@ const DashboardProjectsInner: React.FC = () => {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-[10000]">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between h-14">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-3 min-w-0">
+              <div className="flex items-center gap-1 sm:gap-2 min-w-0">
                 <button
                   onClick={() => navigate('/dashboard/projects')}
-                  className="-ml-9 w-10 h-10 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#0056b3] hover:bg-blue-50 transition-colors flex-shrink-0"
+                  className="-ml-9 w-8 h-8 sm:w-10 sm:h-10 flex items-center justify-center rounded-lg text-gray-400 hover:text-[#0056b3] hover:bg-blue-50 transition-colors flex-shrink-0"
                   title="Volver a Proyectos"
                   aria-label="Volver a Proyectos"
                 >
-                  <ArrowLeft size={22} />
+                  <ArrowLeft size={20} className="sm:hidden" />
+                  <ArrowLeft size={22} className="hidden sm:block" />
                 </button>
-                <img src={logo} alt="Logo ALL-BIM" className="h-11 w-auto" />
+                <img src={logo} alt="Logo ALL-BIM" className="h-8 sm:h-11 w-auto flex-shrink-0" />
                 <span className="text-2xl font-black text-[#0056b3]"></span>
-                <span className="text-sm text-gray-400">|</span>
-                <span className="text-sm font-medium text-gray-600 truncate max-w-xs">{project.name}</span>
+                <span className="hidden sm:inline text-sm text-gray-400">|</span>
+                <span className="hidden sm:inline text-sm font-medium text-gray-600 truncate max-w-[10rem] md:max-w-xs">{project.name}</span>
                 {!checkingOwner && (isOwner || myMembership) && (
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-[#0056b3] border border-blue-100">
+                  <span className="hidden md:inline-flex text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-[#0056b3] border border-blue-100 whitespace-nowrap">
                     {isOwner ? 'Propietario' : (
                       <RoleSummary
                         isAdmin={myMembership!.is_admin}
@@ -361,7 +314,7 @@ const DashboardProjectsInner: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
               <button
                 onClick={() => window.open(`/ayuda/${helpSection}`, '_blank', 'noopener')}
                 className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -371,20 +324,20 @@ const DashboardProjectsInner: React.FC = () => {
                 <HelpCircle size={18} />
               </button>
 
-              <div className="relative border-l border-gray-200 pl-4" ref={userMenuRef}>
-                <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-2">
+              <div className="relative border-l border-gray-200 pl-2 sm:pl-4" ref={userMenuRef}>
+                <button onClick={() => setIsUserMenuOpen(!isUserMenuOpen)} className="flex items-center gap-1 sm:gap-2">
                   {user?.profile_picture_url ? (
                     <img
                       src={user.profile_picture_url}
                       alt={user.name}
-                      className="w-8 h-8 rounded-full object-cover"
+                      className="w-8 h-8 rounded-full object-cover flex-shrink-0"
                     />
                   ) : (
-                    <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-sm font-bold">
+                    <div className="w-8 h-8 rounded-full bg-[#0056b3] text-white flex items-center justify-center text-sm font-bold flex-shrink-0">
                       {user?.name?.charAt(0).toUpperCase() || 'U'}
                     </div>
                   )}
-                  <span className="text-sm font-medium text-gray-700">{user?.name || 'Usuario'}</span>
+                  <span className="hidden md:inline text-sm font-medium text-gray-700">{user?.name || 'Usuario'}</span>
                   <svg
                     className={`w-4 h-4 text-gray-500 transition-transform ${isUserMenuOpen ? 'rotate-180' : ''}`}
                     fill="none" stroke="currentColor" viewBox="0 0 24 24"

@@ -19,11 +19,6 @@ interface MetradosTableProps {
  
   onReorderColumn?: (setIndex: number, fromColIndex: number, toColIndex: number) => void;
 
-  // Toggle: click sobre una fila resalta ese grupo en el visor 3D
-  // (highlight + propiedades del primer elemento) SIN atenuar el resto
-  // de la partida, click de nuevo sobre la fila ya resaltada la
-  // deselecciona. selectedGroupIndex lo controla el padre
-  // (PartidasTree.tsx) para que sobreviva a los re-renders de esta tabla.
   onToggleGroupSelect?: (group: PartidaGroup, index: number) => void;
   selectedGroupIndex?: number | null;
 }
@@ -150,7 +145,7 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
 
   return (
     <div className="flex-1 min-h-0 overflow-auto rounded border border-gray-300">
-      <table className="w-full text-[10px] border-collapse min-w-[820px]">
+      <table className="w-full text-[10px] border-separate border-spacing-0 min-w-[820px]">
         <thead>
           <tr className="bg-gray-100">
             {orderedSets.map((set) => {
@@ -160,7 +155,7 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
                 <th
                   key={set.template_set_id ?? set.name}
                   colSpan={visibleInSet.length}
-                  className="px-2 py-1 text-left font-bold text-black border border-gray-300"
+                  className="sticky top-0 z-20 h-[26px] px-2 py-1 text-left font-bold text-black bg-gray-100 border-r border-b border-gray-300"
                 >
                   {set.name}
                 </th>
@@ -182,7 +177,7 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
                   onDrop={(e) => handleDrop(fc, e)}
                   onDragEnd={handleDragEnd}
                   title={onReorderColumn ? 'Arrastrá para reordenar dentro de este grupo' : undefined}
-                  className={`px-2 py-1.5 font-semibold text-black border border-gray-300 select-none ${
+                  className={`sticky top-[26px] z-10 bg-gray-50 px-2 py-1.5 font-semibold text-black border-r border-b border-gray-300 select-none ${
                     isNumeric ? 'text-right' : 'text-left'
                   } ${
                     onReorderColumn
@@ -222,7 +217,7 @@ const MetradosTable: React.FC<MetradosTableProps> = ({
               {flat.map((fc) => (
                 <td
                   key={colKey(fc)}
-                  className={`px-2 py-1.5 border border-gray-200 text-gray-600 ${
+                  className={`px-2 py-1.5 border-r border-b border-gray-200 text-gray-600 ${
                     fc.col.source_type === 'builtin' && NUMERIC_BUILTIN_FIELDS.has(fc.col.builtin_field ?? '')
                       ? 'text-right'
                       : 'text-left'

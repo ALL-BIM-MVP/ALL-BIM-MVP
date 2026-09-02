@@ -1,5 +1,5 @@
 import React, { forwardRef, useImperativeHandle, useState, useEffect, useCallback, useRef } from 'react';
-import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, Search, Crosshair, Paintbrush, Layers, Download, FolderOpen, RefreshCw, SeparatorHorizontal, Table2 } from 'lucide-react';
+import { AlertCircle, Footprints, Camera, Moon, Sun, Ruler, X as XIcon, Diamond, Triangle, Square, Circle, Scissors, EyeOff, Eye, Focus, Search, Crosshair, Paintbrush, Layers, Download, FolderOpen, RefreshCw, Table2 } from 'lucide-react';
 import { useIfcModel } from './hooks/useIfcModel';
 import { crossLabelPos } from './hooks/useCrossTool';
 import { ViewPreset } from './types';
@@ -21,6 +21,8 @@ interface IFCViewerProps {
   isActive?: boolean;
 
   onViewElementInMetrados?: (expressId: number) => void;
+
+  fileName?: string;
 }
 
 export interface IFCViewerHandle {
@@ -153,7 +155,7 @@ const MeasurePointMarker: React.FC<{ x: number; y: number; index: number }> = ({
 };
 
 const PAINT_COLORS = ['#ff3b30', '#34c759', '#0056b3', '#ffcc00', '#ffffff'];
-const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fragmentsBuffer = null, projectId, onFileUploaded, viewCubeRightOffset = 0, viewCubeVisible = true, isActive = true, onViewElementInMetrados }, ref) => {
+const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fragmentsBuffer = null, projectId, onFileUploaded, viewCubeRightOffset = 0, viewCubeVisible = true, isActive = true, onViewElementInMetrados, fileName }, ref) => {
   const {
     canvasRef,
     containerRef,
@@ -171,8 +173,6 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     downloadScreenshot,
     isDarkBackground,
     toggleBackground,
-    edgesVisible,
-    toggleEdges,
 
     measureMode,
     enableAndArmMeasure,
@@ -541,7 +541,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     <div className="flex h-full w-full">
       <div
         ref={containerRef}
-        className="bg-[#EEEEEE] flex-1 relative"
+        className="bg-[#EEEEEE] flex-1 relative @container"
         style={{ minHeight: '400px' }}
       >
         {ready && (
@@ -552,7 +552,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
             visible={viewCubeVisible}
             />
               
-            <div className="absolute top-2 left-24 z-20 flex flex-row gap-1.5">
+            <div className="absolute top-2 left-24 right-2 z-20 flex flex-row flex-wrap gap-1.5">
               <button
                 onClick={() => {
                   // Contra searchIconActive, no panelOpen: panelOpen puede
@@ -568,7 +568,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                   setSearchIconActive(next);
                   setCategoryPanelOpen(false);
                 }}
-                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+                className={`w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg transition-colors ${
                   searchIconActive ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
                 }`}
                 title="Buscar / propiedades"
@@ -577,7 +577,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
               </button>
                 <button
   onClick={() => { setCategoryPanelOpen((p) => !p); setPanelOpen(false); setSearchIconActive(false); }}
-  className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+  className={`w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg transition-colors ${
     categoryPanelOpen ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
   }`}
   title="Filtrar por categoría o nivel"
@@ -586,7 +586,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
 </button>
               <button
                 onClick={handleToggleSection}
-                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+                className={`w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg transition-colors ${
                   sectionEnabled ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
                 }`}
                 title={sectionEnabled ? 'Desactivar corte' : 'Sección / corte'}
@@ -596,7 +596,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
 
               <button
                 onClick={toggleWalkMode}
-                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
+                className={`w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg transition-colors ${
                   isWalkMode ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
                 }`}
                 title={isWalkMode ? 'Salir del modo caminar' : 'Modo caminar (WASD + arrastrar para mirar)'}
@@ -604,10 +604,28 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                 <Footprints size={16} />
               </button>
 
+              <button
+                onClick={toggleBackground}
+                className="w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
+                title={isDarkBackground ? 'Fondo claro' : 'Fondo oscuro'}
+              >
+                {isDarkBackground ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+
+              <button
+                onClick={handleTogglePaint}
+                className={`w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg transition-colors ${
+                  paintMode ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
+                }`}
+                title={paintMode ? 'Salir de pintar' : 'Pintar sobre el modelo'}
+              >
+                <Paintbrush size={16} />
+              </button>
+
               <div className="relative" ref={rulerMenuRef}>
                 <button
                   onClick={() => setRulerMenuOpen((prev) => !prev)}
-                  className="w-9 h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
+                  className="w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
                   title="Herramientas de medición"
                 >
                   <Ruler size={16} />
@@ -638,36 +656,8 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
               </div>
 
               <button
-                onClick={handleTogglePaint}
-                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
-                  paintMode ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
-                }`}
-                title={paintMode ? 'Salir de pintar' : 'Pintar sobre el modelo'}
-              >
-                <Paintbrush size={16} />
-              </button>
-
-              <button
-                onClick={toggleBackground}
-                className="w-9 h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
-                title={isDarkBackground ? 'Fondo claro' : 'Fondo oscuro'}
-              >
-                {isDarkBackground ? <Sun size={16} /> : <Moon size={16} />}
-              </button>
-
-              <button
-                onClick={toggleEdges}
-                className={`w-9 h-9 flex items-center justify-center rounded-lg transition-colors ${
-                  edgesVisible ? 'bg-[#0056b3] text-white' : 'bg-black/70 hover:bg-black/90 text-white'
-                }`}
-                title={edgesVisible ? 'Ocultar líneas de contorno' : 'Mostrar líneas de contorno'}
-              >
-                <SeparatorHorizontal size={16} />
-              </button>
-
-              <button
                 onClick={takeScreenshot}
-                className="w-9 h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
+                className="w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg bg-black/70 hover:bg-black/90 text-white transition-colors"
                 title="Capturar imagen del visor"
               >
                 <Camera size={16} />
@@ -695,7 +685,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
               {hasAnyIsolation && (
                 <button
                   onClick={handleClearAllIsolation}
-                  className="w-9 h-9 flex items-center justify-center rounded-lg bg-[#0056b3] hover:bg-[#004494] text-white transition-colors"
+                  className="w-5 h-5 @2xs:w-6 @2xs:h-6 @xs:w-7 @xs:h-7 @sm:w-9 @sm:h-9 flex items-center justify-center rounded-lg bg-[#0056b3] hover:bg-[#004494] text-white transition-colors"
                   title="Mostrar todo el modelo (deshacer aislamiento y elementos ocultos)"
                 >
                   <Eye size={16} />
@@ -716,6 +706,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                     usingFragmentsSelection ? selectFragmentsByIdOrGuid(String(id)) : selectEntityById(id)
                   }
                   onDeselect={() => { suppressPanelCloseOnDeselectRef.current = true; handleDeselectEntity(); }}
+                  fileName={fileName}
                 />
               </div>
             )}
@@ -738,8 +729,8 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
 )}
 
          {isWalkMode && (
-  <div className="absolute top-2 left-1/2 -translate-x-1/2 z-20 bg-white text-slate-700 text-[11px] px-3 py-1.5 rounded-lg shadow-lg">
-    Modo caminar: <span className="font-semibold">W A S D</span> para moverte · arrastrá el mouse para mirar
+  <div className="absolute bottom-14 left-4 z-20 bg-white text-slate-700 text-[10px] px-2 py-1 rounded-lg shadow-lg">
+    <span className="font-semibold">W A S D</span> caminar · mouse mirar · <span className="font-semibold">Espacio</span> pausar
   </div>
 )}
             {(measureMode || fragmentsMeasureMode) && (
@@ -841,7 +832,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                 })}
 
                 {displayMeasurements.length > 0 && (
-  <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
+  <div className="absolute bottom-4 left-4 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
     <Ruler size={13} className="text-[#0056b3] flex-shrink-0" />
     <button
       onClick={() => { clearMeasurement(); exitMeasureMode(); clearFragmentsMeasurement(); exitFragmentsMeasureMode(); }}
@@ -959,7 +950,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
                 })}
 
                 {displayCrosses.length > 0 && (
-  <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
+  <div className="absolute bottom-4 left-4 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
     <Crosshair size={13} className="text-[#0056b3] flex-shrink-0" />
     <button
       onClick={() => { clearCross(); exitCrossMode(); clearFragmentsCross(); exitFragmentsCrossMode(); }}
@@ -973,7 +964,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
             )}
 
             {paintMode && (
-              <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
+              <div className="absolute bottom-4 left-4 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-2.5 shadow-xl">
                 <Paintbrush size={13} className="text-[#0056b3] flex-shrink-0" />
                 <div className="flex items-center gap-1.5">
                   {PAINT_COLORS.map((c) => (
@@ -1005,7 +996,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
             )}
 
             {sectionEnabled && (
-              <div className="absolute top-10 left-1/2 -translate-x-1/2 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg shadow-xl flex flex-col gap-1.5 min-w-[230px]">
+              <div className="absolute bottom-4 left-4 z-30 bg-white/95 backdrop-blur-md border border-gray-200 text-gray-700 text-xs px-2.5 py-1.5 rounded-lg shadow-xl flex flex-col gap-1.5 min-w-[230px]">
                 <div className="flex items-center gap-2">
                   <Scissors size={12} className="text-[#0056b3] flex-shrink-0" />
 

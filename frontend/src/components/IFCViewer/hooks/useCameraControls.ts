@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
+import * as THREE from 'three';
 
 interface UseCameraControlsParams {
   ready: boolean;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   rendererRef: React.RefObject<any>;
+  storeRef?: React.RefObject<any>;
   isWalkModeRef: React.RefObject<boolean>;
   walkStateRef: React.RefObject<{ yaw: number; pitch: number; position: any }>;
   measureModeRef: React.RefObject<boolean>;
@@ -32,6 +34,7 @@ export function useCameraControls(params: UseCameraControlsParams) {
     ready,
     canvasRef,
     rendererRef,
+    storeRef,
     isWalkModeRef,
     walkStateRef,
     measureModeRef,
@@ -71,6 +74,41 @@ export function useCameraControls(params: UseCameraControlsParams) {
     let lastX = 0, lastY = 0, downX = 0, downY = 0;
     let wheelEndTimeout: number | null = null;
 
+    let proximityBusy = false;
+    const proximityRef = { current: Infinity };
+    const updateProximity = () => {
+      const model = storeRef?.current?.fragmentsModel;
+      if (model) {
+        if (proximityBusy) return;
+        proximityBusy = true;
+        try {
+          const rect = canvas.getBoundingClientRect();
+          const mouse = new THREE.Vector2(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          Promise.resolve(model.raycastAll({ camera: camera.camera, mouse, dom: canvas }))
+            .then((results: any[]) => {
+              if (!results || results.length === 0) { proximityRef.current = Infinity; return; }
+              let nearest = Infinity;
+              for (const r of results) {
+                const d = r.rayDistance ?? r.distance;
+                if (typeof d === 'number' && Number.isFinite(d) && d < nearest) nearest = d;
+              }
+              proximityRef.current = nearest;
+            })
+            .catch(() => { proximityRef.current = Infinity; })
+            .finally(() => { proximityBusy = false; });
+        } catch {
+          proximityRef.current = Infinity;
+          proximityBusy = false;
+        }
+      } else if (typeof renderer.raycastForward === 'function') {
+        try {
+          proximityRef.current = renderer.raycastForward();
+        } catch {
+          proximityRef.current = Infinity;
+        }
+      }
+    };
+
     const handleMouseDown = (e: MouseEvent) => {
       if (onMeasureMouseDown(e.clientX, e.clientY)) return;
       if (e.button === 0 && onCutMouseDown?.(e.clientX, e.clientY)) return;
@@ -82,6 +120,7 @@ export function useCameraControls(params: UseCameraControlsParams) {
       lastX = e.clientX; lastY = e.clientY;
       downX = e.clientX; downY = e.clientY;
       canvas.style.cursor = isPanning ? 'move' : 'grabbing';
+      updateProximity();
 
       onZoom?.();
     };
@@ -113,7 +152,8 @@ export function useCameraControls(params: UseCameraControlsParams) {
       lastX = e.clientX; lastY = e.clientY;
 
       if (isPanning) camera.pan(deltaX, deltaY);
-      else camera.orbit(deltaX, deltaY);
+      else camera.orbit(deltaX, deltaY, proximityRef.current);
+      updateProximity();
       // Sin renderer.render() acá a propósito — el loop continuo en
       // useModelLoader.ts (requestAnimationFrame) YA redibuja la escena
       // en cada frame sin condición, así que esto era puro trabajo
@@ -137,7 +177,7 @@ export function useCameraControls(params: UseCameraControlsParams) {
       isPanning = false;
       canvas.style.cursor = 'grab';
 
-    
+
       if (isWalkModeRef.current && document.pointerLockElement === canvas) return;
 
       if (wasDragging && moved < 4 && renderer.pick) {
@@ -167,8 +207,11 @@ export function useCameraControls(params: UseCameraControlsParams) {
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-      camera.zoom(e.deltaY, false, mouseX, mouseY, canvas.width, canvas.height);
-   
+      // rect.width/height (píxeles CSS), no canvas.width/height (resolución
+      // interna, escalada por devicePixelRatio) — mouseX/mouseY ya están en
+      // CSS px, mezclar los dos torcía el punto bajo el cursor.
+      camera.zoom(e.deltaY, mouseX, mouseY, rect.width, rect.height, proximityRef.current);
+      updateProximity();
 
       onZoom?.();
       if (wheelEndTimeout !== null) clearTimeout(wheelEndTimeout);

@@ -17,10 +17,7 @@ interface CategoryFilterPanelProps {
 
 type FilterMode = 'categorias' | 'niveles';
 
-// Exportada para que PropertiesPanel.tsx la reuse en los resultados de
-// búsqueda (antes mostraban el tipo IFC crudo, ej. "WALLSTANDARDCASE" —
-// punto 6 de pendientes-sin-definir-frontend.md) en vez de duplicar
-// esta misma lógica ahí.
+
 export function formatTypeName(type: string): string {
   const stripped = type.replace(/^IFC/i, '');
   const spaced = stripped.replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -32,9 +29,7 @@ export function formatTypeName(type: string): string {
     .join(' ');
 }
 
-// "Sin nivel" siempre al final de la lista — no es un piso real, es el
-// resto (elementos sin IfcBuildingStorey asociado), no tiene sentido
-// que compita alfabéticamente con los pisos de verdad.
+
 function sortLevelLabel(a: string, b: string): number {
   if (a === 'Sin nivel') 
     return 1;
@@ -78,7 +73,7 @@ const CategoryFilterPanel: React.FC<CategoryFilterPanelProps> = ({
   const activeClear = isCategorias ? clearSelectedTypes : clearSelectedLevels;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-2xl w-56 max-h-[440px] flex flex-col overflow-hidden">
+    <div className="bg-white border border-gray-200 rounded-xl shadow-2xl w-[min(14rem,90cqw)] max-h-[440px] flex flex-col overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
         <div className="flex items-center gap-2">
           {isCategorias ? <Layers size={15} className="text-gray-500" /> : <Building2 size={15} className="text-gray-500" />}
@@ -89,10 +84,6 @@ const CategoryFilterPanel: React.FC<CategoryFilterPanelProps> = ({
         </button>
       </div>
 
-      {/* Categorías y niveles son excluyentes entre sí (ver useEntityVisibility:
-          toggleSelectType/toggleSelectLevel se limpian mutuamente), así que
-          cambiar de pestaña acá no combina ambos filtros — reemplaza uno por
-          el otro, igual que pasa si tocás uno estando el otro activo. */}
       <div className="flex items-center gap-1 px-3 pt-2.5 pb-2 border-b border-gray-100 flex-shrink-0">
         <button
           onClick={() => setMode('categorias')}
