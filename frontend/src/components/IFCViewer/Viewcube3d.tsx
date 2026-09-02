@@ -30,6 +30,31 @@ const FACES: FaceDef[] = [
   { preset: 'bottom', label: 'ABAJO', transform: `rotateX(-90deg) translateZ(${HALF}px)` },
 ];
 
+type FaceDir = 'front' | 'back' | 'right' | 'left' | 'top' | 'bottom';
+const FACE_ROTATE: Record<FaceDir, (half: number) => string> = {
+  front: (h) => `rotateY(0deg) translateZ(${h}px)`,
+  back: (h) => `rotateY(180deg) translateZ(${h}px)`,
+  right: (h) => `rotateY(90deg) translateZ(${h}px)`,
+  left: (h) => `rotateY(-90deg) translateZ(${h}px)`,
+  top: (h) => `rotateX(90deg) translateZ(${h}px)`,
+  bottom: (h) => `rotateX(-90deg) translateZ(${h}px)`,
+};
+
+const CORNER_SIZE = 10;
+const CORNER_HALF = CORNER_SIZE / 2;
+
+interface CornerDef { preset: ViewPreset; faces: FaceDir[]; sx: 1 | -1; sy: 1 | -1; sz: 1 | -1; }
+const CORNERS: CornerDef[] = [
+  { preset: 'top-front-right', faces: ['top', 'front', 'right'], sx: 1, sy: -1, sz: 1 },
+  { preset: 'top-front-left', faces: ['top', 'front', 'left'], sx: -1, sy: -1, sz: 1 },
+  { preset: 'top-back-right', faces: ['top', 'back', 'right'], sx: 1, sy: -1, sz: -1 },
+  { preset: 'top-back-left', faces: ['top', 'back', 'left'], sx: -1, sy: -1, sz: -1 },
+  { preset: 'bottom-front-right', faces: ['bottom', 'front', 'right'], sx: 1, sy: 1, sz: 1 },
+  { preset: 'bottom-front-left', faces: ['bottom', 'front', 'left'], sx: -1, sy: 1, sz: 1 },
+  { preset: 'bottom-back-right', faces: ['bottom', 'back', 'right'], sx: 1, sy: 1, sz: -1 },
+  { preset: 'bottom-back-left', faces: ['bottom', 'back', 'left'], sx: -1, sy: 1, sz: -1 },
+];
+
 const DEFAULT_ROTATION = { x: -22, y: -38 };
 
 const VIEW_TARGETS: Record<ViewPreset, { x: number; y: number }> = {
@@ -39,6 +64,14 @@ const VIEW_TARGETS: Record<ViewPreset, { x: number; y: number }> = {
   left: { x: -22, y: -90 },
   top: { x: -85, y: -38 },
   bottom: { x: 85, y: -38 },
+  'top-front-right': { x: -35, y: 45 },
+  'top-front-left': { x: -35, y: -45 },
+  'top-back-right': { x: -35, y: 135 },
+  'top-back-left': { x: -35, y: -135 },
+  'bottom-front-right': { x: 35, y: 45 },
+  'bottom-front-left': { x: 35, y: -45 },
+  'bottom-back-right': { x: 35, y: 135 },
+  'bottom-back-left': { x: 35, y: -135 },
 };
 
 // Margen desde el borde derecho del visor hasta el cubo. Subir este
@@ -54,6 +87,7 @@ const TOP_MARGIN = -4;
 const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef, rightOffset = 0, visible = true }) => {
   const [rotation, setRotation] = useState(DEFAULT_ROTATION);
   const [hoveredFace, setHoveredFace] = useState<ViewPreset | null>(null);
+  const [hoveredCorner, setHoveredCorner] = useState<ViewPreset | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [screenPos, setScreenPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -101,8 +135,8 @@ const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef, rightOffse
       lastPosRef.current = { x: e.clientX, y: e.clientY };
 
       setRotation(prev => ({
-        x: Math.max(-85, Math.min(85, prev.x - dy * 0.5)),
-        y: prev.y + dx * 0.5,
+        x: Math.max(-85, Math.min(85, prev.x - dy * 1.2)),
+        y: prev.y + dx * 1.2,
       }));
     };
 
@@ -200,6 +234,52 @@ const ViewCube3D: React.FC<ViewCube3DProps> = ({ onSelect, anchorRef, rightOffse
                 }}
               >
                 {face.label}
+              </div>
+            );
+          })}
+          {CORNERS.map((corner) => {
+            const isHovered = hoveredCorner === corner.preset;
+            const left = corner.sx > 0 ? SIZE - CORNER_SIZE : 0;
+            const top = corner.sy > 0 ? SIZE - CORNER_SIZE : 0;
+            const tz = corner.sz * (HALF - CORNER_HALF);
+            return (
+              <div
+                key={corner.preset}
+                style={{
+                  position: 'absolute',
+                  left,
+                  top,
+                  width: CORNER_SIZE,
+                  height: CORNER_SIZE,
+                  transformStyle: 'preserve-3d',
+                  transform: `translateZ(${tz}px)`,
+                }}
+              >
+                {corner.faces.map((dir) => (
+                  <div
+                    key={dir}
+                    onMouseEnter={() => setHoveredCorner(corner.preset)}
+                    onMouseLeave={() => setHoveredCorner(null)}
+                    onClick={() => handleFaceClick(corner.preset)}
+                    title="Vista de esquina"
+                    style={{
+                      position: 'absolute',
+                      left: 0,
+                      top: 0,
+                      width: CORNER_SIZE,
+                      height: CORNER_SIZE,
+                      transform: FACE_ROTATE[dir](CORNER_HALF),
+                      background: isHovered
+                        ? 'linear-gradient(135deg, #4f9cf9, #0056b3)'
+                        : 'linear-gradient(135deg, #ffffff, #d8dee6)',
+                      border: '1px solid rgba(0,0,0,0.12)',
+                      opacity: isHovered ? 1 : 0.75,
+                      cursor: 'pointer',
+                      transition: 'background 0.15s ease, opacity 0.15s ease',
+                      backfaceVisibility: 'hidden',
+                    }}
+                  />
+                ))}
               </div>
             );
           })}

@@ -27,18 +27,7 @@ interface PartidasTreeProps {
   onSelectAllInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
   onSelectGroupInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
   onClearSelectionInViewer?: () => void;
-  // Botón "Ver partida" del popup de selección en el visor 3D (ver
-  // Visor3DTab.tsx) — salta directo a la pantalla de detalle de esta
-  // partida, sin pasar por el árbol. Trae code/description/unit propios
-  // (de la búsqueda inversa por elemento) porque eso es lo único que
-  // necesita PartidaDetailScreen — no hace falta el nodo completo del
-  // árbol (parent_id/sort_order/element_count/total/children no se usan
-  // ahí, solo en las filas del árbol). expressId es el elemento que se
-  // clickeó en el visor — sirve para señalar en la tabla exactamente
-  // cuál fila/grupo es ese elemento (ver focusExpressId más abajo).
-  // onFocusPartidaHandled avisa que ya se consumió el pedido, para que
-  // un segundo click en el MISMO elemento (mismo partida_id) dispare el
-  // efecto de nuevo.
+ 
   focusPartida?: { partida_id: number; code: string; description: string; unit: string | null; expressId: number } | null;
   onFocusPartidaHandled?: () => void;
 }
@@ -54,30 +43,17 @@ const PartidaDetailScreen: React.FC<{
   node: PartidaNode;
   currentUserId: number;
   onBack: () => void;
-  // globalIds: paralelo a expressIds (mismo orden, mismo largo) — el
-  // visor lo necesita cuando el modelo cargó por Fragments, donde
-  // express_id no sirve para identificar el elemento (ver comentario
-  // largo en isolatePartidaInViewer más abajo).
+
   onSelectGroupInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
   onSelectAllInViewer?: (expressIds: number[], globalIds?: (string | null)[]) => void;
   onClearSelectionInViewer?: () => void;
-  // Elemento puntual que se clickeó en el visor 3D para llegar acá (ver
-  // "Ver partida" en IFCViewer.tsx/Visor3DTab.tsx) — una vez que carga
-  // el detalle, se busca en qué grupo cae y se lo señala en la tabla
-  // (mismo resaltado azul que clickear una fila a mano).
+ 
   focusExpressId?: number | null;
 }> = ({ ifcFileId, node, currentUserId, onBack, onSelectGroupInViewer, onSelectAllInViewer, onClearSelectionInViewer, focusExpressId }) => {
   const [detail, setDetail] = useState<PartidaDetail | null>(null);
-  // Si el botón "Aislar toda la partida" del encabezado está activo —
-  // se entra siempre con esto en true, porque isolatePartidaInViewer en
-  // el árbol ya aisló todo antes de llegar acá.
+
   const [partidaIsolated, setPartidaIsolated] = useState(true);
-  // Qué fila de MetradosTable está resaltada como "seleccionada" ahora
-  // mismo — INDEPENDIENTE de partidaIsolated: clickear un elemento/grupo
-  // puntual ya NO atenúa el resto de la partida (pedido explícito del
-  // usuario, "los otros elementos... no deberian estar transparente"),
-  // solo resalta ese grupo y muestra sus propiedades — el aislado de
-  // toda la partida (o no) sigue como estaba, sin tocarlo.
+  
   const [selectedGroupIndex, setSelectedGroupIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -164,22 +140,13 @@ const PartidaDetailScreen: React.FC<{
     [effectiveSets]
   );
 
-  // Al entrar a una partida nueva, el árbol (isolatePartidaInViewer) ya
-  // aisló todos sus elementos ANTES de mostrar esta pantalla — así que
-  // el estado inicial acá siempre refleja eso, sea cual sea el que haya
-  // quedado en la partida anterior. Tampoco hay ninguna fila
-  // seleccionada todavía.
+  
   useEffect(() => {
     setPartidaIsolated(true);
     setSelectedGroupIndex(null);
   }, [node.partida_id]);
 
-  // Botón "Aislar toda la partida" del encabezado — toggle: si ya está
-  // aislada la partida completa, tocarlo de nuevo la destilda (manda
-  // una lista vacía, que tanto isolateElementsByIds como
-  // isolateFragmentsElementsByIds interpretan como "mostrar todo").
-  // También limpia cualquier fila seleccionada (highlight/popup en el
-  // visor), para no dejar un resaltado de selección colgado.
+
   const handleToggleIsolatePartida = useCallback(() => {
     if (!detail || !onSelectAllInViewer) return;
     if (partidaIsolated) {
@@ -195,17 +162,7 @@ const PartidaDetailScreen: React.FC<{
     setSelectedGroupIndex(null);
   }, [detail, partidaIsolated, onSelectAllInViewer, onClearSelectionInViewer]);
 
-  // Fila de MetradosTable — click: resalta ese grupo (highlight +
-  // popup de propiedades del primer elemento). Antes de eso, se
-  // reasegura que TODA la partida esté aislada/atenuada (mismo
-  // isolateAllInViewer que dispara isolatePartidaInViewer al entrar) —
-  // pedido explícito del usuario: si mientras tanto se tocó "Mostrar
-  // todo el modelo", la geometría de alrededor deja de estar atenuada y
-  // el elemento clickeado puede quedar tapado por ella; reaislar
-  // primero garantiza que siempre se vea igual que la primera vez,
-  // pase lo que pase antes. Click de nuevo sobre la fila ya
-  // seleccionada: solo limpia esa selección puntual (highlight/popup),
-  // sin tocar el aislamiento de la partida.
+
   const handleToggleSelectGroup = useCallback(
     (group: PartidaGroup, index: number) => {
       if (selectedGroupIndex === index) {
@@ -227,15 +184,6 @@ const PartidaDetailScreen: React.FC<{
     [detail, selectedGroupIndex, onSelectGroupInViewer, onSelectAllInViewer, onClearSelectionInViewer]
   );
 
-  // "Ver partida" desde el visor 3D (focusExpressId) — una vez que
-  // carga el detalle, buscar en qué grupo cae ese elemento puntual y
-  // señalarlo en la TABLA (mismo resaltado azul que clickear una fila a
-  // mano) y hacer scroll hasta esa fila. A propósito NO se llama acá a
-  // onSelectGroupInViewer — el elemento ya está resaltado en el visor
-  // desde el click original que trajo hasta acá, y ese grupo podría
-  // tener MÁS de un elemento (el primero no necesariamente es el que se
-  // clickeó) — recargar la selección del visor podría terminar
-  // mostrando el popup de propiedades de OTRO elemento del mismo grupo.
   useEffect(() => {
     if (!detail || focusExpressId == null) return;
     const index = detail.groups.findIndex((g) =>
@@ -390,7 +338,7 @@ const PartidaDetailScreen: React.FC<{
       )}
 
       {isOwn && !loading && (
-        <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 bg-white border border-gray-200 rounded-full shadow-xl px-2 py-2">
+        <div className="absolute bottom-3 right-3 z-20 flex items-center gap-2 bg-white border-r border-b border-gray-200 rounded-full shadow-xl px-2 py-2">
           <button
             onClick={handleQuickSave}
             disabled={quickSaving}
@@ -437,11 +385,6 @@ const PartidaDetailScreen: React.FC<{
   );
 };
 
-// Fila del árbol: carpetas se expanden inline; hojas navegan al detalle.
-// El "abierto/cerrado" de cada carpeta ya NO es estado local de la fila
-// (antes se perdía al volver del detalle, porque React recreaba las
-// filas desde cero) — ahora vive en el componente padre (expandedIds)
-// y sobrevive a entrar/salir de una partida.
 const PartidaTableRow: React.FC<{
   node: PartidaNode;
   depth: number;
@@ -472,7 +415,7 @@ const PartidaTableRow: React.FC<{
           ? 'bg-blue-50 hover:bg-blue-50 ring-1 ring-inset ring-[#0056b3]/30'
           : isLeaf ? 'bg-white hover:bg-gray-50' : 'bg-gray-100/70 hover:bg-gray-200/60'
       }>
-        <td className="px-2.5 py-2 align-top border border-gray-200" style={{ paddingLeft: 12 + depth * 18 }}>
+        <td className="px-2.5 py-2 align-top border-r border-b border-gray-200" style={{ paddingLeft: 12 + depth * 18 }}>
           <button
             onClick={handleClick}
             title={isLeaf ? 'Ver tabla y aislar en el visor 3D' : undefined}
@@ -495,16 +438,16 @@ const PartidaTableRow: React.FC<{
             <span className="text-[11px] font-mono text-gray-500">{node.code}</span>
           </button>
         </td>
-        <td className={`px-2.5 py-2 align-top border border-gray-200 text-xs ${isLeaf ? 'text-black' : 'text-black font-bold'}`}>
+        <td className={`px-2.5 py-2 align-top border-r border-b border-gray-200 text-xs ${isLeaf ? 'text-black' : 'text-black font-bold'}`}>
           {node.description}
         </td>
-        <td className="px-2.5 py-2 align-top border border-gray-200 text-xs text-gray-600">
+        <td className="px-2.5 py-2 align-top border-r border-b border-gray-200 text-xs text-gray-600">
           {node.unit ?? '—'}
         </td>
-        <td className="px-2.5 py-2 align-top border border-gray-200 text-xs text-gray-600 text-right">
+        <td className="px-2.5 py-2 align-top border-r border-b border-gray-200 text-xs text-gray-600 text-right">
           {formatNumber(node.element_count)}
         </td>
-        <td className="px-2.5 py-2 align-top border border-gray-200 text-xs font-semibold text-gray-800 text-right">
+        <td className="px-2.5 py-2 align-top border-r border-b border-gray-200 text-xs font-semibold text-gray-800 text-right">
           {formatNumber(node.total)}
         </td>
       </tr>
@@ -545,9 +488,7 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   const [selectedNode, setSelectedNode] = useState<PartidaNode | null>(null);
   const [isolatingPartidaId, setIsolatingPartidaId] = useState<number | null>(null);
 
-  // Qué carpetas están abiertas — vive ACÁ (no en cada fila) para que no
-  // se pierda al volver del detalle de una partida. Se inicializa con las
-  // carpetas de nivel 0 abiertas, igual que el comportamiento de antes.
+
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const toggleExpand = useCallback((partidaId: number) => {
     setExpandedIds((prev) => {
@@ -558,24 +499,12 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
     });
   }, []);
 
-  // Última partida (hoja) que se seleccionó — se usa para resaltarla al
-  // volver del detalle. A diferencia de selectedNode, esta NO se limpia
-  // en handleBack, para que el resaltado sobreviva.
   const [lastSelectedPartidaId, setLastSelectedPartidaId] = useState<number | null>(null);
 
-  // Qué elemento puntual hay que señalar en la tabla al entrar por
-  // "Ver partida" (ver focusPartida más abajo) — se lo pasa a
-  // PartidaDetailScreen, que busca en qué grupo cae y lo resalta ahí
-  // (mismo mecanismo que clickear una fila a mano).
+
   const [focusExpressId, setFocusExpressId] = useState<number | null>(null);
 
-  // Botón "Ver partida" del popup de selección en el visor 3D (ver
-  // Visor3DTab.tsx) — salta directo a la pantalla de detalle de
-  // focusPartida, sin pasar por el árbol. Arma un PartidaNode "de
-  // mentira" con solo los 4 campos que trae la búsqueda inversa por
-  // elemento; el resto son placeholders porque PartidaDetailScreen no
-  // los toca (parent_id/sort_order/element_count/total/children son
-  // solo para las filas del árbol).
+ 
   useEffect(() => {
     if (!focusPartida) return;
     setSelectedNode({
@@ -700,14 +629,14 @@ const PartidasTree: React.FC<PartidasTreeProps> = ({
   return (
     <div className="h-full flex flex-col overflow-hidden">
       <div className="flex-1 min-h-0 overflow-auto rounded border border-gray-300">
-        <table className="w-full text-[11px] border-collapse min-w-[600px]">
+        <table className="w-full text-[11px] border-separate border-spacing-0 min-w-[600px]">
           <thead>
             <tr className="bg-gray-100">
-              <th className="px-2.5 py-2 text-left font-semibold text-black border border-gray-300">Código</th>
-              <th className="px-2.5 py-2 text-left font-semibold text-black border border-gray-300">Descripción</th>
-              <th className="px-2.5 py-2 text-left font-semibold text-black border border-gray-300">Unidad</th>
-              <th className="px-2.5 py-2 text-right font-semibold text-black border border-gray-300">Cant.</th>
-              <th className="px-2.5 py-2 text-right font-semibold text-black border border-gray-300">Total</th>
+              <th className="sticky top-0 z-20 px-2.5 py-2 text-left font-semibold text-black bg-gray-100 border-r border-b border-gray-300">Código</th>
+              <th className="sticky top-0 z-20 px-2.5 py-2 text-left font-semibold text-black bg-gray-100 border-r border-b border-gray-300">Descripción</th>
+              <th className="sticky top-0 z-20 px-2.5 py-2 text-left font-semibold text-black bg-gray-100 border-r border-b border-gray-300">Unidad</th>
+              <th className="sticky top-0 z-20 px-2.5 py-2 text-right font-semibold text-black bg-gray-100 border-r border-b border-gray-300">Cant.</th>
+              <th className="sticky top-0 z-20 px-2.5 py-2 text-right font-semibold text-black bg-gray-100 border-r border-b border-gray-300">Total</th>
             </tr>
           </thead>
           <tbody>
