@@ -11,7 +11,7 @@ import { useParams } from 'react-router-dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { FragmentsModels } from '@thatopen/fragments';
-import { getIfcProcessStatus, getFileContentArrayBuffer } from '../services/ifcfiles.service';
+import { getIfcProcessStatus, getFileContentArrayBuffer } from '../../services/ifcfiles.service';
 
 type LoadState =
   | { kind: 'loading'; label: string }

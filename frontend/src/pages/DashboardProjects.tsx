@@ -295,7 +295,7 @@ const DashboardProjectsInner: React.FC = () => {
                   <ArrowLeft size={20} className="sm:hidden" />
                   <ArrowLeft size={22} className="hidden sm:block" />
                 </button>
-                <img src={logo} alt="Logo ALL-BIM" className="h-8 sm:h-11 w-auto flex-shrink-0" />
+                <img src={logo} alt="Logo ALL-BIM" className="h-6 sm:h-8 w-auto flex-shrink-0" />
                 <span className="text-2xl font-black text-[#0056b3]"></span>
                 <span className="hidden sm:inline text-sm text-gray-400">|</span>
                 <span className="hidden sm:inline text-sm font-medium text-gray-600 truncate max-w-[10rem] md:max-w-xs">{project.name}</span>
@@ -426,6 +426,10 @@ const DashboardProjectsInner: React.FC = () => {
         >
           <Visor3DTab projectId={project?.project_id || 0} isActive={activeTab === 'visor3d'} />
         </div>
+      )}
+
+      {activeTab !== 'visor3d' && (
+        <div className="h-16 bg-gradient-to-b from-blue-50 to-gray-50" />
       )}
 
       {activeTab !== 'visor3d' && (

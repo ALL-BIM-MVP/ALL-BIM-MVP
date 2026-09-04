@@ -54,6 +54,7 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
   const fullName = user ? `${user.name}${user.last_name ? ` ${user.last_name}` : ''}` : 'Usuario';
 
   return (
+    <>
     <header className="sticky -top-8 -mt-8 -mx-8 z-40 w-[calc(100%+4rem)] bg-white border-b border-gray-200 px-8 py-2.5 flex justify-between items-center">
       <div>
         <h1 className="font-sans text-lg font-bold tracking-tight leading-tight text-slate-600">{title}</h1>
@@ -289,6 +290,8 @@ const PageHeader: React.FC<PageHeaderProps> = ({ title, subtitle }) => {
 
       <MiPerfilModal isOpen={isProfileModalOpen} onClose={() => setIsProfileModalOpen(false)} />
     </header>
+    <div className="-mx-8 h-16 bg-gradient-to-b from-blue-50 to-gray-50" />
+    </>
   );
 };
 

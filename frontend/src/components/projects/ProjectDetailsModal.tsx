@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Project } from '../types/project.types';
-import { resolveMediaUrl } from '../utils/media';
-import { projectService } from '../services/project.service';
+import { Project } from '../../types/project.types';
+import { resolveMediaUrl } from '../../utils/media';
+import { projectService } from '../../services/project.service';
 
 interface ProjectDetailsModalProps {
   isOpen: boolean;

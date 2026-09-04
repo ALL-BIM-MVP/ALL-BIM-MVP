@@ -10,8 +10,8 @@ import IFCViewer, { IFCViewerHandle } from '../IFCViewer/IFCViewer';
 import { parseIfcHeader, IfcFileInfo } from '../IFCViewer/utils/parseIfcHeader';
 import { convertIfcToFragmentsClientSide } from '../IFCViewer/workers/fragmentsImportWorkerClient';
 import { UploadSimple, X as XIcon } from '@phosphor-icons/react';
-import PartidasTree from './PartidasTree';
-import ClassificationConfigModal from './ClassificationConfigModal';
+import PartidasTree from './Metrados/PartidasTree';
+import ClassificationConfigModal from './Metrados/ClassificationConfigModal';
 import {
   IfcFile,
   IfcStatus,

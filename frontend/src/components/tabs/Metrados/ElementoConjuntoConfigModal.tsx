@@ -14,7 +14,7 @@ import {
   setElementoConjuntoConfig,
   AvailableElementoConjuntoFields,
   ElementoConjuntoFieldInput,
-} from '../../services/ifcfiles.service';
+} from '../../../services/ifcfiles.service';
 
 interface ElementoConjuntoConfigModalProps {
   projectId: number;
