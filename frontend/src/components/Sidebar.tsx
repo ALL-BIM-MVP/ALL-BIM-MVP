@@ -64,7 +64,7 @@ const Sidebar: React.FC = () => {
         >
           {/* Logo */}
           <div className="-mt-5 -mx-1 flex items-center justify-between shrink-0">
-            <div className="h-14 w-[190px] flex items-center">
+            <div className="h-11 w-[160px] flex items-center justify-center">
               <img src={logo} alt="Logo ALL-BIM" className="max-h-full max-w-full object-contain" />
             </div>
             <button

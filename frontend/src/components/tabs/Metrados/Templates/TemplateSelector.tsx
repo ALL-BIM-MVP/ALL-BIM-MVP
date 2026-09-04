@@ -6,7 +6,7 @@
 
 import React from 'react';
 import { ChevronDown } from 'lucide-react';
-import type { TemplateSummary } from '../../../services/templates.service';
+import type { TemplateSummary } from '../../../../services/templates.service';
 
 interface TemplateSelectorProps {
   templates: TemplateSummary[];

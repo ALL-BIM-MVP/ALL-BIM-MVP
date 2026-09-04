@@ -7,16 +7,16 @@ import {
   PartidaNode,
   getPartidasTree,
   getPartidaElements,
-} from '../../services/ifcfiles.service';
-import { useTemplates } from '../../hooks/useTemplates';
+} from '../../../services/ifcfiles.service';
+import { useTemplates } from '../../../hooks/useTemplates';
 import {
   templateColumnsToPartidaRequest,
   toTemplateSetsInput,
   replaceTemplateColumns,
   deleteTemplate,
-} from '../../services/templates.service';
-import type { PartidaDetail, PartidaGroup } from '../../services/ifcfiles.service';
-import type { TemplateFull, TemplateSet } from '../../services/templates.service';
+} from '../../../services/templates.service';
+import type { PartidaDetail, PartidaGroup } from '../../../services/ifcfiles.service';
+import type { TemplateFull, TemplateSet } from '../../../services/templates.service';
 import TemplateSelector from './Templates/TemplateSelector';
 import TemplateEditor from './Templates/TemplateEditor';
 import MetradosTable from './Templates/MetradosTable';

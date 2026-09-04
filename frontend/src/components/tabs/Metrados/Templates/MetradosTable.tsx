@@ -2,13 +2,13 @@
 
 
 import React, { useRef, useState } from 'react';
-import type { PartidaDetail, PartidaGroup } from '../../../services/ifcfiles.service';
+import type { PartidaDetail, PartidaGroup } from '../../../../services/ifcfiles.service';
 import {
   propertyKey,
   type TemplateColumn,
   type TemplateFull,
   type TemplateSet,
-} from '../../../services/templates.service';
+} from '../../../../services/templates.service';
 
 interface MetradosTableProps {
   template: TemplateFull;

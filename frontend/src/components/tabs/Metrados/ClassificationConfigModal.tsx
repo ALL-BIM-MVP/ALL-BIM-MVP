@@ -7,7 +7,7 @@ import {
   setClassificationConfig,
   ClassificationConfig,
   ClassificationConfigInput,
-} from '../../services/ifcfiles.service';
+} from '../../../services/ifcfiles.service';
 
 interface ClassificationConfigModalProps {
   projectId: number;

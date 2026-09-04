@@ -1,7 +1,7 @@
 // frontend/src/pages/Login.tsx
 import React from 'react';
 import { Link } from 'react-router-dom';
-import LoginForm from '../components/LoginForm';
+import LoginForm from '../components/auth/LoginForm';
 import fondo from '../assets/fondo.jpg';
 import logo from '../assets/logo3.png';
 

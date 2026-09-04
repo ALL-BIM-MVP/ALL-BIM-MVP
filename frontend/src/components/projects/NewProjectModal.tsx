@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { NewProjectData } from '../types/project.types';
+import { NewProjectData } from '../../types/project.types';
 
 interface NewProjectModalProps {
   isOpen: boolean;

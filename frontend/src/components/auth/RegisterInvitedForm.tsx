@@ -1,7 +1,7 @@
 // src/components/RegisterInvitedForm.tsx
 import React, { useState } from 'react';
-import { useAuth } from '../hooks/useAuth';
-import { useAuth as useAuthContext } from '../context/AuthContext';
+import { useAuth } from '../../hooks/useAuth';
+import { useAuth as useAuthContext } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 

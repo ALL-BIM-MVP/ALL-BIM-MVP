@@ -36,7 +36,7 @@ import {
   type TemplateColumn,
   type TemplateFull,
   type TemplateSet,
-} from '../../../services/templates.service';
+} from '../../../../services/templates.service';
 
 interface EditableColumn extends TemplateColumn {
   _localId: string;
