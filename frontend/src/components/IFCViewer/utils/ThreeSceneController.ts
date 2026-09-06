@@ -18,6 +18,15 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 const STROKE_RADIUS = 0.015;
 const STROKE_RADIAL_SEGMENTS = 12;
+const ZOOM_SPEED_FAR = 0.001;
+const ZOOM_SPEED_NEAR = 0.000015;
+const ZOOM_NEAR_DISTANCE = 7;
+const MIN_ZOOM_STEP = 0.3;
+const MIN_ZOOM_STEP_NEAR = 0.1;
+const PAN_SPEED_FAR = 0.0015;
+const PAN_SPEED_NEAR = 0.000005;
+const PAN_NEAR_DISTANCE = 7;
+const MIN_PAN_SPEED = 0.02;
 
 class OrbitCameraController {
   camera: THREE.PerspectiveCamera;
@@ -55,14 +64,18 @@ class OrbitCameraController {
   // cámara — sin ella, velocidad normal.
   orbit(deltaX: number, deltaY: number, proximity = Infinity) {
     if (!Number.isFinite(proximity)) proximity = Infinity;
-    const s = 0.006 * Math.max(0.04, Math.min(1, proximity / 7));
+    const s = 0.006 * Math.max(0.02, Math.min(1, proximity / 7));
     this.spherical.theta -= deltaX * s;
     this.spherical.phi = Math.max(0.05, Math.min(Math.PI - 0.05, this.spherical.phi - deltaY * s));
     this.syncFromSpherical();
   }
 
-  pan(deltaX: number, deltaY: number) {
-    const panSpeed = this.spherical.radius * 0.0015;
+  pan(deltaX: number, deltaY: number, proximity = Infinity) {
+    const distanceFactor = Number.isFinite(proximity)
+      ? Math.min(1, proximity / PAN_NEAR_DISTANCE)
+      : 1;
+    const panFactor = THREE.MathUtils.lerp(PAN_SPEED_NEAR, PAN_SPEED_FAR, distanceFactor);
+    const panSpeed = Math.max(MIN_PAN_SPEED, this.spherical.radius * panFactor);
     const right = new THREE.Vector3();
     const up = new THREE.Vector3();
     this.camera.matrix.extractBasis(right, up, new THREE.Vector3());
@@ -79,10 +92,16 @@ class OrbitCameraController {
   // siempre centrado en el mismo lugar.
   zoom(deltaY: number, mouseX?: number, mouseY?: number, viewWidth?: number, viewHeight?: number, proximity = Infinity) {
     if (!Number.isFinite(proximity)) proximity = Infinity;
-    const k = 0.001 * Math.max(0.15, Math.min(1, proximity / 7));
-    const factor = Math.exp(deltaY * k);
+    const proximityFactor = Math.min(1, proximity / ZOOM_NEAR_DISTANCE);
+    const zoomSpeed = THREE.MathUtils.lerp(ZOOM_SPEED_NEAR, ZOOM_SPEED_FAR, proximityFactor);
     const oldRadius = this.spherical.radius;
-    const newRadius = Math.max(0.05, Math.min(5000, oldRadius * factor));
+    const requestedStep = oldRadius * (Math.exp(Math.abs(deltaY) * zoomSpeed) - 1);
+    const minimumStep = Number.isFinite(proximity) ? MIN_ZOOM_STEP_NEAR : MIN_ZOOM_STEP;
+    const step = Math.max(minimumStep, requestedStep);
+    const direction = Math.sign(deltaY);
+    const rawRadius = oldRadius + direction * step;
+    const newRadius = Math.max(0.05, Math.min(5000, rawRadius));
+    const viewDirection = new THREE.Vector3().subVectors(this.target, this.camera.position).normalize();
 
     if (mouseX !== undefined && mouseY !== undefined && viewWidth && viewHeight) {
       const ndcX = (mouseX / viewWidth) * 2 - 1;
@@ -93,8 +112,7 @@ class OrbitCameraController {
       // Plano que pasa por target, perpendicular a la vista — no hace
       // falta pegarle a geometría real, solo saber qué punto hay "bajo
       // el cursor" a esa profundidad.
-      const viewDir = new THREE.Vector3().subVectors(this.target, this.camera.position).normalize();
-      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDir, this.target);
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDirection, this.target);
       const hit = new THREE.Vector3();
       if (raycaster.ray.intersectPlane(plane, hit)) {
         // shift = 1 - newRadius/oldRadius: corre el target una fracción
@@ -104,6 +122,14 @@ class OrbitCameraController {
         const shift = 1 - newRadius / oldRadius;
         this.target.lerp(hit, shift);
       }
+    }
+
+    // Cuando el radio mínimo ya fue alcanzado, continuar el zoom hacia
+    // dentro desplaza cámara y target en la dirección de la vista para
+    // atravesar el elemento en lugar de quedarse bloqueado en el límite.
+    const passThroughDistance = direction < 0 ? Math.max(0, 0.05 - rawRadius) : 0;
+    if (passThroughDistance > 0) {
+      this.target.addScaledVector(viewDirection, passThroughDistance);
     }
 
     this.spherical.radius = newRadius;

@@ -76,6 +76,22 @@ export function useCameraControls(params: UseCameraControlsParams) {
 
     let proximityBusy = false;
     const proximityRef = { current: Infinity };
+    const proximitySlowModeRef = { current: false };
+    const PROXIMITY_SLOW_START = 7;
+    const PROXIMITY_SLOW_END = 8;
+    const setProximity = (distance: number) => {
+      if (!Number.isFinite(distance)) {
+        proximitySlowModeRef.current = false;
+        proximityRef.current = Infinity;
+        return;
+      }
+      if (proximitySlowModeRef.current) {
+        if (distance > PROXIMITY_SLOW_END) proximitySlowModeRef.current = false;
+      } else if (distance < PROXIMITY_SLOW_START) {
+        proximitySlowModeRef.current = true;
+      }
+      proximityRef.current = proximitySlowModeRef.current ? distance : Infinity;
+    };
     const updateProximity = () => {
       const model = storeRef?.current?.fragmentsModel;
       if (model) {
@@ -86,25 +102,30 @@ export function useCameraControls(params: UseCameraControlsParams) {
           const mouse = new THREE.Vector2(rect.left + rect.width / 2, rect.top + rect.height / 2);
           Promise.resolve(model.raycastAll({ camera: camera.camera, mouse, dom: canvas }))
             .then((results: any[]) => {
-              if (!results || results.length === 0) { proximityRef.current = Infinity; return; }
+              if (!results || results.length === 0) {
+                setProximity(Infinity);
+                return;
+              }
               let nearest = Infinity;
               for (const r of results) {
                 const d = r.rayDistance ?? r.distance;
                 if (typeof d === 'number' && Number.isFinite(d) && d < nearest) nearest = d;
               }
-              proximityRef.current = nearest;
+              setProximity(nearest);
             })
-            .catch(() => { proximityRef.current = Infinity; })
+            .catch(() => {
+              setProximity(Infinity);
+            })
             .finally(() => { proximityBusy = false; });
         } catch {
-          proximityRef.current = Infinity;
+          setProximity(Infinity);
           proximityBusy = false;
         }
       } else if (typeof renderer.raycastForward === 'function') {
         try {
-          proximityRef.current = renderer.raycastForward();
+          setProximity(renderer.raycastForward());
         } catch {
-          proximityRef.current = Infinity;
+          setProximity(Infinity);
         }
       }
     };
@@ -151,7 +172,7 @@ export function useCameraControls(params: UseCameraControlsParams) {
       const deltaY = e.clientY - lastY;
       lastX = e.clientX; lastY = e.clientY;
 
-      if (isPanning) camera.pan(deltaX, deltaY);
+      if (isPanning) camera.pan(deltaX, deltaY, proximityRef.current);
       else camera.orbit(deltaX, deltaY, proximityRef.current);
       updateProximity();
       // Sin renderer.render() acá a propósito — el loop continuo en
