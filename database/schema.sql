@@ -695,3 +695,503 @@ CREATE TABLE metrado_template_columns (
         )
     )
 );
+
+
+
+-- ============================================================
+-- ALMACÉN BIM — inventario/ubicación 3D/kardex (módulo nuevo, ver
+-- docs/roadmap/almacen-bim.md y, sobre todo,
+-- docs/roadmap/almacen-bim-base-datos.md — ESE documento es el diseño
+-- completo con el razonamiento de cada decisión; acá solo se traduce a
+-- SQL real, siguiendo la convención del resto de este archivo (PK
+-- `_id` + IDENTITY, snake_case, TIMESTAMPTZ, NUMERIC(18,6) para
+-- medidas — mismo tipo que ya usa metrado_elements más arriba).
+-- Prototipo explorado antes en `prueba-BIM/ALMACEN-BIM/`.
+--
+-- Corregido: la primera versión de este bloque tenía TODO en español
+-- (tablas y columnas) — inconsistente con el resto de este archivo,
+-- donde tabla y columna son SIEMPRE inglés (`created_at`, `name`,
+-- `code`...), salvo jerga de dominio genuinamente intraducible
+-- (`metrado`, `partida`, `elemento_conjunto`, acá `ruc`/`dni`) o
+-- valores de dato tipo enum que el usuario ve/tipea en español (mismo
+-- criterio que `project_invitations.status IN ('pendiente',...)`).
+-- Reescrito entero en inglés — el nombre del MÓDULO en sí
+-- (`modules.code = 'almacen'`, `modules.name = 'ALMACÉN BIM'`, ver
+-- system-data.sql) sigue en español a propósito: es el nombre real del
+-- módulo/producto, mismo criterio que `METRADOS_MODULE_CODE` en el
+-- backend.
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 1. Ubicación física: warehouse (la "casa") > rack > bin
+-- ------------------------------------------------------------
+
+-- Plantilla VISUAL (colores + cuántos niveles admite un rack adentro)
+-- — nunca tamaño, eso lo define cada `warehouses` con sus propias
+-- esquinas. Catálogo casi-inmutable: solo se audita cuándo se agregó,
+-- no quién/cuándo se editó (ver almacen-bim-base-datos.md, sección 5).
+CREATE TABLE warehouse_styles (
+    warehouse_style_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    roof_color VARCHAR(7) NOT NULL,
+    wall_color VARCHAR(7) NOT NULL,
+    wall_frame_color VARCHAR(7) NOT NULL,
+    max_level INT NOT NULL CHECK (max_level > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Soft-delete (ver sección 5.1.2 del diseño): un warehouse_style en
+    -- uso no se puede borrar de motor (ver ON DELETE RESTRICT en
+    -- warehouses.warehouse_style_id más abajo) ni tampoco dar de baja
+    -- sin antes cambiarle el estilo a los warehouses que lo usan — eso
+    -- lo valida la aplicación, no una FK (cruzaría a otra fila de otra
+    -- tabla con una condición, no una simple existencia).
+    deleted_at TIMESTAMPTZ
+);
+
+-- "La casa": el rectángulo real del plano. project_id usa CASCADE
+-- (mismo criterio que TODO lo demás que cuelga de un proyecto en este
+-- archivo — files.project_id, ifc_documents.project_id, etc.): si se
+-- borra el proyecto entero, se borra con él.
+CREATE TABLE warehouses (
+    warehouse_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- RESTRICT: no se puede borrar de motor un estilo que algún
+    -- warehouse sigue usando (ver 5.1.1 del diseño).
+    warehouse_style_id INT NOT NULL REFERENCES warehouse_styles(warehouse_style_id) ON DELETE RESTRICT,
+    name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    corner1_x NUMERIC(18,6) NOT NULL,
+    corner1_z NUMERIC(18,6) NOT NULL,
+    corner2_x NUMERIC(18,6) NOT NULL,
+    corner2_z NUMERIC(18,6) NOT NULL,
+    -- Invariante de la propia fila (no coherencia ENTRE niveles de la
+    -- jerarquía, eso el sistema no lo fuerza — ver nota de
+    -- almacen-bim-base-datos.md 1.2): un footprint de área cero no es
+    -- un warehouse válido bajo ningún criterio.
+    CHECK (corner1_x <> corner2_x AND corner1_z <> corner2_z),
+    -- Valores en español a propósito (dato real, no identificador de
+    -- esquema — mismo criterio que project_invitations.status): a qué
+    -- pared va la puerta del modelo 3D.
+    direction VARCHAR(10) NOT NULL CHECK (direction IN ('norte','sur','este','oeste')),
+    -- Puramente geométrica (|corner2_x-corner1_x| × |corner2_z-corner1_z|),
+    -- la recalcula la aplicación cada vez que cambian las esquinas —
+    -- columna real para no recalcularla en cada listado/detalle.
+    area_m2 NUMERIC(18,6) NOT NULL,
+    -- Espacio interior utilizable — INDEPENDIENTE del footprint de
+    -- arriba, a propósito (confirmado explícito: "una casa chica por
+    -- fuera puede tener mucho espacio adentro", no se deriva de
+    -- corner1/corner2). NO tocar esto para "derivarlo" del footprint
+    -- sin que se pida de nuevo.
+    grid_width INT NOT NULL CHECK (grid_width > 0),
+    grid_depth INT NOT NULL CHECK (grid_depth > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+-- Único dentro del proyecto, pero SOLO entre los activos — un
+-- warehouse dado de baja no debe bloquear reusar su nombre después
+-- (mismo espíritu que idx_un_project_cover/idx_un_template_default:
+-- unicidad condicional con un índice parcial, no un UNIQUE plano).
+CREATE UNIQUE INDEX idx_un_warehouses_name_active ON warehouses (project_id, name) WHERE deleted_at IS NULL;
+-- Listado de warehouses de un proyecto — patrón idéntico a
+-- idx_projects_owner_id/idx_files_project_id de más arriba.
+CREATE INDEX idx_warehouses_project_id ON warehouses (project_id);
+
+-- Mismo criterio que `warehouses`: sin índices de grilla (bay/level)
+-- ni ancho/profundidad como columnas — se derivan de las 2 esquinas
+-- (LOCALES al warehouse, no coordenadas absolutas). `levels` sí es
+-- columna propia porque, a diferencia del footprint, no nace de 2
+-- puntos: un rack crece niveles hacia arriba desde el piso.
+CREATE TABLE racks (
+    rack_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- RESTRICT: no se puede borrar de motor un warehouse que todavía
+    -- tiene CUALQUIER rack (5.1.1) — hay que borrar/mover todos sus
+    -- racks primero, de abajo hacia arriba.
+    warehouse_id INT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
+    name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    corner1_x NUMERIC(18,6) NOT NULL,
+    corner1_z NUMERIC(18,6) NOT NULL,
+    corner2_x NUMERIC(18,6) NOT NULL,
+    corner2_z NUMERIC(18,6) NOT NULL,
+    CHECK (corner1_x <> corner2_x AND corner1_z <> corner2_z),
+    levels INT NOT NULL CHECK (levels > 0),
+    -- Cuál de las 2 caras (mismo dominio 0/1 que bins.face más abajo)
+    -- es la accesible/abierta — sirve para el día que se diseñe un
+    -- rack "cerrado" tipo cajón con profundidad=1 (pared de fondo, no
+    -- abierto por las 2 caras como el rack de hoy). Con profundidad=2
+    -- el dato no tiene efecto práctico pero se llena igual, por
+    -- consistencia de esquema. El nombre visible de cada valor (ej.
+    -- "norte"/"sur" respecto al rack) es decisión del frontend, no de
+    -- esta columna.
+    direction INT NOT NULL CHECK (direction IN (0, 1)),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX idx_un_racks_name_active ON racks (warehouse_id, name) WHERE deleted_at IS NULL;
+-- Listado de racks de un warehouse — se consulta cada vez que se abre
+-- un warehouse en el visor.
+CREATE INDEX idx_racks_warehouse_id ON racks (warehouse_id);
+
+-- Ancho (bahías) y profundidad de `racks` NO son columnas — se derivan
+-- de sus esquinas (`|corner2_x-corner1_x| / CUBE_SIZE`, etc, ver
+-- diseño 1.3). Que el resultado dé un entero exacto y que profundidad
+-- sea 1 o 2 (nunca más — con 3+ la fila del medio queda sin cara
+-- accesible) es una validación de la aplicación al crear el rack, no
+-- un CHECK de este archivo (CUBE_SIZE es una constante de la
+-- aplicación, no un dato guardado acá).
+CREATE TABLE bins (
+    bin_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- RESTRICT: no se puede borrar de motor un rack que todavía tiene
+    -- CUALQUIER bin (5.1.1) — en la práctica un rack siempre tiene
+    -- bins (se generan solas al crearlo), así que esto bloquea el
+    -- hard-delete salvo que se borren antes una por una (lo cual, a su
+    -- vez, cada una se bloquea sola si tiene contenido o participa de
+    -- un merge — ver más abajo).
+    rack_id BIGINT NOT NULL REFERENCES racks(rack_id) ON DELETE RESTRICT,
+    bay INT NOT NULL CHECK (bay >= 0),
+    level INT NOT NULL CHECK (level >= 0),
+    -- 0 = una cara, 1 = la otra — solo tiene sentido real si la
+    -- profundidad derivada del rack = 2, pero se guarda siempre en 0
+    -- para consistencia cuando profundidad = 1.
+    face INT NOT NULL CHECK (face IN (0, 1)),
+    -- Coordenada estructural generada sola (ej. "A1 · nivel 1") — el
+    -- formato exacto lo arma el frontend al crear la fila.
+    location_label VARCHAR(100) NOT NULL,
+    -- Por defecto = location_label, pero editable y PUEDE repetirse (a
+    -- diferencia de location_label, que es la coordenada real) — por
+    -- eso no lleva ningún UNIQUE.
+    name VARCHAR(100) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Cuándo se editó `name` por última vez — no hay updated_by acá a
+    -- propósito, no estaba en el diseño (que sí lo pide para
+    -- warehouses/racks/products/categories) y renombrar un bin es una
+    -- edición mucho más liviana que las de esas otras tablas.
+    updated_at TIMESTAMPTZ,
+    deleted_at TIMESTAMPTZ,
+    -- Identidad estructural: dos bins del mismo rack no pueden ocupar
+    -- la misma posición. A diferencia del nombre "humano" de
+    -- warehouse/rack, esto NO se relaja para bajas lógicas (un bin
+    -- dado de baja sigue ocupando su posición física real, reactivarlo
+    -- es lo esperado, no crear uno segundo en el mismo lugar).
+    UNIQUE (rack_id, bay, level, face)
+);
+-- El rango válido de bay/level/face según las dimensiones del rack que
+-- lo contiene (0 <= bay < ancho derivado, 0 <= level < levels, 0 <=
+-- face < profundidad derivada) se valida en la aplicación antes del
+-- INSERT — cruza a otra tabla (racks), no es un CHECK de SQL puro (ver
+-- diseño 1.4).
+CREATE INDEX idx_bins_rack_id ON bins (rack_id);
+
+
+-- ------------------------------------------------------------
+-- 2. Catálogo de productos
+-- ------------------------------------------------------------
+
+-- Para esta versión son EXACTAMENTE 3 filas por proyecto, cerradas —
+-- Partida (fija) y Materiales/Equipo (relacionales → Partida). La
+-- tabla queda genérica a propósito para el día que se habilite crear
+-- categorías nuevas (Fase 5 del roadmap de ejecución, a futuro) pero
+-- la regla de HOY (nada de crear otra desde la app) es 100% de
+-- aplicación — nada acá lo impide a nivel de motor.
+CREATE TABLE categories (
+    category_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    -- Valores en español a propósito (dato real de negocio: "fija" vs.
+    -- "relacional", mismo criterio que warehouses.direction).
+    type VARCHAR(20) NOT NULL CHECK (type IN ('fijo', 'relacional')),
+    -- Ambas NULL si type='fijo'; ambas obligatorias en la aplicación
+    -- si type='relacional' (el CHECK de abajo solo liga prefix a
+    -- base_category_id entre sí, no al type — cruzar type+2 columnas
+    -- en un solo CHECK ya es más frágil de leer que validarlo en
+    -- código, y de cualquier forma para esta versión las 3 filas están
+    -- fijas de antemano, no las arma un usuario a mano).
+    prefix VARCHAR(20),
+    -- RESTRICT: no se puede borrar de motor una categoría que es la
+    -- base de otra (5.1.1).
+    base_category_id INT REFERENCES categories(category_id) ON DELETE RESTRICT,
+    CHECK ((prefix IS NULL) = (base_category_id IS NULL)),
+    -- Contador de tag por categoría, embebido acá — cada categoría ya
+    -- pertenece a un solo proyecto, una tabla aparte para 1 columna no
+    -- se justifica (diseño 2.1, [decisión]). El incremento SIEMPRE
+    -- tiene que hacerse en la misma transacción que el INSERT del
+    -- producto nuevo (leer, sumar 1, guardar, atómico) — si no, dos
+    -- altas simultáneas se pisan el mismo tag. Eso es responsabilidad
+    -- del código de la aplicación, no de esta columna.
+    next_tag INT NOT NULL DEFAULT 1 CHECK (next_tag > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+-- No estaba pedido explícito, pero evita duplicar sin querer el mismo
+-- nombre de categoría dentro de un proyecto — mismo criterio de
+-- "único mientras esté activo" que warehouses/racks. [decisión mía]
+CREATE UNIQUE INDEX idx_un_categories_name_active ON categories (project_id, name) WHERE deleted_at IS NULL;
+
+-- Si la categoría es relacional, `code` es la concatenación completa
+-- (prefix + código de la partida) YA guardada acá — no se arma con un
+-- JOIN en cada lectura. `base_product_code` guarda aparte el código de
+-- la partida relacionada, para saber a cuál pertenece sin parsear
+-- `code`.
+CREATE TABLE products (
+    product_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- RESTRICT: no se puede borrar de motor una categoría que todavía
+    -- tiene algún producto (5.1.1).
+    category_id INT NOT NULL REFERENCES categories(category_id) ON DELETE RESTRICT,
+    code VARCHAR(100) NOT NULL,
+    -- Copia de `categories.type = 'fijo'` en el momento de crear ESTE
+    -- producto (fijo, nunca se recalcula) — SOLO existe para que el
+    -- índice único condicional de más abajo pueda filtrar por esto:
+    -- Postgres no permite que el WHERE de un índice mire una columna
+    -- de OTRA tabla (categories), tiene que ser una columna propia.
+    -- Regla de negocio real (confirmada): un `code` de categoría FIJA
+    -- tiene que ser único (es la identidad real de una Partida); uno
+    -- de categoría RELACIONAL puede repetirse — varios Materiales/
+    -- Equipos distintos pueden relacionarse con la MISMA Partida, y
+    -- como el código de un relacional es únicamente
+    -- `prefix-códigoDeLaPartida` (sin nada que distinga uno de otro),
+    -- es esperable que se repita.
+    is_fixed BOOLEAN NOT NULL,
+    -- Solo si la categoría es relacional. A propósito NO es una FK
+    -- real a products.code (acoplaría fuerte para evitar un JOIN que
+    -- de cualquier forma casi no se usa) — la aplicación valida que
+    -- matchee el código de algún producto con categories.type='fijo'.
+    base_product_code VARCHAR(100),
+    -- Valor de categories.next_tag en el momento de crear ESTE
+    -- producto — snapshot, no se recalcula después.
+    tag INT NOT NULL CHECK (tag > 0),
+    name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    -- Normalizada a minúsculas por la aplicación antes de guardar.
+    unit VARCHAR(20) NOT NULL,
+    -- Modelo 3D asignado — NULL = todavía sin modelo. Ver
+    -- prueba-BIM/ALMACEN-BIM (sección BIM/Modelos del prototipo).
+    model_3d_path TEXT,
+    model_3d_format VARCHAR(20),
+    -- Valores en español a propósito (dato real, ya existe así en el
+    -- prototipo de BIM/Modelos).
+    model_3d_source VARCHAR(20) CHECK (model_3d_source IN ('repositorio', 'subido', 'generado_ia')),
+    model_3d_assigned_at TIMESTAMPTZ,
+    CHECK ((model_3d_path IS NULL) = (model_3d_format IS NULL)),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+-- Único mientras esté activo — pero SOLO entre productos de categoría
+-- fija (`is_fixed`, ver comentario en la columna). Un código
+-- relacional repetido entre varios Materiales/Equipos de la misma
+-- Partida no rompe nada: la identidad real de la fila sigue siendo
+-- `product_id`, todo lo demás (bin_contents, goods_receipt_items,
+-- inventory_movements...) referencia ese id, nunca el código.
+CREATE UNIQUE INDEX idx_un_products_code_active ON products (project_id, code) WHERE deleted_at IS NULL AND is_fixed;
+CREATE INDEX idx_products_project_id ON products (project_id);
+-- "Productos relacionados" (una Partida → sus Materiales/Equipos) —
+-- Catálogo, endpoint de detalle (ver Fase 3 del roadmap).
+CREATE INDEX idx_products_category_id ON products (category_id);
+-- Stock total y ubicación principal (SUM/MAX sobre bin_contents) NO
+-- son columnas acá — se calculan siempre en el momento.
+
+
+-- ------------------------------------------------------------
+-- 3. Contenido guardado
+-- ------------------------------------------------------------
+
+CREATE TABLE bin_contents (
+    bin_content_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Exactamente uno de los dos (ver CHECK abajo) — RESTRICT en
+    -- ambos: no se puede borrar de motor un bin/grupo fusionado que
+    -- todavía tiene contenido acá, sin importar la cantidad (la
+    -- validación linda de "solo bloquea si cantidad > 0", para el
+    -- mensaje de error al usuario, es de la aplicación — el motor es
+    -- más estricto a propósito, nunca pierde ni una fila con
+    -- quantity=0 en silencio).
+    bin_id BIGINT REFERENCES bins(bin_id) ON DELETE RESTRICT,
+    bin_merge_group_id BIGINT,
+    -- RESTRICT: no se puede borrar de motor un producto que todavía
+    -- tiene contenido guardado en algún lado.
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    quantity NUMERIC(18,6) NOT NULL CHECK (quantity >= 0),
+    position_x NUMERIC(18,6) NOT NULL DEFAULT 0,
+    position_y NUMERIC(18,6) NOT NULL DEFAULT 0,
+    position_z NUMERIC(18,6) NOT NULL DEFAULT 0,
+    rotation_x NUMERIC(18,6) NOT NULL DEFAULT 0,
+    rotation_y NUMERIC(18,6) NOT NULL DEFAULT 0,
+    rotation_z NUMERIC(18,6) NOT NULL DEFAULT 0,
+    scale NUMERIC(18,6),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    -- Última vez que cambió la cantidad acá (se va sumando/restando
+    -- con Ingresos/Vales de Salida).
+    updated_at TIMESTAMPTZ,
+    CHECK ((bin_id IS NOT NULL) <> (bin_merge_group_id IS NOT NULL))
+);
+CREATE INDEX idx_bin_contents_bin_id ON bin_contents (bin_id);
+-- Stock total y ubicación principal de un producto (diseño 2.2) hacen
+-- SUM/MAX sobre esta tabla filtrando por product_id — el cálculo
+-- central de todo el Catálogo.
+CREATE INDEX idx_bin_contents_product_id ON bin_contents (product_id);
+
+-- A futuro, NO se implementa todavía (hoy cada bin es un espacio
+-- separado) — ver diseño 3.2. La tabla se crea igual ahora porque
+-- bin_contents.bin_merge_group_id ya referencia esto arriba.
+CREATE TABLE bin_merge_groups (
+    bin_merge_group_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY
+);
+ALTER TABLE bin_contents
+    ADD CONSTRAINT fk_bin_contents_merge_group
+    FOREIGN KEY (bin_merge_group_id) REFERENCES bin_merge_groups(bin_merge_group_id) ON DELETE RESTRICT;
+
+CREATE TABLE bin_merge_members (
+    bin_merge_member_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Compositiva: si se borra el grupo (todavía sin contenido, o ya
+    -- se validó que no tiene), sus filas de membresía se van con él.
+    bin_merge_group_id BIGINT NOT NULL REFERENCES bin_merge_groups(bin_merge_group_id) ON DELETE CASCADE,
+    -- RESTRICT: no se puede borrar de motor un bin que participa de un
+    -- grupo fusionado (5.1.1).
+    bin_id BIGINT NOT NULL REFERENCES bins(bin_id) ON DELETE RESTRICT,
+    UNIQUE (bin_id)
+);
+
+
+-- ------------------------------------------------------------
+-- 4. Movimientos — Goods Receipt (ingreso) y Goods Issue (vale de
+--    salida), simétricos, + Kardex (inventory movements)
+-- ------------------------------------------------------------
+
+-- Reducido para esta etapa a "4 datos de compra" + elegir
+-- ubicación(es)+cantidad por ítem, sin Órdenes de Compra. Registro de
+-- movimiento INMUTABLE: no se edita, no se da de baja (no tiene
+-- deleted_at) — un error se corrige con un movimiento nuevo, nunca
+-- reescribiendo este.
+CREATE TABLE goods_receipts (
+    goods_receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- RUC = "Registro Único de Contribuyentes", el identificador
+    -- tributario peruano — jerga de dominio intraducible (mismo
+    -- criterio que `metrado`/`partida`), no un nombre de columna
+    -- traducible.
+    supplier_ruc VARCHAR(20) NOT NULL,
+    supplier_name VARCHAR(200) NOT NULL,
+    -- "Guía de remisión" — el documento de despacho real; su NÚMERO sí
+    -- se traduce (a diferencia del RUC, acá no se pierde nada
+    -- específico del dominio).
+    delivery_note_number VARCHAR(50) NOT NULL,
+    -- Fecha del documento — distinta de created_at (cuándo se registró
+    -- en el sistema, puede no ser el mismo día).
+    purchase_date DATE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id)
+);
+CREATE INDEX idx_goods_receipts_project_id ON goods_receipts (project_id);
+
+CREATE TABLE goods_receipt_items (
+    goods_receipt_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Compositiva: un ítem no existe sin su goods receipt.
+    goods_receipt_id BIGINT NOT NULL REFERENCES goods_receipts(goods_receipt_id) ON DELETE CASCADE,
+    -- RESTRICT: no se puede borrar de motor un producto con historial
+    -- de ingresos.
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    total_quantity NUMERIC(18,6) NOT NULL CHECK (total_quantity > 0)
+);
+CREATE INDEX idx_goods_receipt_items_receipt_id ON goods_receipt_items (goods_receipt_id);
+CREATE INDEX idx_goods_receipt_items_product_id ON goods_receipt_items (product_id);
+
+-- Reparto entre varias ubicaciones. SUM(quantity) agrupado por
+-- goods_receipt_item_id debe dar exactamente total_quantity de ese
+-- ítem — cruza filas de la misma tabla, no es un CHECK de SQL puro: lo
+-- valida la aplicación ANTES de confirmar el ingreso completo, en la
+-- misma transacción que crea/suma bin_contents e inserta
+-- inventory_movements (ver diseño 4.3).
+CREATE TABLE goods_receipt_item_locations (
+    goods_receipt_item_location_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    goods_receipt_item_id BIGINT NOT NULL REFERENCES goods_receipt_items(goods_receipt_item_id) ON DELETE CASCADE,
+    -- RESTRICT: no se puede borrar de motor un bin que alguna vez
+    -- recibió un ingreso (dejaría el historial huérfano — 5.1.2).
+    bin_id BIGINT NOT NULL REFERENCES bins(bin_id) ON DELETE RESTRICT,
+    quantity NUMERIC(18,6) NOT NULL CHECK (quantity > 0)
+);
+CREATE INDEX idx_goods_receipt_item_locations_item_id ON goods_receipt_item_locations (goods_receipt_item_id);
+CREATE INDEX idx_goods_receipt_item_locations_bin_id ON goods_receipt_item_locations (bin_id);
+
+-- Simétrico a `goods_receipts`, con los campos REALES del documento
+-- físico (Vale de Salida) — NO un "motivo" de texto libre genérico.
+-- Trae a qué sector/nivel/bloque de la obra va el material, y quién lo
+-- retira por nombre+DNI directo (texto libre, NO un `usuario` del
+-- sistema: quien retira en obra no siempre tiene login acá — distinto
+-- de created_by, que es quien lo REGISTRÓ en el sistema).
+CREATE TABLE goods_issues (
+    goods_issue_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    destination_sector VARCHAR(100) NOT NULL,
+    destination_level VARCHAR(100) NOT NULL,
+    destination_block VARCHAR(100) NOT NULL,
+    recipient_name VARCHAR(200) NOT NULL,
+    -- DNI = "Documento Nacional de Identidad" peruano — mismo criterio
+    -- que supplier_ruc arriba, jerga de dominio intraducible.
+    recipient_dni VARCHAR(20) NOT NULL,
+    issue_date DATE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id)
+);
+CREATE INDEX idx_goods_issues_project_id ON goods_issues (project_id);
+
+CREATE TABLE goods_issue_items (
+    goods_issue_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    goods_issue_id BIGINT NOT NULL REFERENCES goods_issues(goods_issue_id) ON DELETE CASCADE,
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    total_quantity NUMERIC(18,6) NOT NULL CHECK (total_quantity > 0)
+);
+CREATE INDEX idx_goods_issue_items_issue_id ON goods_issue_items (goods_issue_id);
+CREATE INDEX idx_goods_issue_items_product_id ON goods_issue_items (product_id);
+
+-- Mismas columnas que goods_receipt_item_locations, invertido:
+-- `quantity` se RESTA de bin_contents al confirmar (constraint real ya
+-- vive en bin_contents.quantity CHECK (quantity >= 0) — una salida que
+-- dejaría negativo se rechaza ahí).
+CREATE TABLE goods_issue_item_locations (
+    goods_issue_item_location_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    goods_issue_item_id BIGINT NOT NULL REFERENCES goods_issue_items(goods_issue_item_id) ON DELETE CASCADE,
+    bin_id BIGINT NOT NULL REFERENCES bins(bin_id) ON DELETE RESTRICT,
+    quantity NUMERIC(18,6) NOT NULL CHECK (quantity > 0)
+);
+CREATE INDEX idx_goods_issue_item_locations_item_id ON goods_issue_item_locations (goods_issue_item_id);
+CREATE INDEX idx_goods_issue_item_locations_bin_id ON goods_issue_item_locations (bin_id);
+
+-- Historial inmutable de movimientos — snapshot del saldo resultante
+-- en el momento (no se recalcula después leyendo hacia atrás).
+-- reference_document_id NO lleva FK real de motor: según
+-- reference_document_type apunta a `goods_receipts` O a
+-- `goods_issues`, y Postgres no tiene una FK condicional/polimórfica —
+-- mismo criterio ya usado en products.base_product_code (a propósito
+-- no un FK real, para no forzar una tabla intermedia solo para esto).
+-- La aplicación arma esta fila siempre dentro de la misma transacción
+-- que el movimiento real, nunca por separado.
+CREATE TABLE inventory_movements (
+    inventory_movement_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- Valores en español a propósito (dato real que se muestra en un
+    -- reporte de Kardex, mismo criterio que warehouses.direction).
+    type VARCHAR(10) NOT NULL CHECK (type IN ('entrada', 'salida')),
+    quantity NUMERIC(18,6) NOT NULL CHECK (quantity > 0),
+    bin_id BIGINT NOT NULL REFERENCES bins(bin_id) ON DELETE RESTRICT,
+    resulting_balance NUMERIC(18,6) NOT NULL,
+    -- A diferencia de `type` de arriba (dato real, en español), esto
+    -- es un discriminador TÉCNICO de a qué tabla apunta
+    -- reference_document_id — en inglés, matcheando el nombre real de
+    -- esas tablas (nunca se muestra tal cual a un usuario).
+    reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue')),
+    reference_document_id BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id)
+);
+-- Kardex filtrable por producto/fecha (Fase 4) — la consulta central
+-- de este historial.
+CREATE INDEX idx_inventory_movements_product_id ON inventory_movements (product_id, created_at);
+CREATE INDEX idx_inventory_movements_bin_id ON inventory_movements (bin_id);
