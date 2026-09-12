@@ -16,7 +16,8 @@ const CornersSchema = z.object({
 });
 
 export const CreateRackBodySchema = CornersSchema.extend({
-    name: z.string().trim().min(1, "El nombre no puede estar vacío"),
+    // .max(100) espeja racks.name VARCHAR(100) en schema.sql.
+    name: z.string().trim().min(1, "El nombre no puede estar vacío").max(100),
     levels: z.coerce.number().int().positive(),
     // 0 | 1 — cuál de las 2 caras es la accesible (ver diseño 1.3): el
     // nombre visible de cada valor es decisión del frontend, acá solo
@@ -31,6 +32,6 @@ export type CreateRackBody = z.infer<typeof CreateRackBodySchema>;
 // esta fase. Para "reubicar" un rack hoy: darlo de baja y crear uno
 // nuevo.
 export const UpdateRackBodySchema = z.object({
-    name: z.string().trim().min(1, "El nombre no puede estar vacío"),
+    name: z.string().trim().min(1, "El nombre no puede estar vacío").max(100),
 });
 export type UpdateRackBody = z.infer<typeof UpdateRackBodySchema>;

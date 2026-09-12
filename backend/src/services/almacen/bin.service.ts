@@ -21,7 +21,7 @@ import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { ALMACEN_MODULE_CODE, getWarehouseRowOrThrow } from "./warehouse.service.js";
 import type { BinIdParam, UpdateBinBody } from "../../schemas/almacen/bin.schema.js";
-import type { BinRow } from "../../models/almacen/bin.models.js";
+import type { BinRow, BinWithContents } from "../../models/almacen/bin.models.js";
 
 // Bahía/nivel se muestran 1-based en `location_label` (más legible que
 // empezar en 0), aunque se guarden 0-based en las columnas — mismo
@@ -64,10 +64,32 @@ export const insertBinsForRack = async (
 };
 
 // Llamado desde rack.service.ts (getRackByIdService) para armar la
-// respuesta anidada de un rack con sus bins.
-export const listBinsForRack = async (rackId: number): Promise<BinRow[]> => {
-    const { rows } = await pool.query<BinRow>(
-        `SELECT * FROM bins WHERE rack_id = $1 AND deleted_at IS NULL ORDER BY face, level, bay`,
+// respuesta anidada de un rack con sus bins — incluye qué hay guardado
+// en cada uno (`contents`, [] si está vacío). No existía ningún camino
+// para ver esto (bin_contents solo se tocaba desde goods-receipt/
+// goods-issue) hasta que se pidió explícito poder verlo acá. Un solo
+// query con `json_agg`/`FILTER` en vez de N+1 — trae también el modelo
+// 3D del producto (si tiene) para no necesitar una consulta aparte por
+// cada bin ocupado.
+export const listBinsForRack = async (rackId: number): Promise<BinWithContents[]> => {
+    const { rows } = await pool.query<BinWithContents>(
+        `SELECT b.*,
+            COALESCE(
+                json_agg(
+                    json_build_object(
+                        'product_id', p.product_id, 'code', p.code, 'name', p.name,
+                        'quantity', bc.quantity,
+                        'model_3d_path', p.model_3d_path, 'model_3d_format', p.model_3d_format
+                    )
+                ) FILTER (WHERE bc.bin_content_id IS NOT NULL),
+                '[]'
+            ) AS contents
+        FROM bins b
+        LEFT JOIN bin_contents bc ON bc.bin_id = b.bin_id AND bc.quantity > 0
+        LEFT JOIN products p ON p.product_id = bc.product_id
+        WHERE b.rack_id = $1 AND b.deleted_at IS NULL
+        GROUP BY b.bin_id
+        ORDER BY b.face, b.level, b.bay`,
         [rackId]
     );
     return rows;

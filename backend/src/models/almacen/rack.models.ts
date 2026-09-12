@@ -1,4 +1,4 @@
-import type { BinRow } from "./bin.models.js";
+import type { BinWithContents } from "./bin.models.js";
 
 // racks — ver docs/roadmap/almacen-bim-base-datos.md 1.3.
 export interface RackRow {
@@ -29,5 +29,5 @@ export interface RackFull extends RackRow {
 }
 
 export interface RackWithBins extends RackFull {
-    bins: BinRow[];
+    bins: BinWithContents[];
 }

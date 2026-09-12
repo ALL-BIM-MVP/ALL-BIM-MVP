@@ -21,7 +21,8 @@ const CornersSchema = z.object({
 });
 
 export const CreateWarehouseBodySchema = CornersSchema.extend({
-    name: z.string().trim().min(1, "El nombre no puede estar vacío"),
+    // .max(100) espeja warehouses.name VARCHAR(100) en schema.sql.
+    name: z.string().trim().min(1, "El nombre no puede estar vacío").max(100),
     warehouse_style_id: z.coerce.number(),
     direction: z.enum(["norte", "sur", "este", "oeste"]),
     // Espacio interior utilizable — INDEPENDIENTE del footprint de
