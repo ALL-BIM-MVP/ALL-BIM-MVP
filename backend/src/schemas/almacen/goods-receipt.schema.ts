@@ -27,11 +27,27 @@ const GoodsReceiptItemInputSchema = z.object({
     { message: "La suma de las cantidades por ubicación tiene que ser igual a total_quantity.", path: ["locations"] }
 );
 
+// RUC peruano (SUNAT): SIEMPRE 11 dígitos numéricos exactos, nunca
+// letras/guiones/espacios propios del identificador — mismo CHECK que
+// espeja goods_receipts.supplier_ruc en schema.sql (~ '^\d{11}$').
+// `.replace` antes de validar es tolerancia de tipeo/copy-paste (un
+// RUC copiado de una factura a veces trae espacios o un guion tipo
+// "20-123456789"), NO relaja la regla: lo que llega a la base sigue
+// siendo exactamente 11 dígitos limpios.
+const RUC_REGEX = /^\d{11}$/;
+export const supplierRucSchema = z.string().trim()
+    .transform((v) => v.replace(/[\s-]/g, ""))
+    .pipe(z.string().regex(RUC_REGEX, "El RUC debe tener exactamente 11 dígitos numéricos (formato SUNAT)"));
+
 export const CreateGoodsReceiptBodySchema = z.object({
     // 4 datos de compra (diseño 4.1) — separados, no un solo campo de texto libre.
-    supplier_ruc: z.string().trim().min(1, "El RUC no puede estar vacío"),
-    supplier_name: z.string().trim().min(1, "El proveedor no puede estar vacío"),
-    delivery_note_number: z.string().trim().min(1, "El número de guía no puede estar vacío"),
+    supplier_ruc: supplierRucSchema,
+    // Los .max() de acá abajo espejan los VARCHAR(n) reales de
+    // schema.sql — sin esto, un texto más largo que la columna no lo
+    // rechaza un 400 legible, lo rechaza Postgres con un error crudo
+    // de "value too long for type character varying(n)".
+    supplier_name: z.string().trim().min(1, "El proveedor no puede estar vacío").max(200),
+    delivery_note_number: z.string().trim().min(1, "El número de guía no puede estar vacío").max(50),
     purchase_date: z.coerce.date(),
     items: z.array(GoodsReceiptItemInputSchema).min(1, "Un ingreso necesita al menos un ítem."),
 });

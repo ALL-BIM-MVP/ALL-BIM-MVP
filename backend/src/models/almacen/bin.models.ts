@@ -12,3 +12,23 @@ export interface BinRow {
     created_at: Date;
     updated_at: Date | null;
 }
+
+// Qué hay guardado en un bin puntual — no existía ningún endpoint que
+// lo mostrara (bin_contents solo se tocaba desde goods-receipt/
+// goods-issue, nunca se leía directo) hasta que se pidió explícito
+// poder verlo en el detalle de un estante. `[]` = bin vacío. Incluye
+// los datos del modelo 3D del producto (si tiene) para que el
+// frontend pueda mostrarlo ahí mismo, sin una consulta aparte por cada
+// bin ocupado.
+export interface BinContentSummary {
+    product_id: number;
+    code: string;
+    name: string;
+    quantity: number;
+    model_3d_path: string | null;
+    model_3d_format: string | null;
+}
+
+export interface BinWithContents extends BinRow {
+    contents: BinContentSummary[];
+}

@@ -733,9 +733,12 @@ CREATE TABLE metrado_template_columns (
 CREATE TABLE warehouse_styles (
     warehouse_style_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
-    roof_color VARCHAR(7) NOT NULL,
-    wall_color VARCHAR(7) NOT NULL,
-    wall_frame_color VARCHAR(7) NOT NULL,
+    -- '#RRGGBB' exacto (7 caracteres: '#' + 6 hex) — sin este CHECK,
+    -- VARCHAR(7) solo limita el largo, no el formato: dejaría pasar
+    -- cualquier texto de 7 caracteres como si fuera un color válido.
+    roof_color VARCHAR(7) NOT NULL CHECK (roof_color ~ '^#[0-9A-Fa-f]{6}$'),
+    wall_color VARCHAR(7) NOT NULL CHECK (wall_color ~ '^#[0-9A-Fa-f]{6}$'),
+    wall_frame_color VARCHAR(7) NOT NULL CHECK (wall_frame_color ~ '^#[0-9A-Fa-f]{6}$'),
     max_level INT NOT NULL CHECK (max_level > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- Soft-delete (ver sección 5.1.2 del diseño): un warehouse_style en
@@ -773,8 +776,10 @@ CREATE TABLE warehouses (
     direction VARCHAR(10) NOT NULL CHECK (direction IN ('norte','sur','este','oeste')),
     -- Puramente geométrica (|corner2_x-corner1_x| × |corner2_z-corner1_z|),
     -- la recalcula la aplicación cada vez que cambian las esquinas —
-    -- columna real para no recalcularla en cada listado/detalle.
-    area_m2 NUMERIC(18,6) NOT NULL,
+    -- columna real para no recalcularla en cada listado/detalle. Con
+    -- el CHECK de esquinas de arriba (área ≠ 0) esto ya no puede dar
+    -- 0, pero se guarda el invariante acá también, explícito.
+    area_m2 NUMERIC(18,6) NOT NULL CHECK (area_m2 > 0),
     -- Espacio interior utilizable — INDEPENDIENTE del footprint de
     -- arriba, a propósito (confirmado explícito: "una casa chica por
     -- fuera puede tener mucho espacio adentro", no se deriva de
@@ -858,12 +863,17 @@ CREATE TABLE bins (
     -- para consistencia cuando profundidad = 1.
     face INT NOT NULL CHECK (face IN (0, 1)),
     -- Coordenada estructural generada sola (ej. "A1 · nivel 1") — el
-    -- formato exacto lo arma el frontend al crear la fila.
-    location_label VARCHAR(100) NOT NULL,
+    -- formato exacto lo arma el frontend al crear la fila. Mismo CHECK
+    -- de no-vacío que el resto de los "nombre" de este archivo (se
+    -- había quedado afuera acá porque estas 2 columnas nunca las llena
+    -- un formulario de alta, solo insertBinsForRack — pero igual hay
+    -- que blindarlas, location_label es la identidad legible de la
+    -- casilla).
+    location_label VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(location_label)) > 0),
     -- Por defecto = location_label, pero editable y PUEDE repetirse (a
     -- diferencia de location_label, que es la coordenada real) — por
     -- eso no lleva ningún UNIQUE.
-    name VARCHAR(100) NOT NULL,
+    name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- Cuándo se editó `name` por última vez — no hay updated_by acá a
     -- propósito, no estaba en el diseño (que sí lo pide para
@@ -909,7 +919,14 @@ CREATE TABLE categories (
     -- en un solo CHECK ya es más frágil de leer que validarlo en
     -- código, y de cualquier forma para esta versión las 3 filas están
     -- fijas de antemano, no las arma un usuario a mano).
-    prefix VARCHAR(20),
+    -- Se concatena directo en products.code como `prefix-código`
+    -- (ver esa tabla) — mayúsculas/dígitos, sin espacios ni guion
+    -- propio (el guion ya lo pone la aplicación al armar el code, uno
+    -- adentro del prefix rompería poder distinguirlos a simple vista).
+    -- 10 en vez de un VARCHAR(20) genérico: los 2 prefijos reales de
+    -- hoy ('MAT', 'EQ', ver system-data.sql) son de 2-3 caracteres, no
+    -- hay ningún prefijo de catálogo real que necesite más de 10.
+    prefix VARCHAR(10) CHECK (prefix IS NULL OR prefix ~ '^[A-Z0-9]{1,10}$'),
     -- RESTRICT: no se puede borrar de motor una categoría que es la
     -- base de otra (5.1.1).
     base_category_id INT REFERENCES categories(category_id) ON DELETE RESTRICT,
@@ -944,7 +961,7 @@ CREATE TABLE products (
     -- RESTRICT: no se puede borrar de motor una categoría que todavía
     -- tiene algún producto (5.1.1).
     category_id INT NOT NULL REFERENCES categories(category_id) ON DELETE RESTRICT,
-    code VARCHAR(100) NOT NULL,
+    code VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(code)) > 0),
     -- Copia de `categories.type = 'fijo'` en el momento de crear ESTE
     -- producto (fijo, nunca se recalcula) — SOLO existe para que el
     -- índice único condicional de más abajo pueda filtrar por esto:
@@ -962,17 +979,28 @@ CREATE TABLE products (
     -- real a products.code (acoplaría fuerte para evitar un JOIN que
     -- de cualquier forma casi no se usa) — la aplicación valida que
     -- matchee el código de algún producto con categories.type='fijo'.
-    base_product_code VARCHAR(100),
+    base_product_code VARCHAR(100) CHECK (base_product_code IS NULL OR LENGTH(TRIM(base_product_code)) > 0),
     -- Valor de categories.next_tag en el momento de crear ESTE
     -- producto — snapshot, no se recalcula después.
     tag INT NOT NULL CHECK (tag > 0),
     name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
     -- Normalizada a minúsculas por la aplicación antes de guardar.
-    unit VARCHAR(20) NOT NULL,
+    -- Texto libre a propósito, NO un enum cerrado — mismo criterio que
+    -- ya usa `metrado_partidas.unit` (línea ~502 de este archivo): las
+    -- unidades de obra real (m, m2, m3, kg, und, glb, viaje, bls...)
+    -- varían demasiado entre proyectos/proveedores para forzar un
+    -- catálogo fijo, ninguna otra tabla de este sistema lo hace.
+    unit VARCHAR(20) NOT NULL CHECK (LENGTH(TRIM(unit)) > 0),
     -- Modelo 3D asignado — NULL = todavía sin modelo. Ver
     -- prueba-BIM/ALMACEN-BIM (sección BIM/Modelos del prototipo).
     model_3d_path TEXT,
-    model_3d_format VARCHAR(20),
+    -- A diferencia de unit (arriba), esto NO es un dato libre que
+    -- tipea el usuario — es el formato real del archivo, y el único
+    -- código que lo consume (GLTFLoader en prueba-BIM/ALMACEN-BIM/
+    -- app.html y modulo.html) solo sabe cargar estos 2. Guardar
+    -- cualquier otro string acá dejaría un modelo "asignado" que
+    -- ningún visor real puede abrir.
+    model_3d_format VARCHAR(20) CHECK (model_3d_format IS NULL OR model_3d_format IN ('glb', 'gltf')),
     -- Valores en español a propósito (dato real, ya existe así en el
     -- prototipo de BIM/Modelos).
     model_3d_source VARCHAR(20) CHECK (model_3d_source IN ('repositorio', 'subido', 'generado_ia')),
@@ -1024,7 +1052,15 @@ CREATE TABLE bin_contents (
     rotation_x NUMERIC(18,6) NOT NULL DEFAULT 0,
     rotation_y NUMERIC(18,6) NOT NULL DEFAULT 0,
     rotation_z NUMERIC(18,6) NOT NULL DEFAULT 0,
-    scale NUMERIC(18,6),
+    -- Sin CHECK de rango en rotation_x/y/z a propósito: todavía no hay
+    -- ningún endpoint que las escriba (columnas preparadas para el
+    -- posicionamiento fino a futuro, ver comentario de bin_merge_groups
+    -- más abajo) y no está definido si van a guardarse en grados o
+    -- radianes — forzar un rango ahora sería adivinar. scale sí tiene
+    -- un invariante universal e independiente de esa decisión: un
+    -- factor de escala 0 o negativo no es un objeto 3D válido bajo
+    -- ningún criterio.
+    scale NUMERIC(18,6) CHECK (scale IS NULL OR scale > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id),
     -- Última vez que cambió la cantidad acá (se va sumando/restando
@@ -1074,15 +1110,30 @@ CREATE TABLE goods_receipts (
     goods_receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     -- RUC = "Registro Único de Contribuyentes", el identificador
-    -- tributario peruano — jerga de dominio intraducible (mismo
-    -- criterio que `metrado`/`partida`), no un nombre de columna
-    -- traducible.
-    supplier_ruc VARCHAR(20) NOT NULL,
-    supplier_name VARCHAR(200) NOT NULL,
+    -- tributario peruano (lo asigna SUNAT) — jerga de dominio
+    -- intraducible (mismo criterio que `metrado`/`partida`), no un
+    -- nombre de columna traducible. Formato REAL, no genérico: SIEMPRE
+    -- 11 dígitos numéricos exactos (2 dígitos de tipo de contribuyente
+    -- + 8 de cuerpo + 1 dígito verificador) — nunca letras, guiones ni
+    -- espacios, nunca menos ni más de 11. `VARCHAR(20)` sin CHECK
+    -- dejaba pasar cualquier cosa, incluido "1" — corregido. El
+    -- dígito verificador (checksum módulo 11 con pesos fijos) NO se
+    -- valida acá a propósito: implementarlo mal en un CHECK de SQL
+    -- rechazaría RUCs reales válidos, un daño peor que no validarlo —
+    -- si hace falta a futuro, con una referencia/librería confiable en
+    -- la aplicación, no adivinado en el esquema.
+    supplier_ruc VARCHAR(11) NOT NULL CHECK (supplier_ruc ~ '^\d{11}$'),
+    supplier_name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(supplier_name)) > 0),
     -- "Guía de remisión" — el documento de despacho real; su NÚMERO sí
     -- se traduce (a diferencia del RUC, acá no se pierde nada
-    -- específico del dominio).
-    delivery_note_number VARCHAR(50) NOT NULL,
+    -- específico del dominio). A propósito SIN un formato fijo tipo
+    -- RUC/DNI: a diferencia de esos (identificador emitido por una
+    -- entidad única con una regla nacional), el número de guía lo
+    -- define cada proveedor en SU propio documento físico/electrónico
+    -- — puede traer serie+correlativo con guion, sin guion, con
+    -- letras, etc. Acá solo se transcribe lo que dice el papel, no se
+    -- valida contra SUNAT.
+    delivery_note_number VARCHAR(50) NOT NULL CHECK (LENGTH(TRIM(delivery_note_number)) > 0),
     -- Fecha del documento — distinta de created_at (cuándo se registró
     -- en el sistema, puede no ser el mismo día).
     purchase_date DATE NOT NULL,
@@ -1129,13 +1180,18 @@ CREATE INDEX idx_goods_receipt_item_locations_bin_id ON goods_receipt_item_locat
 CREATE TABLE goods_issues (
     goods_issue_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    destination_sector VARCHAR(100) NOT NULL,
-    destination_level VARCHAR(100) NOT NULL,
-    destination_block VARCHAR(100) NOT NULL,
-    recipient_name VARCHAR(200) NOT NULL,
-    -- DNI = "Documento Nacional de Identidad" peruano — mismo criterio
-    -- que supplier_ruc arriba, jerga de dominio intraducible.
-    recipient_dni VARCHAR(20) NOT NULL,
+    destination_sector VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_sector)) > 0),
+    destination_level VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_level)) > 0),
+    destination_block VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_block)) > 0),
+    recipient_name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(recipient_name)) > 0),
+    -- DNI = "Documento Nacional de Identidad" peruano (lo asigna
+    -- RENIEC) — mismo criterio que supplier_ruc arriba, jerga de
+    -- dominio intraducible. Formato real: SIEMPRE 8 dígitos numéricos
+    -- exactos (con ceros a la izquierda si hace falta — es un
+    -- identificador, no un número, por eso VARCHAR y no INT). Mismo
+    -- error que tenía supplier_ruc: `VARCHAR(20)` sin CHECK dejaba
+    -- pasar cualquier largo/contenido — corregido.
+    recipient_dni VARCHAR(8) NOT NULL CHECK (recipient_dni ~ '^\d{8}$'),
     issue_date DATE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id)
@@ -1181,7 +1237,11 @@ CREATE TABLE inventory_movements (
     type VARCHAR(10) NOT NULL CHECK (type IN ('entrada', 'salida')),
     quantity NUMERIC(18,6) NOT NULL CHECK (quantity > 0),
     bin_id BIGINT NOT NULL REFERENCES bins(bin_id) ON DELETE RESTRICT,
-    resulting_balance NUMERIC(18,6) NOT NULL,
+    -- Mismo invariante que bin_contents.quantity (>= 0, nunca
+    -- negativo) — es el snapshot de ESE saldo justo después del
+    -- movimiento, tiene que respetar la misma regla que la columna que
+    -- retrata.
+    resulting_balance NUMERIC(18,6) NOT NULL CHECK (resulting_balance >= 0),
     -- A diferencia de `type` de arriba (dato real, en español), esto
     -- es un discriminador TÉCNICO de a qué tabla apunta
     -- reference_document_id — en inglés, matcheando el nombre real de

@@ -70,7 +70,14 @@ export const getGoodsReceiptByIdService = async (
 export const createGoodsReceiptService = async (
     user: DecodedToken, { projectId }: ProjectIdParam, body: CreateGoodsReceiptBody
 ): Promise<GoodsReceiptDetail> => {
-    await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "upload");
+    // Corregido: era "upload" — quedaba solo, distinto de TODAS las
+    // demás altas de este módulo (warehouse/rack/bin/product/goods
+    // issue, todas piden "process"). No cambiaba nada hoy en la
+    // práctica (el rol Editor sembrado en system-data.sql tiene los
+    // dos permisos), pero sí sería inconsistente el día que se arme un
+    // rol a medida con "process" pero sin "upload" — sin ninguna razón
+    // real para que justo esta alta se comporte distinto.
+    await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "process");
 
     const client = await pool.connect();
     try {
