@@ -40,6 +40,9 @@ out/
 .output/
 .vite/
 
+#ESPACIOS DE PRUEBA
+/prueba-BIM
+
 # vite temp files
 vite.config.*.timestamp-*
 

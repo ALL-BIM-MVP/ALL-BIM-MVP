@@ -13,6 +13,7 @@ import { AppError } from "../models/errors/app-error.js";
 import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import type { UserSuggestion } from "../models/users.models.js";
 import type { SearchUserQuery } from "../schemas/project-invitations.schema.js";
+import { createFixedCategoriesForProject } from "./almacen/category.service.js";
 
 export const getListProjectService = async (
     { user_id : userId } : DecodedToken, { scope } : GetProjectsQuery
@@ -179,6 +180,14 @@ export const createProjectService = async (
                    ($1, 4, 'builtin', 'partida_code')`,
             [p.project_id]
         );
+
+        // Almacén BIM (Fase 2, ver docs/roadmap/almacen-bim.md) — mismo
+        // criterio que arriba: las 3 categorías fijas (Partida/
+        // Materiales/Equipo) quedan ancladas desde el alta del
+        // proyecto, en la misma transacción, en vez de resolverse con
+        // un default implícito. Sin endpoint propio todavía — ver
+        // services/almacen/category.service.ts.
+        await createFixedCategoriesForProject(client, p.project_id, userId);
 
         await client.query("COMMIT");
     } catch (error) {

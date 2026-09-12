@@ -33,15 +33,19 @@ VALUES
 -- MÓDULOS + ROLES/PERMISOS POR MÓDULO (Fase 2 — reemplaza
 -- project_roles, ver docs/roadmap-modulos-y-permisos.md)
 -- ------------------------------------------------------------
--- Los 6 módulos reales de la app — solo METRADOS BIM tiene
--- funcionalidad hoy (is_active=true), el resto son slots reservados.
+-- Los módulos reales de la app — METRADOS BIM y, desde acá, ALMACÉN
+-- BIM (is_active=true los dos: ya se está construyendo de verdad, no
+-- es un slot reservado como el resto). "logistica" queda intacto,
+-- reservado sin usar — Almacén BIM es un módulo nuevo propio, NO
+-- reutiliza ese slot (confirmado explícito por el usuario).
 INSERT INTO modules (code, name, is_active) VALUES
     ('metrados',  'METRADOS BIM',   true),
     ('ssomma',    'SSOMMA BIM',     false),
     ('calidad',   'CALIDAD BIM',    false),
     ('logistica', 'LOGISTICA BIM',  false),
     ('costos',    'COSTOS BIM',     false),
-    ('planos',    'PLANOS BIM',     false);
+    ('planos',    'PLANOS BIM',     false),
+    ('almacen',   'ALMACÉN BIM',    true);
 
 -- Vocabulario ÚNICO de permisos, reusado entre TODOS los módulos (no
 -- un catálogo por módulo) — export/configure quedan reservados para
@@ -91,6 +95,63 @@ BEGIN
     SELECT v_role_viewer, module_permission_id FROM module_permissions
         WHERE code = 'view';
 END $$;
+
+-- Roles del módulo ALMACÉN BIM — mismo patrón EXACTO que Metrados,
+-- confirmado explícito por el usuario (ver
+-- docs/roadmap/almacen-bim-base-datos.md, sección 5.2): mismos 3
+-- roles, mismo vocabulario de permisos, ninguno nuevo.
+DO $$
+DECLARE
+    v_module_id INT;
+    v_role_admin INT;
+    v_role_editor INT;
+    v_role_viewer INT;
+BEGIN
+    SELECT module_id INTO v_module_id FROM modules WHERE code = 'almacen';
+
+    INSERT INTO module_roles (module_id, name, description) VALUES
+        (v_module_id, 'Administrador', 'Acceso completo: ver, registrar ingresos, crear/editar ubicaciones y productos, emitir vales de salida, eliminar y configurar el módulo.')
+        RETURNING module_role_id INTO v_role_admin;
+    INSERT INTO module_roles (module_id, name, description) VALUES
+        (v_module_id, 'Editor', 'Puede ver, registrar ingresos, crear/editar almacenes/estantes/casillas/productos, emitir vales de salida y dar de baja, pero no configurar el módulo.')
+        RETURNING module_role_id INTO v_role_editor;
+    INSERT INTO module_roles (module_id, name, description) VALUES
+        (v_module_id, 'Visualizador', 'Solo puede ver — no puede registrar movimientos ni editar nada.')
+        RETURNING module_role_id INTO v_role_viewer;
+
+    INSERT INTO module_role_permissions (module_role_id, module_permission_id)
+    SELECT v_role_admin, module_permission_id FROM module_permissions; -- Administrador: TODOS
+
+    INSERT INTO module_role_permissions (module_role_id, module_permission_id)
+    SELECT v_role_editor, module_permission_id FROM module_permissions
+        WHERE code IN ('view', 'upload', 'process', 'delete');
+
+    INSERT INTO module_role_permissions (module_role_id, module_permission_id)
+    SELECT v_role_viewer, module_permission_id FROM module_permissions
+        WHERE code = 'view';
+END $$;
+
+
+-- ------------------------------------------------------------
+-- ESTILOS DE ALMACÉN (Fase 2 — ver docs/roadmap/almacen-bim.md)
+-- ------------------------------------------------------------
+-- warehouse_styles es solo APARIENCIA (colores + cuántos niveles
+-- admite un rack adentro) — NUNCA tamaño, eso lo define cada warehouse
+-- con sus propias esquinas (ver database/schema.sql). Sin esto
+-- sembrado, nadie podría crear un warehouse
+-- (warehouses.warehouse_style_id es NOT NULL) — no hay endpoint para
+-- crear estilos nuevos todavía (a futuro), así que estos 3 son el
+-- catálogo completo por ahora. Colores y max_level idénticos a los 3
+-- "ALMACEN_TEMPLATES" que ya venía usando el prototipo
+-- (prueba-BIM/ALMACEN-BIM/index.html) antes de que el tamaño se
+-- desacoplara del estilo — se reusan los mismos, ahora separados de
+-- gridW/gridD (eso pasó a ser libre por warehouse). Los NOMBRES de los
+-- 3 estilos quedan en español a propósito (dato real que el usuario
+-- ve al elegir un estilo, no un identificador de esquema).
+INSERT INTO warehouse_styles (name, roof_color, wall_color, wall_frame_color, max_level) VALUES
+    ('Almacén Chico',   '#B5453D', '#E9DAB3', '#C9A96A', 3),
+    ('Almacén Mediano', '#3D6FB5', '#E2E7EE', '#A9B6C4', 3),
+    ('Almacén Grande',  '#4A9B6E', '#EDEAD6', '#C7BE96', 4);
 
 
 -- ------------------------------------------------------------
