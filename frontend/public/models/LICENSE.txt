@@ -1,0 +1,8 @@
+caja.glb, bulto.glb, tubo.glb
+
+Modelos de Kenney (www.kenney.nl), licencia CC0 (dominio público) —
+uso libre, incluso comercial, sin necesidad de atribución.
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Descargados de: https://github.com/shorepine/kenney (mirror organizado
+de los assets de Kenney en formato glTF-binary).

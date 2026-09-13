@@ -87,4 +87,4 @@ export interface NewProjectData {
   contractor?: string | null;
 }
 
-export type TabType = 'inicio' | 'archivos' | 'colaboradores' | 'visor3d' | 'modulos';
+export type TabType = 'inicio' | 'archivos' | 'colaboradores' | 'visor3d' | 'modulos' | 'almacen';

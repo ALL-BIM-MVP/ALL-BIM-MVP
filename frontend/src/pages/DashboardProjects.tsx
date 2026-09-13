@@ -24,6 +24,7 @@ import InicioTab from '../components/tabs/InicioTab';
 import ColaboradoresTab from "../components/tabs/ColaboradoresTab";
 import ArchivosTab from "../components/tabs/ArchivosTab";
 import Visor3DTab from "../components/tabs/Visor3DTab";
+import AlmacenTab from "../components/tabs/AlmacenTab";
 import { getEstadoElementos, EstadoElementosResult } from '../services/ifcfiles.service';
 import { useHelp, useHelpSection } from '../context/HelpContext';
 import { RoleSummary } from '../components/RoleSummary';
@@ -428,11 +429,17 @@ const DashboardProjectsInner: React.FC = () => {
         </div>
       )}
 
-      {activeTab !== 'visor3d' && (
+      {activeTab === 'almacen' && (
+        <div className="fixed left-0 right-0 bottom-0 top-14 z-0">
+          <AlmacenTab />
+        </div>
+      )}
+
+      {activeTab !== 'visor3d' && activeTab !== 'almacen' && (
         <div className="h-16 bg-gradient-to-b from-blue-50 to-gray-50" />
       )}
 
-      {activeTab !== 'visor3d' && (
+      {activeTab !== 'visor3d' && activeTab !== 'almacen' && (
       <div className="max-w-9xl mx-auto p-6 pb-32 pl-16 relative isolate">
             
         {/* TAB: INICIO */}
@@ -472,9 +479,9 @@ const DashboardProjectsInner: React.FC = () => {
 
         {activeTab === 'modulos' && (
           <div className="relative z-10 flex items-center justify-center min-h-[500px]">
-            <div className="bg-white rounded-3xl w-[700px] max-h-[90vh] overflow-y-auto p-8 shadow-2xl border border-gray-200 animate-floatIn">
+            <div className="bg-white rounded-3xl w-[900px] max-h-[90vh] overflow-y-auto p-8 shadow-2xl border border-gray-200 animate-floatIn">
               <div className="flex items-center justify-between mb-2">
-                <h2 className="text-3xl font-bold text-gray-800">SELECCIÓN DE MÓDULOS</h2>
+                <h2 className="text-xl font-bold text-gray-800">SELECCIÓN DE MÓDULOS</h2>
                 <button onClick={() => setActiveTab('inicio')} className="text-gray-400 hover:text-gray-600 transition text-2xl">
                   <X size={28} />
                 </button>
@@ -482,7 +489,7 @@ const DashboardProjectsInner: React.FC = () => {
               
               <p className="text-sm text-gray-500 mb-6">Selecciona los módulos que deseas activar para este proyecto</p>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 {MODULOS.map((modulo) => {
                   const Icon = modulo.icon;
                   const isSelected = selectedModulos.includes(modulo.id);
@@ -510,11 +517,12 @@ const DashboardProjectsInner: React.FC = () => {
               </div>
 
               <div className="flex justify-end gap-3 mt-8 pt-6 border-t border-gray-200">
-                {confirmedModuloId && (
-                  <button onClick={() => { setSelectedModulos([]); setActiveTab('inicio'); }} className="px-6 py-2.5 text-gray-600 hover:text-gray-800 transition-colors font-semibold">
-                    Cancelar
-                  </button>
-                )}
+                <button
+                  onClick={() => { setSelectedModulos([]); setActiveTab('inicio'); }}
+                  className={`px-6 py-2.5 text-gray-600 hover:text-gray-800 transition-colors font-semibold ${confirmedModuloId ? '' : 'invisible'}`}
+                >
+                  Cancelar
+                </button>
                 <button
                   onClick={() => {
                     if (selectedModulos.length === 0) {
@@ -522,8 +530,14 @@ const DashboardProjectsInner: React.FC = () => {
                       return;
                     }
                     const elegido = MODULOS.find(m => m.id === selectedModulos[0]);
-                    const esMetrados = elegido?.label?.toLowerCase().includes('metrados');
 
+                    if (elegido?.id === 'almacen') {
+                      setConfirmedModuloId(selectedModulos[0]);
+                      setActiveTab('almacen');
+                      return;
+                    }
+
+                    const esMetrados = elegido?.label?.toLowerCase().includes('metrados');
                     if (!esMetrados) {
                       alert('Próximamente disponible. Por ahora solo Metrados BIM está activo.');
                       return;
@@ -609,7 +623,7 @@ const DashboardProjectsInner: React.FC = () => {
       )}
 
       {/* NAVEGACIÓN LATERAL (modo normal) — siempre visible, para Inicio/Archivos/Colaboradores */}
-      {confirmedModuloId && activeTab !== 'visor3d' && (
+      {confirmedModuloId && activeTab !== 'visor3d' && activeTab !== 'almacen' && (
       <nav className="fixed left-0 top-14 h-[calc(100vh-3.5rem)] z-40 flex flex-col items-center bg-white border-r border-gray-200 shadow-md w-10 py-6">
         <div className="flex flex-col items-center gap-1.5 w-full">
           {tabs.map((tab) => {
