@@ -253,7 +253,7 @@ class OrbitCameraController {
     return { x: (v.x * 0.5 + 0.5) * canvasWidth, y: (-v.y * 0.5 + 0.5) * canvasHeight };
   }
 
-  fitToBounds(bounds: ModelBounds) {
+  fitToBounds(bounds: ModelBounds, marginFactor = 0.9) {
     const center = new THREE.Vector3(
       (bounds.min.x + bounds.max.x) / 2,
       (bounds.min.y + bounds.max.y) / 2,
@@ -265,7 +265,7 @@ class OrbitCameraController {
       bounds.max.z - bounds.min.z
     );
     this.target.copy(center);
-    this.spherical.radius = Math.max(size.length() * 0.9, 1);
+    this.spherical.radius = Math.max(size.length() * marginFactor, 1);
     this.spherical.theta = Math.PI / 4;
     this.spherical.phi = Math.PI / 3;
     this.syncFromSpherical();
@@ -440,9 +440,9 @@ export class ThreeSceneController {
   setModelBounds(bounds: ModelBounds | null) { this.modelBounds = bounds; }
   getModelBounds() { return this.modelBounds; }
 
-  fitToView() {
+  fitToView(marginFactor?: number) {
     if (this.modelBounds) {
-      this.cameraController.fitToBounds(this.modelBounds);
+      this.cameraController.fitToBounds(this.modelBounds, marginFactor);
 
       this.panelCompensationBaseTarget = this.cameraController.target.clone();
     }
