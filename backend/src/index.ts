@@ -17,7 +17,7 @@ import routerModules, { projectModulesRouter } from './routes/modules.routes.js'
 import routerIfcSpecialties, { projectIfcDocumentsRouter } from './routes/ifc-documents.routes.js';
 import routerIfcClassification from './routes/ifc-classification.routes.js';
 import routerElementoConjunto from './routes/elemento-conjunto.routes.js';
-import { warehouseStyleRouter, projectAlmacenRouter } from './routes/almacen/index.js';
+import { warehouseStyleRouter, model3DAssetUploadRouter, projectAlmacenRouter } from './routes/almacen/index.js';
 import { errorHandler } from './middlewares/error.middleware.js';
 import { recoverStaleProcessingRows } from './services/ifc-processing-runner.js';
 import { ensureBootstrapAdminService } from './services/users.service.js';
@@ -78,6 +78,7 @@ app.use('/api/projects', projectIfcDocumentsRouter );
 app.use('/api/projects', routerIfcClassification );
 app.use('/api/projects', routerElementoConjunto );
 app.use('/api/warehouse-styles', warehouseStyleRouter );
+app.use('/api/model-3d-assets', model3DAssetUploadRouter );
 app.use('/api/projects', projectAlmacenRouter );
 
 

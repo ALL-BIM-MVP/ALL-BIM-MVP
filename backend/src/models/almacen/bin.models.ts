@@ -25,8 +25,11 @@ export interface BinContentSummary {
     code: string;
     name: string;
     quantity: number;
-    model_3d_path: string | null;
     model_3d_format: string | null;
+    // Lista para usar con Authorization: Bearer normal (ver
+    // model-3d-asset.models.ts, buildModel3DAssetUrl) — nunca un path
+    // crudo del disco.
+    model_3d_url: string | null;
 }
 
 export interface BinWithContents extends BinRow {

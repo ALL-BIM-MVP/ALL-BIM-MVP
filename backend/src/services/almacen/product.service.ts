@@ -1,7 +1,10 @@
 // products (catálogo) — ver docs/roadmap/almacen-bim-base-datos.md 2.2.
-// Importa de category.service.ts (más abajo en la jerarquía del
-// módulo, mismo criterio que rack importa de warehouse) — category
-// nunca importa de acá, no hay ciclo.
+// Importa de category.service.ts y model-3d-asset.service.ts (los dos
+// más abajo en la jerarquía del módulo, mismo criterio que rack
+// importa de warehouse) — ninguno de los dos importa de acá, no hay
+// ciclo. Subir un modelo 3D nuevo NO pasa por acá (es una acción del
+// usuario, sin proyecto — ver model-3d-asset.service.ts,
+// uploadModel3DAssetService) — acá solo se ASIGNA uno ya existente.
 import pool from "../../db/database.js";
 import type { Pool, PoolClient } from "pg";
 import { AppError } from "../../models/errors/app-error.js";
@@ -10,10 +13,14 @@ import { CATEGORY_ERRORS } from "../../models/errors/almacen/category.errors.js"
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
+import { assertModel3DAssetVisible } from "./model-3d-asset.service.js";
 import type { CategoryRow } from "../../models/almacen/category.models.js";
-import type { ProductDetail, ProductListing, ProductRow } from "../../models/almacen/product.models.js";
 import type {
-    CreateProductBody, ListProductsQuery, ProductIdParam, UpdateProductBody,
+    ProductDetail, ProductListing, ProductRow, ProductRowWithAssetJoin, ProductWithModel3D,
+} from "../../models/almacen/product.models.js";
+import { transformProductModel3D } from "../../models/almacen/product.models.js";
+import type {
+    AssignProductModel3DBody, CreateProductBody, ListProductsQuery, ProductIdParam, UpdateProductBody,
 } from "../../schemas/almacen/product.schema.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 
@@ -32,11 +39,13 @@ export const assertProductInProject = async (
     if (rowCount === 0) throw new AppError(PRODUCT_ERRORS.PRODUCT_NOT_FOUND);
 };
 
-// Stock total (SUM sobre bin_contents) y ubicación principal (el bin
+// Stock total (SUM sobre bin_contents), ubicación principal (el bin
 // con más cantidad guardada de este producto, path completo
-// warehouse·rack·bin) — NUNCA columnas propias, se calculan siempre
-// acá (ver diseño 2.2).
-const STOCK_LOCATION_JOINS = `
+// warehouse·rack·bin) y el modelo 3D asignado (LEFT JOIN a
+// model_3d_assets, ver product.models.ts/transformProductModel3D) —
+// NUNCA columnas propias más allá de model_3d_asset_id, se calculan/
+// resuelven siempre acá (ver diseño 2.2).
+const PRODUCT_JOINS = `
     LEFT JOIN LATERAL (
         SELECT SUM(quantity) AS total FROM bin_contents WHERE product_id = p.product_id
     ) stock ON true
@@ -50,6 +59,7 @@ const STOCK_LOCATION_JOINS = `
         ORDER BY bc.quantity DESC
         LIMIT 1
     ) loc ON true
+    LEFT JOIN model_3d_assets ma ON ma.model_3d_asset_id = p.model_3d_asset_id
 `;
 
 export const listProductsService = async (
@@ -57,16 +67,17 @@ export const listProductsService = async (
 ): Promise<ProductListing[]> => {
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
 
-    const { rows } = await pool.query<ProductListing>(
-        `SELECT p.*, COALESCE(stock.total, 0) AS total_stock, loc.label AS main_location
+    const { rows } = await pool.query<ProductListing & ProductRowWithAssetJoin>(
+        `SELECT p.*, ma.name AS model_3d_name, ma.format AS model_3d_format,
+            COALESCE(stock.total, 0) AS total_stock, loc.label AS main_location
         FROM products p
-        ${STOCK_LOCATION_JOINS}
+        ${PRODUCT_JOINS}
         WHERE p.project_id = $1 AND p.deleted_at IS NULL
             AND ($2::int IS NULL OR p.category_id = $2)
         ORDER BY p.name`,
         [projectId, category_id ?? null]
     );
-    return rows;
+    return rows.map((r) => ({ ...transformProductModel3D(r, projectId), total_stock: r.total_stock, main_location: r.main_location }));
 };
 
 // Detalle con stock/ubicación + "productos relacionados" (Fase 3 del
@@ -78,12 +89,13 @@ export const getProductByIdService = async (
 ): Promise<ProductDetail> => {
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
 
-    const { rows } = await pool.query<ProductListing & { category_type: "fijo" | "relacional" }>(
-        `SELECT p.*, cat.type AS category_type,
+    const { rows } = await pool.query<ProductListing & ProductRowWithAssetJoin & { category_type: "fijo" | "relacional" }>(
+        `SELECT p.*, ma.name AS model_3d_name, ma.format AS model_3d_format,
+            cat.type AS category_type,
             COALESCE(stock.total, 0) AS total_stock, loc.label AS main_location
         FROM products p
         INNER JOIN categories cat ON cat.category_id = p.category_id
-        ${STOCK_LOCATION_JOINS}
+        ${PRODUCT_JOINS}
         WHERE p.product_id = $1 AND p.project_id = $2 AND p.deleted_at IS NULL`,
         [productId, projectId]
     );
@@ -99,10 +111,15 @@ export const getProductByIdService = async (
         related = relatedResult.rows;
     }
 
-    const { category_type, ...rest } = product;
-    return { ...rest, related };
+    const { category_type, total_stock, main_location, ...rest } = product;
+    return { ...transformProductModel3D(rest, projectId), total_stock, main_location, related };
 };
 
+// Un producto SIEMPRE nace sin modelo 3D — se asigna después, con sus
+// propios endpoints (ver assignProductModel3DService más abajo, y
+// uploadModel3DAssetService en model-3d-asset.service.ts para subir
+// uno nuevo). No forma parte de este body a propósito (ver comentario
+// grande en product.schema.ts).
 export const createProductService = async (
     user: DecodedToken, { projectId }: ProjectIdParam, body: CreateProductBody
 ): Promise<ProductRow> => {
@@ -114,8 +131,8 @@ export const createProductService = async (
 
         // FOR UPDATE: bloquea la fila de la categoría por el resto de
         // la transacción — el riesgo real que señala el diseño 2.1
-        // (dos altas simultáneas pisándose el mismo `next_tag`) se
-        // blinda acá, no alcanza con leer y actualizar por separado.
+        // (dos altas simultáneas pisándose el mismo `next_display_id`)
+        // se blinda acá, no alcanza con leer y actualizar por separado.
         const categoryResult = await client.query<CategoryRow>(
             `SELECT * FROM categories WHERE category_id = $1 AND project_id = $2 AND deleted_at IS NULL FOR UPDATE`,
             [body.category_id, projectId]
@@ -147,26 +164,24 @@ export const createProductService = async (
             code = `${category.prefix}-${body.base_product_code}`;
         }
 
-        // Snapshot del tag ANTES de incrementar — no se recalcula
-        // después (diseño 2.2: "valor de categories.next_tag en el
-        // momento de crear este producto").
-        const tag = category.next_tag;
+        // Snapshot del display_id ANTES de incrementar — no se
+        // recalcula después (diseño 2.2: "valor de
+        // categories.next_display_id en el momento de crear este
+        // producto").
+        const displayId = category.next_display_id;
         await client.query(
-            `UPDATE categories SET next_tag = next_tag + 1 WHERE category_id = $1`,
+            `UPDATE categories SET next_display_id = next_display_id + 1 WHERE category_id = $1`,
             [category.category_id]
         );
 
         const inserted = await client.query<ProductRow>(
             `INSERT INTO products
-                (project_id, category_id, code, is_fixed, base_product_code, tag, name, unit,
-                 model_3d_path, model_3d_format, model_3d_source, model_3d_assigned_at, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                (project_id, category_id, code, is_fixed, base_product_code, display_id, name, unit, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
             RETURNING *`,
             [
-                projectId, category.category_id, code, category.type === "fijo", baseProductCode, tag,
-                body.name, body.unit.trim().toLowerCase(),
-                body.model_3d_path ?? null, body.model_3d_format ?? null, body.model_3d_source ?? null,
-                body.model_3d_path ? new Date() : null, user.user_id,
+                projectId, category.category_id, code, category.type === "fijo", baseProductCode, displayId,
+                body.name, body.unit.trim().toLowerCase(), user.user_id,
             ]
         );
 
@@ -183,27 +198,20 @@ export const createProductService = async (
     }
 };
 
-// A propósito solo name/unit/model_3d — category_id/code/
-// base_product_code/tag/is_fixed son la identidad del producto, fijada
-// al crearlo (ver schemas/almacen/product.schema.ts).
+// A propósito solo name/unit — category_id/code/base_product_code/
+// display_id/is_fixed son la identidad del producto, fijada al crearlo, y el
+// modelo 3D tiene sus propios endpoints (ver más abajo) — ninguno de
+// los dos forma parte de este PUT (ver schemas/almacen/product.schema.ts).
 export const updateProductService = async (
     user: DecodedToken, { projectId, productId }: ProductIdParam, body: UpdateProductBody
 ): Promise<ProductRow> => {
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "process");
 
     const { rows } = await pool.query<ProductRow>(
-        `UPDATE products SET
-            name = $1, unit = $2,
-            model_3d_path = $3, model_3d_format = $4, model_3d_source = $5,
-            model_3d_assigned_at = CASE WHEN $3::text IS DISTINCT FROM model_3d_path THEN NOW() ELSE model_3d_assigned_at END,
-            updated_at = NOW(), updated_by = $6
-        WHERE product_id = $7 AND project_id = $8 AND deleted_at IS NULL
+        `UPDATE products SET name = $1, unit = $2, updated_at = NOW(), updated_by = $3
+        WHERE product_id = $4 AND project_id = $5 AND deleted_at IS NULL
         RETURNING *`,
-        [
-            body.name, body.unit.trim().toLowerCase(),
-            body.model_3d_path ?? null, body.model_3d_format ?? null, body.model_3d_source ?? null,
-            user.user_id, productId, projectId,
-        ]
+        [body.name, body.unit.trim().toLowerCase(), user.user_id, productId, projectId]
     );
     const product = rows[0];
     if (!product) throw new AppError(PRODUCT_ERRORS.PRODUCT_NOT_FOUND);
@@ -234,4 +242,41 @@ export const deleteProductService = async (
         [productId, projectId]
     );
     if (rowCount === 0) throw new AppError(PRODUCT_ERRORS.HAS_STOCK);
+};
+
+// Asigna un model_3d_asset_id YA EXISTENTE (mío, del sistema, o ya en
+// uso en este proyecto — ver assertModel3DAssetVisible) — o `null`
+// para sacar el modelo asignado. Subir un archivo NUEVO es otro
+// endpoint aparte, sin proyecto (ver model-3d-asset.service.ts,
+// uploadModel3DAssetService) — acá NUNCA se crea una fila de
+// model_3d_assets, solo se referencia una existente. NUNCA borra la
+// fila de model_3d_assets al sacarlo de un producto: sigue siendo del
+// catálogo, puede estar en uso por otros productos o reasignarse
+// después (ON DELETE RESTRICT en products.model_3d_asset_id es
+// justamente lo que impediría borrar el asset del catálogo mientras
+// algún producto lo siga usando, ver esquema).
+export const assignProductModel3DService = async (
+    user: DecodedToken, { projectId, productId }: ProductIdParam, body: AssignProductModel3DBody
+): Promise<ProductWithModel3D> => {
+    await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "process");
+    await assertProductInProject(pool, projectId, productId);
+
+    if (body.model_3d_asset_id !== null) {
+        await assertModel3DAssetVisible(pool, user, projectId, body.model_3d_asset_id);
+    }
+
+    const { rows } = await pool.query<ProductRowWithAssetJoin>(
+        `UPDATE products p SET
+            model_3d_asset_id = $1,
+            model_3d_assigned_at = CASE WHEN $1::bigint IS NULL THEN NULL ELSE NOW() END,
+            updated_at = NOW(), updated_by = $2
+        WHERE p.product_id = $3 AND p.project_id = $4 AND p.deleted_at IS NULL
+        RETURNING p.*,
+            (SELECT ma.name FROM model_3d_assets ma WHERE ma.model_3d_asset_id = p.model_3d_asset_id) AS model_3d_name,
+            (SELECT ma.format FROM model_3d_assets ma WHERE ma.model_3d_asset_id = p.model_3d_asset_id) AS model_3d_format`,
+        [body.model_3d_asset_id, user.user_id, productId, projectId]
+    );
+    const product = rows[0];
+    if (!product) throw new AppError(PRODUCT_ERRORS.PRODUCT_NOT_FOUND);
+    return transformProductModel3D(product, projectId);
 };

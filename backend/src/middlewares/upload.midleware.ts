@@ -104,3 +104,34 @@ export const uploadDryRunFile = multer({
   storage: dryRunStorage,
   limits: { fileSize: MAX_FILE_SIZE_BYTES },
 }).single("file");
+
+// Modelo 3D (Almacén BIM, catálogo model_3d_assets) — DEL USUARIO que
+// lo sube, no de un proyecto (ver database/schema.sql), por eso NO
+// puede reusar `uploadSingleFile` (esa guarda bajo UPLOADS_DIR/<projectId>/,
+// y acá no hay ningún :projectId en la URL de subida — POST
+// /api/model-3d-assets, sin anidar bajo /projects). Carpeta propia,
+// sin depender de ningún parámetro de ruta. Privado igual que
+// uploadSingleFile (bajo UPLOADS_DIR, nunca PUBLIC_UPLOADS_DIR) — un
+// modelo 3D de catálogo no es tan público como una foto de perfil, se
+// sirve autenticado (ver model-3d-asset.service.ts,
+// assertModel3DAssetVisible). Límite más chico que el general
+// (200MB): es un modelo de catálogo para verse en tiempo real en un
+// visor, no un documento de proyecto.
+const MODEL_3D_ASSET_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
+
+const model3DAssetStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    const dir = path.join(UPLOADS_DIR, "model-3d-assets");
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: (_req, file, cb) => {
+    const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, "_");
+    cb(null, `${randomUUID()}-${safeName}`);
+  },
+});
+
+export const uploadModel3DAssetFile = multer({
+  storage: model3DAssetStorage,
+  limits: { fileSize: MODEL_3D_ASSET_MAX_UPLOAD_BYTES },
+}).single("file");

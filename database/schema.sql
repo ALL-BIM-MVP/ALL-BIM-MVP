@@ -931,14 +931,19 @@ CREATE TABLE categories (
     -- base de otra (5.1.1).
     base_category_id INT REFERENCES categories(category_id) ON DELETE RESTRICT,
     CHECK ((prefix IS NULL) = (base_category_id IS NULL)),
-    -- Contador de tag por categoría, embebido acá — cada categoría ya
-    -- pertenece a un solo proyecto, una tabla aparte para 1 columna no
-    -- se justifica (diseño 2.1, [decisión]). El incremento SIEMPRE
-    -- tiene que hacerse en la misma transacción que el INSERT del
-    -- producto nuevo (leer, sumar 1, guardar, atómico) — si no, dos
-    -- altas simultáneas se pisan el mismo tag. Eso es responsabilidad
-    -- del código de la aplicación, no de esta columna.
-    next_tag INT NOT NULL DEFAULT 1 CHECK (next_tag > 0),
+    -- Contador de display_id por categoría, embebido acá — cada
+    -- categoría ya pertenece a un solo proyecto, una tabla aparte para 1
+    -- columna no se justifica (diseño 2.1, [decisión]). El incremento
+    -- SIEMPRE tiene que hacerse en la misma transacción que el INSERT
+    -- del producto nuevo (leer, sumar 1, guardar, atómico) — si no, dos
+    -- altas simultáneas se pisan el mismo display_id. Eso es
+    -- responsabilidad del código de la aplicación, no de esta columna.
+    -- Renombrado de `next_tag`: "tag" no decía nada de que esto es el
+    -- ID que se muestra al usuario en el frontend (encabezado "ID"),
+    -- ni de que es propio del sistema (nada que ver con el `tag` de
+    -- Revit que sí usa metrado_elements/ifc_elements, un campo
+    -- completamente distinto).
+    next_display_id INT NOT NULL DEFAULT 1 CHECK (next_display_id > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id),
     updated_at TIMESTAMPTZ,
@@ -949,6 +954,52 @@ CREATE TABLE categories (
 -- nombre de categoría dentro de un proyecto — mismo criterio de
 -- "único mientras esté activo" que warehouses/racks. [decisión mía]
 CREATE UNIQUE INDEX idx_un_categories_name_active ON categories (project_id, name) WHERE deleted_at IS NULL;
+
+-- Catálogo de modelos 3D reales (Almacén BIM) — a propósito NO es una
+-- tabla de extensión de `files` (a diferencia de la primera versión de
+-- este diseño): un modelo 3D es del USUARIO que lo sube, no de un
+-- proyecto, y `files` es SIEMPRE de un proyecto en el resto de esta
+-- app (IFC, Excel, documentos) — forzar esto ahí adentro habría
+-- significado tocar una tabla que usan muchos módulos para servir a un
+-- caso nuevo y angosto. Mismo criterio que ya usa `users.
+-- profile_picture_path` (tampoco pasa por `files`, tiene su propio
+-- guardado — ver utils/avatar.ts): cuando el dueño real es un usuario
+-- y no un proyecto, se guarda aparte.
+--
+-- Visibilidad (sin tabla de relación — se resuelve con estas 2
+-- columnas + un JOIN a products, ver model-3d-asset.service.ts):
+--   1) `owner_id = <yo>` — mi propia biblioteca personal.
+--   2) `is_system = true` — repositorio del sistema, visible siempre.
+--   3) ya usado en algún producto del proyecto que estoy mirando
+--      (join a products.model_3d_asset_id) — se resuelve al vuelo, no
+--      es una columna de acá.
+CREATE TABLE model_3d_assets (
+    model_3d_asset_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(150) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    -- El único código real que abre esto (GLTFLoader, en
+    -- prueba-BIM/ALMACEN-BIM/app.html) solo sabe cargar estos 2.
+    format VARCHAR(20) NOT NULL CHECK (format IN ('glb', 'gltf')),
+    -- Ubicación real en disco — privada, nunca se expone tal cual al
+    -- cliente (se sirve vía GET .../model-3d-assets/:id/content, con
+    -- el mismo chequeo de visibilidad de arriba en CADA pedido, nunca
+    -- una URL firmada: acá el archivo puede vivir mucho tiempo y
+    -- reusarse en muchos productos/proyectos, una URL que vence a los
+    -- 5 minutos no tiene sentido para este caso).
+    file_path TEXT NOT NULL,
+    -- SIEMPRE alguien real, incluso para un modelo de sistema (lo sube
+    -- un usuario que en ese momento es admin — ver is_system abajo).
+    owner_id INT NOT NULL REFERENCES users(user_id),
+    -- CONGELADO al momento de subir (¿el que lo sube es admin de la
+    -- app EN ESE MOMENTO?) — nunca se recalcula después. Mismo
+    -- criterio ya usado en `products.is_fixed`: si más adelante a esa
+    -- persona le cambian el rol, este modelo YA subido no se mueve del
+    -- repositorio del sistema ni al revés — evita que el repositorio
+    -- "pierda" contenido por un cambio de rol de otra persona, sin
+    -- necesitar ningún candado especial sobre el sistema de roles.
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_model_3d_assets_owner_id ON model_3d_assets (owner_id);
 
 -- Si la categoría es relacional, `code` es la concatenación completa
 -- (prefix + código de la partida) YA guardada acá — no se arma con un
@@ -980,9 +1031,14 @@ CREATE TABLE products (
     -- de cualquier forma casi no se usa) — la aplicación valida que
     -- matchee el código de algún producto con categories.type='fijo'.
     base_product_code VARCHAR(100) CHECK (base_product_code IS NULL OR LENGTH(TRIM(base_product_code)) > 0),
-    -- Valor de categories.next_tag en el momento de crear ESTE
-    -- producto — snapshot, no se recalcula después.
-    tag INT NOT NULL CHECK (tag > 0),
+    -- Valor de categories.next_display_id en el momento de crear ESTE
+    -- producto — snapshot, no se recalcula después. Renombrado de
+    -- `tag`: es el ID que ve el usuario (encabezado "ID" en el
+    -- frontend), un correlativo propio de este sistema por categoría —
+    -- "tag" confundía porque no tiene ninguna relación con el `tag` de
+    -- Revit que sí usa metrado_elements/ifc_elements (campo distinto,
+    -- de otro módulo).
+    display_id INT NOT NULL CHECK (display_id > 0),
     name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
     -- Normalizada a minúsculas por la aplicación antes de guardar.
     -- Texto libre a propósito, NO un enum cerrado — mismo criterio que
@@ -991,21 +1047,21 @@ CREATE TABLE products (
     -- varían demasiado entre proyectos/proveedores para forzar un
     -- catálogo fijo, ninguna otra tabla de este sistema lo hace.
     unit VARCHAR(20) NOT NULL CHECK (LENGTH(TRIM(unit)) > 0),
-    -- Modelo 3D asignado — NULL = todavía sin modelo. Ver
-    -- prueba-BIM/ALMACEN-BIM (sección BIM/Modelos del prototipo).
-    model_3d_path TEXT,
-    -- A diferencia de unit (arriba), esto NO es un dato libre que
-    -- tipea el usuario — es el formato real del archivo, y el único
-    -- código que lo consume (GLTFLoader en prueba-BIM/ALMACEN-BIM/
-    -- app.html y modulo.html) solo sabe cargar estos 2. Guardar
-    -- cualquier otro string acá dejaría un modelo "asignado" que
-    -- ningún visor real puede abrir.
-    model_3d_format VARCHAR(20) CHECK (model_3d_format IS NULL OR model_3d_format IN ('glb', 'gltf')),
-    -- Valores en español a propósito (dato real, ya existe así en el
-    -- prototipo de BIM/Modelos).
-    model_3d_source VARCHAR(20) CHECK (model_3d_source IN ('repositorio', 'subido', 'generado_ia')),
+    -- Modelo 3D asignado — NULL = todavía sin modelo. Referencia una
+    -- fila real de `model_3d_assets` (archivo real en `files` +
+    -- formato + dueño) — nunca un path/formato sueltos acá. Corregido:
+    -- la primera versión de este campo era un `model_3d_path` de texto
+    -- libre, sin ningún archivo real detrás cuando se marcaba como
+    -- "subido". Error real, no de estilo: un producto "con modelo"
+    -- tiene que apuntar a algo que de verdad existe.
+    -- RESTRICT: no se puede borrar de motor un asset que todavía es el
+    -- modelo de algún producto (5.1.1) — hay que sacarlo del producto
+    -- primero.
+    model_3d_asset_id BIGINT REFERENCES model_3d_assets(model_3d_asset_id) ON DELETE RESTRICT,
+    -- Cuándo se le asignó el modelo ACTUAL a ESTE producto — distinto
+    -- de model_3d_assets.created_at (cuándo se subió/creó el asset en
+    -- sí, que puede ser antes y reusarse en varios productos).
     model_3d_assigned_at TIMESTAMPTZ,
-    CHECK ((model_3d_path IS NULL) = (model_3d_format IS NULL)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id),
     updated_at TIMESTAMPTZ,
@@ -1023,6 +1079,7 @@ CREATE INDEX idx_products_project_id ON products (project_id);
 -- "Productos relacionados" (una Partida → sus Materiales/Equipos) —
 -- Catálogo, endpoint de detalle (ver Fase 3 del roadmap).
 CREATE INDEX idx_products_category_id ON products (category_id);
+CREATE INDEX idx_products_model_3d_asset_id ON products (model_3d_asset_id);
 -- Stock total y ubicación principal (SUM/MAX sobre bin_contents) NO
 -- son columnas acá — se calculan siempre en el momento.
 
