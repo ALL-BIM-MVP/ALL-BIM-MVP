@@ -1,5 +1,5 @@
 import type { FileType } from "../schemas/file.schema.js";
-import type { IfcProcessingStatus } from "./ifc-files.models.js";
+import type { IfcProcessingStatus } from "./metrados/ifc-files.models.js";
 import { buildSignedFileUrl } from "../utils/file-signing.js";
 
 // Sin imagen a propósito — es atribución (quién subió el archivo), no

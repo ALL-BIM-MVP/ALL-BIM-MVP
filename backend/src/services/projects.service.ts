@@ -14,6 +14,8 @@ import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import type { UserSuggestion } from "../models/users.models.js";
 import type { SearchUserQuery } from "../schemas/project-invitations.schema.js";
 import { createFixedCategoriesForProject } from "./almacen/category.service.js";
+import { assertAlmacenEmpty, countAlmacenContent } from "./almacen/almacen-content.service.js";
+import { ALMACEN_CONTENT_ERRORS } from "../models/errors/almacen/almacen-content.errors.js";
 
 export const getListProjectService = async (
     { user_id : userId } : DecodedToken, { scope } : GetProjectsQuery
@@ -238,17 +240,49 @@ export const updateProjectService = async(
     return transformProjectFull(p);
 };
 
+const FOREIGN_KEY_VIOLATION = "23503";
+
 export const deleteProjectByIdService = async(
     {user_id : userId } : DecodedToken, { projectId } : ProjectIdParam
 ) : Promise<void> => {
 
-    const result = await pool.query(
-        `DELETE FROM projects
-            WHERE project_id = $1 AND owner_id = $2`,
-        [projectId, userId]
-    );
+    const client = await pool.connect();
 
-    if (result.rowCount === 0) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
+    try {
+        await client.query("BEGIN");
+
+        // Mismo criterio de siempre: solo el OWNER puede eliminar el
+        // proyecto (no existe / no es tuyo -> el mismo 404).
+        const ownerResult = await client.query(
+            `SELECT 1 FROM projects WHERE project_id = $1 AND owner_id = $2 FOR UPDATE`,
+            [projectId, userId]
+        );
+        if (ownerResult.rowCount === 0) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
+
+        // Almacén guarda el registro de auditoría de cómo llegó cada
+        // material y protege su jerarquía con ON DELETE RESTRICT: hay
+        // que vaciarlo antes, de forma explícita (DELETE
+        // /projects/:id/almacen/content). Metrados y el resto siguen
+        // eliminándose en cascada, sin cambios.
+        await assertAlmacenEmpty(client, projectId);
+
+        await client.query(`DELETE FROM projects WHERE project_id = $1`, [projectId]);
+
+        await client.query("COMMIT");
+    } catch (error) {
+        await client.query("ROLLBACK");
+
+        // Carrera: alguien agregó datos a Almacén entre la comprobación de
+        // arriba y el DELETE. Se confirma con los datos reales (un 23503
+        // también podría venir de otra tabla) antes de traducirlo.
+        if ((error as { code? : string }).code === FOREIGN_KEY_VIOLATION
+            && !(await countAlmacenContent(client, projectId)).is_empty) {
+            throw new AppError(ALMACEN_CONTENT_ERRORS.NOT_EMPTY);
+        }
+        throw error;
+    } finally {
+        client.release();
+    }
 
     // El DELETE de arriba ya se llevó puestas todas las filas relacionadas
     // en la BD vía ON DELETE CASCADE (files, ifc_files, ifc_documents
