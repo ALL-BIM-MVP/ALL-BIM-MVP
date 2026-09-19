@@ -18,6 +18,7 @@ import {
     transformIfcFileStatus, type IfcFileStatusFull, type IfcFileStatusRow, type IfcFileStatusWithFragments
 } from "../../models/metrados/ifc-files.models.js";
 import { saveFileService } from "../files.service.js";
+import { METRADOS_MODULE_CODE } from "../../constants/modules.js";
 import { assertModulePermission } from "../project-access.service.js";
 import {
     acquireSlot, assertPathWithinUploads, EXEC_MAX_BUFFER, PROCESSING_TIMEOUT_MS, PYTHON_BIN, releaseSlot, REPO_ROOT,
@@ -32,7 +33,6 @@ const execFileAsync = promisify(execFile);
 // funcional hoy (Fase 2, ver docs/roadmap-modulos-y-permisos.md). El
 // día que otro módulo también procese IFC, esta constante deja de
 // alcanzar y hay que resolver el módulo real por contexto.
-const METRADOS_MODULE_CODE = "metrados";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -269,7 +269,7 @@ export const processIfcMetradosService = async (
             await fs.rm(multerFile.path, { force: true }).catch(() => {});
             throw error;
         }
-        const saved = await saveFileService(user, { projectId }, "ifc", multerFile);
+        const saved = await saveFileService(user, { projectId }, METRADOS_MODULE_CODE, "ifc", multerFile);
         fileId = saved.file_id;
         filePath = multerFile.path;
         fileName = saved.name;

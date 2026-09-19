@@ -6,6 +6,7 @@
 // candados, los procesos se separan: vaciar Almacén es una acción
 // explícita y protegida (esta), y eliminar el proyecto exige que ya
 // esté vacío (ver deleteProjectByIdService en projects.service.ts).
+import fs from "node:fs";
 import pool from "../../db/database.js";
 import type { Pool, PoolClient } from "pg";
 import { AppError } from "../../models/errors/app-error.js";
@@ -39,8 +40,10 @@ export const countAlmacenContent = async (
             (SELECT COUNT(*) FROM products WHERE project_id = $1)::int AS products,
             (SELECT COUNT(*) FROM goods_receipts WHERE project_id = $1)::int AS goods_receipts,
             (SELECT COUNT(*) FROM goods_issues WHERE project_id = $1)::int AS goods_issues,
-            (SELECT COUNT(*) FROM inventory_movements WHERE product_id IN (${PROJECT_PRODUCTS}))::int AS inventory_movements`,
-        [projectId]
+            (SELECT COUNT(*) FROM inventory_movements WHERE product_id IN (${PROJECT_PRODUCTS}))::int AS inventory_movements,
+            (SELECT COUNT(*) FROM files f INNER JOIN modules m ON m.module_id = f.module_id
+                WHERE f.project_id = $1 AND m.code = $2)::int AS files`,
+        [projectId, ALMACEN_MODULE_CODE]
     );
     const counts = rows[0]!;
     return { ...counts, is_empty: Object.values(counts).every((n) => n === 0) };
@@ -75,9 +78,10 @@ export const getAlmacenSummaryService = async (
 // se eliminó de cada cosa.
 //
 // Cada tabla nueva que Almacén guarde por proyecto se suma acá (y a
-// countAlmacenContent). Los archivos de Almacén (documentos adjuntos) no
-// existen todavía: cuando lleguen con files.module_id (Fase 1) también
-// se borran acá, con sus bytes en disco DESPUÉS del COMMIT.
+// countAlmacenContent). También se borran los ARCHIVOS del proyecto cuyo
+// módulo es Almacén (files.module_id) — filas dentro de la transacción,
+// bytes en disco DESPUÉS del COMMIT; los archivos de otros módulos
+// (Metrados) no se tocan.
 export const emptyAlmacenContentService = async (
     user: DecodedToken, { projectId }: ProjectIdParam
 ): Promise<AlmacenContentCounts> => {
@@ -123,7 +127,24 @@ export const emptyAlmacenContentService = async (
 
         await client.query(`UPDATE categories SET next_display_id = 1 WHERE project_id = $1`, [projectId]);
 
+        // Los documentos de Almacén (fases siguientes del roadmap) van a
+        // referenciar files: se borran ANTES de esta línea.
+        const files = await client.query<{ file_path: string; thumbnail_path: string | null }>(
+            `DELETE FROM files
+            WHERE project_id = $1 AND module_id = (SELECT module_id FROM modules WHERE code = $2)
+            RETURNING file_path, thumbnail_path`,
+            [projectId, ALMACEN_MODULE_CODE]
+        );
+
         await client.query("COMMIT");
+
+        // Recién con el COMMIT hecho se borran los bytes: si la
+        // transacción hubiera fallado, no queremos haber perdido archivos
+        // cuyas filas siguen existiendo.
+        for (const file of files.rows) {
+            await fs.promises.rm(file.file_path, { force: true });
+            if (file.thumbnail_path) await fs.promises.rm(file.thumbnail_path, { force: true });
+        }
 
         return {
             warehouses: warehouses.rowCount ?? 0,
@@ -133,6 +154,7 @@ export const emptyAlmacenContentService = async (
             goods_receipts: receipts.rowCount ?? 0,
             goods_issues: issues.rowCount ?? 0,
             inventory_movements: movements.rowCount ?? 0,
+            files: files.rowCount ?? 0,
         };
     } catch (error) {
         await client.query("ROLLBACK");

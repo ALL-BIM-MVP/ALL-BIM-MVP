@@ -18,18 +18,16 @@ export interface ProjectOwner {
     role_id : number;
 };
 
-// image_* salen de un LEFT JOIN a project_images+files (ver
-// projects.service.ts) — todos null cuando el proyecto no tiene
-// portada propia, transformProjectFull los reemplaza por la imagen de
-// por defecto en ese caso ("traiga la imagen siempre", nunca null en
-// la respuesta final).
+// cover_image_* son columnas de `projects` (ver database/schema.sql) —
+// todas null cuando el proyecto no tiene portada propia,
+// transformProjectFull las reemplaza por la imagen de por defecto en ese
+// caso ("traiga la imagen siempre", nunca null en la respuesta final).
 export interface ProjectRow extends ProjectCreate, ProjectOwner {
     project_id : number;
     created_at : Date;
-    image_file_id : string | null;
-    image_path : string | null;
-    image_name : string | null;
-    image_mime_type : string | null;
+    cover_image_path : string | null;
+    cover_image_name : string | null;
+    cover_image_mime_type : string | null;
 };
 
 export interface ProjectFull extends ProjectCreate {
@@ -81,8 +79,8 @@ export const transformProjectFull = (p : ProjectRow) : ProjectFull => {
             user_last_name: p.user_last_name,
             role_id: p.role_id,
         },
-        cover_image: p.image_file_id && p.image_path
-            ? { file_id: p.image_file_id, name: p.image_name!, mime_type: p.image_mime_type, url: toPublicUploadsUrl(p.image_path) }
+        cover_image: p.cover_image_path
+            ? { name: p.cover_image_name!, mime_type: p.cover_image_mime_type, url: toPublicUploadsUrl(p.cover_image_path) }
             : buildDefaultCoverImage(),
     };
 };

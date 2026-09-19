@@ -10,6 +10,8 @@ export interface AlmacenContentCounts {
     goods_receipts: number;
     goods_issues: number;
     inventory_movements: number;
+    // Archivos del proyecto cuyo módulo es Almacén (files.module_id).
+    files: number;
 }
 
 // GET .../almacen/summary — is_empty es true solo si TODO lo de arriba

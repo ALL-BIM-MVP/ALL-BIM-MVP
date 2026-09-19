@@ -119,7 +119,27 @@ const seedAlmacenData = async () => {
     const [{ bin_merge_group_id: groupId }] = await q(`INSERT INTO bin_merge_groups DEFAULT VALUES RETURNING bin_merge_group_id`);
     await q(`INSERT INTO bin_merge_members (bin_merge_group_id, bin_id) VALUES ($1, $2)`, [groupId, bins[1].bin_id]);
 
+    // Un archivo de Almacén y uno de Metrados en el MISMO proyecto, con
+    // bytes reales en la carpeta temporal: vaciar Almacén borra el primero
+    // (fila y bytes) y NO toca el segundo.
+    const projectDir = path.join(TMP_UPLOADS_DIR, String(projectId));
+    fs.mkdirSync(projectDir, { recursive: true });
+    const fileIds = {};
+    const filePaths = {};
+    for (const moduleCode of ["almacen", "metrados"]) {
+        const filePath = path.join(projectDir, `${moduleCode}.pdf`);
+        fs.writeFileSync(filePath, "%PDF-1.4 prueba");
+        const [{ file_id: fileId }] = await q(
+            `INSERT INTO files (project_id, module_id, file_type, name, file_path, uploaded_by)
+            SELECT $1, module_id, 'pdf', $3, $2, $4 FROM modules WHERE code = $5 RETURNING file_id`,
+            [projectId, filePath, `${moduleCode}.pdf`, OWNER_USER_ID, moduleCode]
+        );
+        fileIds[moduleCode] = fileId;
+        filePaths[moduleCode] = filePath;
+    }
+
     return {
+        almacenFileId: fileIds.almacen, metradosFileId: fileIds.metrados, filePaths,
         warehouseId, rackId, productId, binContentId, receiptId, receiptItemId, issueId, issueItemId, groupId,
         binIds: bins.map((b) => b.bin_id),
         movementIds: movements.map((m) => m.inventory_movement_id),
@@ -142,6 +162,7 @@ const remainingSeededRows = async () => {
         ["goods_issue_items", "goods_issue_item_id", [s.issueItemId]],
         ["goods_issue_item_locations", "goods_issue_item_id", [s.issueItemId]],
         ["inventory_movements", "inventory_movement_id", s.movementIds],
+        ["files", "file_id", [s.almacenFileId]],
         ["bin_merge_groups", "bin_merge_group_id", [s.groupId]],
         ["bin_merge_members", "bin_merge_group_id", [s.groupId]],
     ];
@@ -205,7 +226,7 @@ test("summary de un proyecto sin datos de Almacén: vacío, con todo en 0", asyn
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
         warehouses: 0, racks: 0, bins: 0, products: 0,
-        goods_receipts: 0, goods_issues: 0, inventory_movements: 0, is_empty: true,
+        goods_receipts: 0, goods_issues: 0, inventory_movements: 0, files: 0, is_empty: true,
     });
 });
 
@@ -214,7 +235,7 @@ test("summary con datos: cuenta todo (incluye grupos y movimientos) y is_empty=f
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
         warehouses: 1, racks: 1, bins: 2, products: 1,
-        goods_receipts: 1, goods_issues: 1, inventory_movements: 2, is_empty: false,
+        goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1, is_empty: false,
     });
 });
 
@@ -249,10 +270,19 @@ test("el dueño vacía Almacén: devuelve lo eliminado, no deja huérfanos y con
     const deleted = await emptyAlmacenContentService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(deleted, {
         warehouses: 1, racks: 1, bins: 2, products: 1,
-        goods_receipts: 1, goods_issues: 1, inventory_movements: 2,
+        goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1,
     });
 
     assert.deepEqual(await remainingSeededRows(), {}, "no debe quedar ninguna fila sembrada");
+
+    // Los bytes del archivo de Almacén se borraron; el archivo de Metrados
+    // del mismo proyecto sigue intacto (fila y bytes).
+    assert.equal(fs.existsSync(seeded.filePaths.almacen), false, "los bytes del archivo de Almacén se borran");
+    assert.equal(fs.existsSync(seeded.filePaths.metrados), true, "el archivo de Metrados NO se toca");
+    assert.equal(
+        (await pool.query(`SELECT 1 FROM files WHERE file_id = $1`, [seeded.metradosFileId])).rowCount, 1,
+        "la fila del archivo de Metrados sigue existiendo"
+    );
     assert.equal((await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId })).is_empty, true);
 
     const { rows } = await pool.query(

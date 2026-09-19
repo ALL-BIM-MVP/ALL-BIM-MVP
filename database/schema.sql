@@ -101,7 +101,20 @@ CREATE TABLE projects (
     end_date DATE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     owner_id INT NOT NULL REFERENCES users(user_id),
-    created_by INT NOT NULL REFERENCES users(user_id)
+    created_by INT NOT NULL REFERENCES users(user_id),
+    -- Portada del proyecto: NO es un archivo de `files` (no es un
+    -- "documento del proyecto" de ningún módulo, y se sirve pública
+    -- desde uploads/public/covers/) — mismo criterio que
+    -- users.profile_picture_path. Todas NULL = el proyecto no tiene
+    -- portada propia y el backend sirve la imagen por defecto
+    -- (uploads/public/default/). Así TODO lo que queda en `files`
+    -- pertenece a algún módulo (files.module_id NOT NULL). Se quitó la
+    -- tabla project_images (su tipo 'gallery' nunca lo usó ningún código).
+    cover_image_path TEXT,
+    cover_image_name VARCHAR(150),
+    cover_image_mime_type VARCHAR(255),
+    CONSTRAINT chk_projects_cover_image
+        CHECK ((cover_image_path IS NULL) = (cover_image_name IS NULL))
 );
 -- Postgres no indexa automático las columnas de FK (solo el lado
 -- referenciado) — GET /projects (scope mine/member) filtra por esto
@@ -221,6 +234,16 @@ CREATE TABLE project_invitation_module_roles (
 CREATE TABLE files (
     file_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Módulo dueño del archivo (Metrados, Almacén, futuros): un archivo
+    -- es de UN proyecto Y de UN módulo. Subir/borrar exige el permiso de
+    -- ese módulo (assertModulePermission), no solo ser miembro del
+    -- proyecto. Los archivos que genera el propio backend (Excel
+    -- exportado, .frag) lo fijan en el servidor; en una subida manual lo
+    -- manda el cliente (module_code) y el backend NUNCA asume uno. Sin
+    -- ON DELETE explícito a propósito: las filas de `modules` no se
+    -- borran nunca. La portada del proyecto ya no vive acá (ver
+    -- projects.cover_image_path).
+    module_id INT NOT NULL REFERENCES modules(module_id),
     -- 'fragments': migración del visor a ThatOpen (ver
     -- docs/roadmap/migracion-visor-thatopen-backend.md, B1/B2) — un
     -- .frag generado a partir de un 'ifc' ya procesado, mismo patrón
@@ -453,25 +476,6 @@ CREATE TABLE elemento_conjunto_config_fields (
     ),
     UNIQUE (project_id, position)
 );
-
--- "files" es el archivo físico (metadata + ruta en disco); esta tabla
--- es el ROL que cumple ese archivo para un proyecto — hoy solo se usa
--- 'cover' (la portada, una sola por proyecto, ver el índice único de
--- abajo), 'gallery' queda armado desde ya para cuando haga falta una
--- galería de varias imágenes, pero todavía no tiene endpoint propio.
--- Si el proyecto no tiene fila 'cover' acá, el backend sirve una
--- imagen por defecto (uploads/default/) — ver project-images.service.ts.
-CREATE TABLE project_images (
-    project_image_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    file_id BIGINT NOT NULL UNIQUE REFERENCES files(file_id) ON DELETE CASCADE,
-    image_type VARCHAR(30) NOT NULL DEFAULT 'gallery'
-        CHECK (image_type IN ('cover', 'gallery')),
-    sort_order INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE UNIQUE INDEX idx_un_project_cover ON project_images (project_id) WHERE image_type = 'cover';
-
 
 -- ------------------------------------------------------------
 -- ELEMENTOS Y PARTIDAS

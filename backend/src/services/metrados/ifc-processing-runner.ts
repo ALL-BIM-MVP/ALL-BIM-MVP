@@ -23,12 +23,12 @@ import { logger } from "../../utils/logger.js";
 const execFileAsync = promisify(execFile);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// backend/dist/services -> backend/dist -> backend -> raíz del repo.
+// backend/dist/services/metrados -> backend/dist/services -> backend/dist -> backend -> raíz del repo.
 // Exportadas junto con PYTHON_BIN/PROCESSING_TIMEOUT_MS/EXEC_MAX_BUFFER
 // — el dry-run de clasificación (ifc-metrados.service.ts, consolidación
 // punto 5) invoca el MISMO intérprete/CLI de Python, no tiene sentido
 // que mantenga su propia copia de estas constantes.
-export const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
+export const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
 export const PYTHON_BIN = process.env.PROCESSING_PYTHON
     || path.join(REPO_ROOT, "processing", ".venv", "bin", "python");

@@ -10,7 +10,7 @@ import {
 } from "../models/projects.models.js";
 import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
 import { AppError } from "../models/errors/app-error.js";
-import { UPLOADS_DIR } from "../middlewares/upload.midleware.js";
+import { UPLOADS_DIR, PUBLIC_UPLOADS_DIR } from "../middlewares/upload.midleware.js";
 import type { UserSuggestion } from "../models/users.models.js";
 import type { SearchUserQuery } from "../schemas/project-invitations.schema.js";
 import { createFixedCategoriesForProject } from "./almacen/category.service.js";
@@ -28,15 +28,10 @@ export const getListProjectService = async (
             p.project_id, p.name, p.description, p.location, p.client, p.contractor,
             p.start_date, p.end_date, p.created_at,
             u.user_id, u.name AS user_name, u.last_name AS user_last_name, u.role_id,
-            f.file_id AS image_file_id, f.file_path AS image_path,
-            f.name AS image_name, f.mime_type AS image_mime_type
+            p.cover_image_path, p.cover_image_name, p.cover_image_mime_type
         FROM projects p
         INNER JOIN users u
             ON u.user_id = p.owner_id
-        LEFT JOIN project_images pi
-            ON pi.project_id = p.project_id AND pi.image_type = 'cover'
-        LEFT JOIN files f
-            ON f.file_id = pi.file_id
         ${where}
         ORDER BY p.created_at DESC`,
         params
@@ -54,15 +49,10 @@ export const getProjectByIdService = async (
             p.project_id, p.name, p.description, p.location, p.client, p.contractor,
             p.start_date, p.end_date, p.created_at,
             u.user_id, u.name AS user_name, u.last_name AS user_last_name, u.role_id,
-            f.file_id AS image_file_id, f.file_path AS image_path,
-            f.name AS image_name, f.mime_type AS image_mime_type
+            p.cover_image_path, p.cover_image_name, p.cover_image_mime_type
         FROM projects p
         INNER JOIN users u
             ON u.user_id = p.owner_id
-        LEFT JOIN project_images pi
-            ON pi.project_id = p.project_id AND pi.image_type = 'cover'
-        LEFT JOIN files f
-            ON f.file_id = pi.file_id
         WHERE p.project_id = $1 AND (
                 p.owner_id = $2
                 OR EXISTS (
@@ -96,8 +86,7 @@ export const getProjectByIdService = async (
 
     // Resumen de archivos por tipo — 'ifc' sale de ifc_documents (por
     // lo mismo de arriba: documentos, no versiones), el resto es
-    // conteo directo de `files` (excluyendo la portada del proyecto,
-    // que no es "un archivo subido" para este resumen, y 'fragments' —
+    // conteo directo de `files` (excluyendo 'fragments' —
     // migración del visor a ThatOpen — que es puramente técnico, no
     // algo que el usuario subió/generó a propósito, ver
     // getProjectFilesService en files.service.ts para el mismo
@@ -110,7 +99,6 @@ export const getProjectByIdService = async (
         `SELECT f.file_type, COUNT(*)::int AS count
         FROM files f
         WHERE f.project_id = $1 AND f.file_type NOT IN ('ifc', 'fragments')
-            AND NOT EXISTS (SELECT 1 FROM project_images pi WHERE pi.file_id = f.file_id)
         GROUP BY f.file_type`,
         [projectId]
     );
@@ -143,6 +131,7 @@ export const createProjectService = async (
                 ($1, $2, $3, $4, $5, $6, $7, $8, $8)
             RETURNING
                 project_id, name, description, location, client, contractor, start_date, end_date, created_at,
+                cover_image_path, cover_image_name, cover_image_mime_type,
                 owner_id AS user_id,
                 (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
                 (SELECT last_name FROM users WHERE user_id = owner_id) AS user_last_name,
@@ -226,6 +215,7 @@ export const updateProjectService = async(
         WHERE project_id = $${lengthParams + 1} AND owner_id = $${lengthParams + 2}
         RETURNING
             project_id, name, description, location, client, contractor, start_date, end_date, created_at,
+            cover_image_path, cover_image_name, cover_image_mime_type,
             owner_id AS user_id,
             (SELECT name FROM users WHERE user_id = owner_id) AS user_name,
             (SELECT last_name FROM users WHERE user_id = owner_id) AS user_last_name,
@@ -286,7 +276,7 @@ export const deleteProjectByIdService = async(
 
     // El DELETE de arriba ya se llevó puestas todas las filas relacionadas
     // en la BD vía ON DELETE CASCADE (files, ifc_files, ifc_documents
-    // (Fase 3) y todo lo de metrados colgado de ahí, project_images,
+    // (Fase 3) y todo lo de metrados colgado de ahí,
     // project_members, project_invitations) — pero eso no borra los BYTES reales del
     // disco, ninguna de esas cascadas toca el filesystem. Todo archivo
     // de este proyecto (subidas normales Y la imagen de portada) vive
@@ -294,4 +284,9 @@ export const deleteProjectByIdService = async(
     // upload.midleware.ts, así que borrar esa carpeta entera de una
     // cubre todo sin tener que enumerar cada file_path a mano.
     await fs.promises.rm(path.join(UPLOADS_DIR, String(projectId)), { recursive: true, force: true });
+
+    // La portada NO vive ahí: la guarda uploadCoverImage bajo la carpeta
+    // pública uploads/public/covers/<projectId>/ (ver upload.midleware.ts)
+    // — sin esta línea sus bytes quedaban huérfanos al eliminar el proyecto.
+    await fs.promises.rm(path.join(PUBLIC_UPLOADS_DIR, "covers", String(projectId)), { recursive: true, force: true });
 };

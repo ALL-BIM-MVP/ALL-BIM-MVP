@@ -1,3 +1,4 @@
+import { METRADOS_MODULE_CODE } from "../../constants/modules.js";
 import ExcelJS from "exceljs";
 import fs from "node:fs/promises";
 import fsSync from "node:fs";
@@ -412,11 +413,12 @@ export const generateExcelExportService = async (
 
         const result = await pool.query<FileRow>(
             `INSERT INTO
-                files(project_id, file_type, name, file_path, file_size, checksum, mime_type, uploaded_by, generated_from_ifc_file_id)
+                files(project_id, file_type, name, file_path, file_size, checksum, mime_type, uploaded_by, generated_from_ifc_file_id, module_id)
             VALUES
-                ($1, 'excel', $2, $3, $4, $5, $6, $7, $8)
+                ($1, 'excel', $2, $3, $4, $5, $6, $7, $8, (SELECT module_id FROM modules WHERE code = $9))
             RETURNING
-                file_id, project_id, file_type, name, file_size, checksum, mime_type, uploaded_at, thumbnail_path,
+                file_id, project_id, $9::VARCHAR AS module_code, file_type, name, file_size, checksum, mime_type,
+                uploaded_at, thumbnail_path,
                 NULL AS ifc_status, NULL AS ifc_error_message,
                 NULL AS ifc_document_id, NULL AS ifc_document_name, NULL AS version_number, NULL AS is_current,
                 NULL AS specialty_code, NULL AS specialty_name,
@@ -427,7 +429,7 @@ export const generateExcelExportService = async (
             [
                 ctx.project_id, safeName, filePath, stat.size, checksum,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                user.user_id, ifcFileId,
+                user.user_id, ifcFileId, METRADOS_MODULE_CODE,
             ]
         );
 

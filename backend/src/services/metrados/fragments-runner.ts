@@ -9,6 +9,7 @@ import { UPLOADS_DIR } from "../../middlewares/upload.midleware.js";
 import { computeChecksum } from "../files.service.js";
 import { acquireSlot, releaseSlot } from "./ifc-processing-runner.js";
 import { logger } from "../../utils/logger.js";
+import { METRADOS_MODULE_CODE } from "../../constants/modules.js";
 
 // ------------------------------------------------------------------
 // Fase 2 de la migración del visor a ThatOpen (ver
@@ -28,12 +29,12 @@ import { logger } from "../../utils/logger.js";
 // ------------------------------------------------------------------
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-// backend/dist/services -> backend/dist -> backend -> node_modules/web-ifc
+// backend/dist/services/metrados -> backend/dist/services -> backend/dist -> backend -> node_modules/web-ifc
 // (web-ifc ya está en backend/package.json, y trae los .wasm consigo —
 // @thatopen/fragments lo usa como peer dependency por debajo,
 // confirmado en el spike que resuelve limpio con esta misma forma de
 // apuntar el path).
-const WEB_IFC_WASM_DIR = path.resolve(__dirname, "..", "..", "node_modules", "web-ifc") + "/";
+const WEB_IFC_WASM_DIR = path.resolve(__dirname, "..", "..", "..", "node_modules", "web-ifc") + "/";
 
 interface FileOwnerRow {
     project_id: number;
@@ -96,13 +97,13 @@ export const generateFragmentsForIfcFile = async (
 
             await pool.query(
                 `INSERT INTO
-                    files(project_id, file_type, name, file_path, file_size, checksum, mime_type, uploaded_by, generated_from_ifc_file_id)
+                    files(project_id, file_type, name, file_path, file_size, checksum, mime_type, uploaded_by, generated_from_ifc_file_id, module_id)
                 VALUES
-                    ($1, 'fragments', $2, $3, $4, $5, $6, $7, $8)`,
+                    ($1, 'fragments', $2, $3, $4, $5, $6, $7, $8, (SELECT module_id FROM modules WHERE code = $9))`,
                 [
                     owner.project_id, fileName, filePath, stat.size, checksum,
                     "application/octet-stream",
-                    owner.uploaded_by, ifcFileId,
+                    owner.uploaded_by, ifcFileId, METRADOS_MODULE_CODE,
                 ]
             );
         } finally {
