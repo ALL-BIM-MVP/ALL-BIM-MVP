@@ -1,5 +1,5 @@
 import z from 'zod';
-import { AT_LEAST_ONE, atLeastOne, idSchema } from './document-common.schema.js';
+import { AT_LEAST_ONE, atLeastOne, descriptionSchema, idSchema } from './document-common.schema.js';
 
 export const GoodsReceiptIdParamSchema = z.object({
     projectId: z.coerce.number(),
@@ -25,6 +25,8 @@ const GoodsReceiptItemInputSchema = z.object({
     purchase_order_item_id: idSchema.nullable().optional(),
     // Obligatorio solo si el ingreso no tiene orden (con orden es el de la línea citada).
     product_id: idSchema.optional(),
+    // Descripción de la línea según la guía. Si no se envía: la de la línea de orden citada o el nombre del producto.
+    description: descriptionSchema.optional(),
     // Lo que se RECIBIÓ físicamente (suma al stock y se reparte entre ubicaciones).
     total_quantity: z.coerce.number().positive(),
     // Lo que decía la guía — opcional: puede diferir de lo recibido

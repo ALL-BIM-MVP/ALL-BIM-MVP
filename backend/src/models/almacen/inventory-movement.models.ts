@@ -1,3 +1,5 @@
+import type { ProductSummary } from "./product.models.js";
+
 // inventory_movements (Kardex) — ver
 // docs/roadmap/almacen-bim-base-datos.md 4.6. Historial inmutable,
 // `resulting_balance` es un snapshot calculado al insertar (nunca se
@@ -5,6 +7,7 @@
 export interface InventoryMovementRow {
     inventory_movement_id: number;
     product_id: number;
+    product: ProductSummary;
     // Valor real en español — dato de negocio (mismo criterio que
     // warehouses.direction).
     type: "entrada" | "salida";

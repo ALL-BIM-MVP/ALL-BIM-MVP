@@ -18,6 +18,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+let vsSeq = 0;
+const vsn = () => `VS-${++vsSeq}`;
+
 
 // Carpeta temporal ANTES de cargar dist/ (imports dinámicos): no ensuciar uploads/.
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "requisitions-test-"));
@@ -206,7 +209,7 @@ test("preparar: requerimiento de 3 líneas, dos cotizaciones, dos órdenes, una 
     S.invD = await invoice(supplierA, "102", S.poD, [[{ purchase_order_item_id: S.poD.items[0].purchase_order_item_id }, 5]], "2026-09-23");
     // Vale: salen 30 de cemento de la casilla A.
     S.issue = await gisvc.createGoodsIssueService(owner(), ctx(), {
-        destination_sector: "Torre A", destination_level: "Piso 3", destination_block: "Bloque B", recipient_name: "Juan Pérez", recipient_dni: "12345678",
+        number: vsn(), destination_sector: "Torre A", destination_level: "Piso 3", destination_block: "Bloque B", recipient_name: "Juan Pérez", recipient_dni: "12345678",
         issue_date: "2026-09-25", items: [{ product_id: productId, total_quantity: 30, locations: [{ bin_id: binA, quantity: 30 }] }] });
     assert.equal(S.rc2.items[0].locations.length, 2);
 });
@@ -423,7 +426,7 @@ test("una orden hecha solo desde el requerimiento (sin cotización) se une a la 
 
 test("una casilla que quedó en cero ya no figura en el stock actual, pero sus movimientos siguen en la historia", async () => {
     await gisvc.createGoodsIssueService(owner(), ctx(), {
-        destination_sector: "Torre B", destination_level: "Piso 1", destination_block: "Bloque A", recipient_name: "Ana Ruiz", recipient_dni: "87654321",
+        number: vsn(), destination_sector: "Torre B", destination_level: "Piso 1", destination_block: "Bloque A", recipient_name: "Ana Ruiz", recipient_dni: "87654321",
         issue_date: "2026-09-26", items: [{ product_id: productId, total_quantity: 25, locations: [{ bin_id: binB, quantity: 25 }] }] });
     const h = await history();
     assert.deepEqual(h.stock.by_bin.map((b) => b.quantity), ["50.000000"], "la casilla A2 quedó en cero y no se lista");

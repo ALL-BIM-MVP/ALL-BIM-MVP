@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 import type { ItemAdjustmentSummary } from "./inventory-adjustment.models.js";
 
 // goods_issues (Vale de Salida) — ver
@@ -7,6 +8,7 @@ import type { ItemAdjustmentSummary } from "./inventory-adjustment.models.js";
 export interface GoodsIssueRow {
     goods_issue_id: number;
     project_id: number;
+    number: string;
     destination_sector: string;
     destination_level: string;
     destination_block: string;
@@ -35,6 +37,7 @@ export interface GoodsIssueItemRow {
     goods_issue_item_id: number;
     goods_issue_id: number;
     product_id: number;
+    product: ProductSummary;
     total_quantity: number;
 }
 

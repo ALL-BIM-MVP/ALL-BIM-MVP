@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 import type { PurchaseOrderItemProgress, ReceiptDocuments, StatusAlert } from "./document-status.models.js";
 import type { ItemAdjustmentSummary } from "./inventory-adjustment.models.js";
 
@@ -53,6 +54,8 @@ export interface GoodsReceiptItemRow {
     goods_receipt_id: number;
     purchase_order_item_id: number | null;
     product_id: number;
+    product: ProductSummary;
+    description: string;
     // Lo recibido físicamente (suma al stock). Mismo nombre que en el vale de salida.
     total_quantity: number;
     // Lo que decía la guía; null si no se registró.

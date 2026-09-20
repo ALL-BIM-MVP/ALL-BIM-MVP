@@ -17,11 +17,12 @@ import type {
     GoodsIssueDetail, GoodsIssueItemLocationRow, GoodsIssueItemRow, GoodsIssueRow,
 } from "../../models/almacen/goods-issue.models.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 // issue_date sale como texto AAAA-MM-DD (columna DATE): sin pasar por un
 // Date, no depende de la zona horaria del servidor. Fragmento fijo.
 const GOODS_ISSUE_SELECT = `
-    SELECT goods_issue_id, project_id, destination_sector, destination_level, destination_block,
+    SELECT goods_issue_id, project_id, number, destination_sector, destination_level, destination_block,
         recipient_name, recipient_dni, to_char(issue_date, 'YYYY-MM-DD') AS issue_date, created_at, created_by,
         voided_at IS NOT NULL AS voided, voided_at
     FROM goods_issues`;
@@ -51,7 +52,9 @@ export const getGoodsIssueByIdService = async (
     if (!header) throw new AppError(GOODS_ISSUE_ERRORS.NOT_FOUND);
 
     const itemsResult = await pool.query<GoodsIssueItemRow>(
-        `SELECT * FROM goods_issue_items WHERE goods_issue_id = $1 ORDER BY goods_issue_item_id`,
+        `SELECT gii.*, ${productSummarySql('p')} AS product
+        FROM goods_issue_items gii INNER JOIN products p ON p.product_id = gii.product_id
+        WHERE gii.goods_issue_id = $1 ORDER BY gii.goods_issue_item_id`,
         [goodsIssueId]
     );
     const locationsResult = await pool.query<GoodsIssueItemLocationRow>(
@@ -98,11 +101,11 @@ export const createGoodsIssueService = async (
 
         const headerResult = await client.query<{ goods_issue_id: number }>(
             `INSERT INTO goods_issues
-                (project_id, destination_sector, destination_level, destination_block, recipient_name, recipient_dni, issue_date, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+                (project_id, number, destination_sector, destination_level, destination_block, recipient_name, recipient_dni, issue_date, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
             RETURNING goods_issue_id`,
             [
-                projectId, body.destination_sector, body.destination_level, body.destination_block,
+                projectId, body.number, body.destination_sector, body.destination_level, body.destination_block,
                 body.recipient_name, body.recipient_dni, body.issue_date, user.user_id,
             ]
         );
@@ -141,6 +144,7 @@ export const createGoodsIssueService = async (
         return await getGoodsIssueByIdService(user, { projectId, goodsIssueId });
     } catch (error) {
         await client.query("ROLLBACK");
+        if ((error as { code?: string }).code === "23505") throw new AppError(GOODS_ISSUE_ERRORS.DUPLICATE_NUMBER);
         throw error;
     } finally {
         client.release();

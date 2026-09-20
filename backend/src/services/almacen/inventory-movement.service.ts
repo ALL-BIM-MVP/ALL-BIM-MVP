@@ -15,6 +15,7 @@ import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 import type { ListInventoryMovementsQuery } from "../../schemas/almacen/inventory-movement.schema.js";
 import type { InventoryMovementRow } from "../../models/almacen/inventory-movement.models.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 interface ApplyStockMovementParams {
     productId: number;
@@ -93,7 +94,8 @@ export const listInventoryMovementsService = async (
     const { rows } = await pool.query<InventoryMovementRow>(
         `SELECT im.inventory_movement_id, im.product_id, im.type, im.quantity, im.bin_id, im.resulting_balance,
             im.reference_document_type, im.reference_document_id,
-            to_char(im.movement_date, 'YYYY-MM-DD') AS movement_date, im.created_at, im.created_by
+            to_char(im.movement_date, 'YYYY-MM-DD') AS movement_date, im.created_at, im.created_by,
+            ${productSummarySql('p')} AS product
         FROM inventory_movements im
         INNER JOIN products p ON p.product_id = im.product_id
         WHERE p.project_id = $1

@@ -1,5 +1,6 @@
 import z from 'zod';
 import { dateOnlySchema } from './goods-receipt.schema.js';
+import { documentNumberSchema } from './document-common.schema.js';
 
 export const GoodsIssueIdParamSchema = z.object({
     projectId: z.coerce.number(),
@@ -38,6 +39,7 @@ const recipientDniSchema = z.string().trim()
     .pipe(z.string().regex(DNI_REGEX, "El DNI debe tener exactamente 8 dígitos numéricos"));
 
 export const CreateGoodsIssueBodySchema = z.object({
+    number: documentNumberSchema,
     // Campos reales del Vale de Salida (diseño 4.4) — destino en obra +
     // quién retira, no un "motivo" genérico. Los .max() espejan los
     // VARCHAR(n) reales de schema.sql (ver mismo comentario en

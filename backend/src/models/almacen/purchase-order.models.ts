@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 import type { PurchaseOrderItemProgress, StatusAlert } from "./document-status.models.js";
 
 // purchase_orders (órdenes de compra) — ver database/schema.sql y
@@ -41,7 +42,7 @@ export interface PurchaseOrderItem {
     tax_amount: string | null;
     line_total: string;
     notes: string | null;
-    product: { product_id: number; code: string; name: string; unit: string };
+    product: ProductSummary;
     // Origen de la línea (null = la línea no cita ese documento).
     quotation_item: { quotation_item_id: number; description: string; quantity_quoted: string } | null;
     requisition_item: { purchase_requisition_item_id: number; description: string; quantity_requested: string } | null;

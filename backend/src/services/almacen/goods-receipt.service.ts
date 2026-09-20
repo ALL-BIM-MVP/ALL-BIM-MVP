@@ -32,6 +32,7 @@ import type {
     GoodsReceiptDetail, GoodsReceiptFile, GoodsReceiptItemLocationRow, GoodsReceiptItemRow, GoodsReceiptRow,
 } from "../../models/almacen/goods-receipt.models.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -53,7 +54,7 @@ const GOODS_RECEIPT_SELECT = `
         json_build_object('supplier_id', s.supplier_id, 'ruc', s.ruc, 'name', s.name) AS supplier,
         gr.entry_type,
         CASE WHEN o.purchase_order_id IS NULL THEN NULL
-            ELSE json_build_object('purchase_order_id', o.purchase_order_id, 'number', o.number) END AS purchase_order,
+            ELSE json_build_object('purchase_order_id', o.purchase_order_id::text, 'number', o.number) END AS purchase_order,
         gr.delivery_note_series, gr.delivery_note_number,
         to_char(gr.delivery_note_date, 'YYYY-MM-DD') AS delivery_note_date,
         to_char(gr.received_date, 'YYYY-MM-DD') AS received_date,
@@ -103,11 +104,12 @@ const loadDetail = async (
     if (!header) throw new AppError(GOODS_RECEIPT_ERRORS.NOT_FOUND);
 
     const itemsResult = await client.query<Omit<GoodsReceiptItemRow, "purchase_order_progress" | "alerts">>(
-        `SELECT gri.*,
+        `SELECT gri.*, ${productSummarySql('p')} AS product,
             CASE WHEN oi.purchase_order_item_id IS NULL THEN NULL
-                ELSE json_build_object('purchase_order_item_id', oi.purchase_order_item_id, 'description', oi.description,
+                ELSE json_build_object('purchase_order_item_id', oi.purchase_order_item_id::text, 'description', oi.description,
                     'quantity_ordered', oi.quantity_ordered::text) END AS purchase_order_item
         FROM goods_receipt_items gri
+        INNER JOIN products p ON p.product_id = gri.product_id
         LEFT JOIN purchase_order_items oi ON oi.purchase_order_item_id = gri.purchase_order_item_id
         WHERE gri.goods_receipt_id = $1 ORDER BY gri.goods_receipt_item_id`,
         [goodsReceiptId]
@@ -263,10 +265,14 @@ export const createGoodsReceiptService = async (
             const link = links[index]!;
             const itemResult = await client.query<{ goods_receipt_item_id: number }>(
                 `INSERT INTO goods_receipt_items
-                    (goods_receipt_id, purchase_order_item_id, product_id, total_quantity, quantity_per_delivery_note)
-                VALUES ($1,$2,$3,$4,$5)
+                    (goods_receipt_id, purchase_order_item_id, product_id, description, total_quantity, quantity_per_delivery_note)
+                VALUES ($1,$2,$3,
+                    COALESCE($4::text,
+                        (SELECT description FROM purchase_order_items WHERE purchase_order_item_id = $2::bigint),
+                        (SELECT name FROM products WHERE product_id = $3::bigint)),
+                    $5,$6)
                 RETURNING goods_receipt_item_id`,
-                [goodsReceiptId, link.purchaseOrderItemId, link.productId, item.total_quantity, item.quantity_per_delivery_note ?? null]
+                [goodsReceiptId, link.purchaseOrderItemId, link.productId, item.description ?? null, item.total_quantity, item.quantity_per_delivery_note ?? null]
             );
             const goodsReceiptItemId = itemResult.rows[0]!.goods_receipt_item_id;
 

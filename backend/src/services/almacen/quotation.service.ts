@@ -25,6 +25,7 @@ import type {
     SetQuotationFileBody, UpdateQuotationBody, UpdateQuotationItemBody,
 } from "../../schemas/almacen/quotation.schema.js";
 import type { QuotationDetail, QuotationFile, QuotationItem, QuotationRow } from "../../models/almacen/quotation.models.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 const UNIQUE_VIOLATION = "23505";
 const CHECK_VIOLATION = "23514";
@@ -45,7 +46,7 @@ const HEADER_COLUMNS_SQL = `
     q.currency, q.commercial_terms, to_char(q.valid_until, 'YYYY-MM-DD') AS valid_until, q.total_amount,
     (SELECT COALESCE(SUM(i.line_total), 0) FROM quotation_items i WHERE i.quotation_id = q.quotation_id) AS lines_total,
     json_build_object('supplier_id', s.supplier_id, 'ruc', s.ruc, 'name', s.name) AS supplier,
-    json_build_object('purchase_requisition_id', pr.purchase_requisition_id, 'number', pr.number) AS purchase_requisition,
+    json_build_object('purchase_requisition_id', pr.purchase_requisition_id::text, 'number', pr.number) AS purchase_requisition,
     q.created_at, q.created_by, q.updated_at, q.updated_by`;
 const HEADER_FROM_SQL = `
     FROM quotations q
@@ -55,8 +56,8 @@ const HEADER_FROM_SQL = `
 const ITEM_SELECT = `
     SELECT i.quotation_item_id, i.quotation_id, i.purchase_requisition_item_id, i.product_id, i.description,
         i.quantity_quoted, i.unit_price, i.discount_amount, i.tax_amount, i.line_total, i.notes,
-        json_build_object('product_id', p.product_id, 'code', p.code, 'name', p.name, 'unit', p.unit) AS product,
-        json_build_object('purchase_requisition_item_id', ri.purchase_requisition_item_id,
+        ${productSummarySql('p')} AS product,
+        json_build_object('purchase_requisition_item_id', ri.purchase_requisition_item_id::text,
             'description', ri.description, 'quantity_requested', ri.quantity_requested::text) AS requisition_item
     FROM quotation_items i
     INNER JOIN products p ON p.product_id = i.product_id

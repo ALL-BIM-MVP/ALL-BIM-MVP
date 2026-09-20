@@ -89,8 +89,9 @@ export const listBinsForRack = async (rackId: number, projectId: number): Promis
             COALESCE(
                 json_agg(
                     json_build_object(
-                        'product_id', p.product_id, 'code', p.code, 'name', p.name,
-                        'quantity', bc.quantity,
+                        'product_id', p.product_id::text, 'category_id', p.category_id, 'code', p.code, 'display_id', p.display_id,
+                        'name', p.name, 'unit', p.unit,
+                        'quantity', bc.quantity::numeric(18,6)::text,
                         'model_3d_asset_id', p.model_3d_asset_id, 'model_3d_format', ma.format
                     )
                 ) FILTER (WHERE bc.bin_content_id IS NOT NULL),

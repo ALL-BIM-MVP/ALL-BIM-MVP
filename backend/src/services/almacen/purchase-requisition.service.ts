@@ -27,6 +27,7 @@ import type {
 import type {
     PurchaseRequisitionDetail, PurchaseRequisitionFile, PurchaseRequisitionItem, PurchaseRequisitionRow,
 } from "../../models/almacen/purchase-requisition.models.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -44,7 +45,7 @@ const REQUISITION_SELECT = `
 const ITEM_SELECT = `
     SELECT i.purchase_requisition_item_id, i.purchase_requisition_id, i.product_id, i.description,
         i.quantity_requested, i.estimated_unit_price,
-        json_build_object('product_id', p.product_id, 'code', p.code, 'name', p.name, 'unit', p.unit) AS product
+        ${productSummarySql('p')} AS product
     FROM purchase_requisition_items i
     INNER JOIN products p ON p.product_id = i.product_id`;
 

@@ -1538,6 +1538,9 @@ CREATE TABLE goods_receipt_items (
     -- RESTRICT: no se puede borrar de motor un producto con historial
     -- de ingresos.
     product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- Descripción de la línea tal como la muestra la guía (la del cliente: "Descripción de la
+    -- Compra"). Si no se envía, se toma la de la línea de orden citada o el nombre del producto.
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
     -- Lo que se RECIBIÓ físicamente (es lo que suma al stock). Se repartió
     -- entre ubicaciones en goods_receipt_item_locations.
     total_quantity NUMERIC(18,6) NOT NULL CHECK (total_quantity > 0),
@@ -1577,6 +1580,9 @@ CREATE INDEX idx_goods_receipt_item_locations_bin_id ON goods_receipt_item_locat
 CREATE TABLE goods_issues (
     goods_issue_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Número del vale ("VS-01"): lo escribe el usuario, formato libre de la empresa. Único por
+    -- proyecto entre los vales NO anulados (el de un vale anulado se puede reutilizar).
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
     destination_sector VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_sector)) > 0),
     destination_level VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_level)) > 0),
     destination_block VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_block)) > 0),
@@ -1597,6 +1603,7 @@ CREATE TABLE goods_issues (
     voided_by INT REFERENCES users(user_id)
 );
 CREATE INDEX idx_goods_issues_project_id ON goods_issues (project_id);
+CREATE UNIQUE INDEX uq_goods_issues_number ON goods_issues (project_id, number) WHERE voided_at IS NULL;
 
 CREATE TABLE goods_issue_items (
     goods_issue_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

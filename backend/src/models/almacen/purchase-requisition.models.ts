@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 import type { RequisitionItemProgress, RequisitionSummary, StatusAlert } from "./document-status.models.js";
 
 // purchase_requisitions (requerimientos) — ver database/schema.sql y
@@ -27,7 +28,7 @@ export interface PurchaseRequisitionItem {
     description: string;
     quantity_requested: string;
     estimated_unit_price: string | null;
-    product: { product_id: number; code: string; name: string; unit: string };
+    product: ProductSummary;
     // Derivado (Fase 8): avance de la línea por la cadena y avisos.
     progress: RequisitionItemProgress;
     alerts: StatusAlert[];

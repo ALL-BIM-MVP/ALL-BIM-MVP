@@ -90,7 +90,7 @@ const seedAlmacenData = async () => {
         [projectId, supplierId, OWNER_USER_ID]
     );
     const [{ goods_receipt_item_id: receiptItemId }] = await q(
-        `INSERT INTO goods_receipt_items (goods_receipt_id, product_id, total_quantity) VALUES ($1, $2, 10) RETURNING goods_receipt_item_id`,
+        `INSERT INTO goods_receipt_items (goods_receipt_id, product_id, description, total_quantity) VALUES ($1, $2, 'x', 10) RETURNING goods_receipt_item_id`,
         [receiptId, productId]
     );
     await q(
@@ -99,9 +99,9 @@ const seedAlmacenData = async () => {
     );
 
     const [{ goods_issue_id: issueId }] = await q(
-        `INSERT INTO goods_issues (project_id, destination_sector, destination_level, destination_block,
+        `INSERT INTO goods_issues (project_id, number, destination_sector, destination_level, destination_block,
             recipient_name, recipient_dni, issue_date, created_by)
-        VALUES ($1, 's', 'n', 'b', '[test] recibe', '12345678', CURRENT_DATE, $2) RETURNING goods_issue_id`,
+        VALUES ($1, 'VS-1', 's', 'n', 'b', '[test] recibe', '12345678', CURRENT_DATE, $2) RETURNING goods_issue_id`,
         [projectId, OWNER_USER_ID]
     );
     const [{ goods_issue_item_id: issueItemId }] = await q(

@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 import type { QuotationItemProgress, StatusAlert } from "./document-status.models.js";
 
 // quotations (cotizaciones) — ver database/schema.sql y
@@ -40,7 +41,7 @@ export interface QuotationItem {
     tax_amount: string | null;
     line_total: string;
     notes: string | null;
-    product: { product_id: number; code: string; name: string; unit: string };
+    product: ProductSummary;
     // Lo que pedía la línea del requerimiento, para compararlo con lo cotizado.
     requisition_item: { purchase_requisition_item_id: number; description: string; quantity_requested: string };
     // Derivado (Fase 8): cuánto se ordenó de esta línea y si fue adjudicada.

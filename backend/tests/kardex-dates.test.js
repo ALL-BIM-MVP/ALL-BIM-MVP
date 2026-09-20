@@ -20,6 +20,9 @@ import { createGoodsReceiptService } from "../dist/services/almacen/goods-receip
 import { createGoodsIssueService } from "../dist/services/almacen/goods-issue.service.js";
 import { listInventoryMovementsService } from "../dist/services/almacen/inventory-movement.service.js";
 import { ListInventoryMovementsQuerySchema } from "../dist/schemas/almacen/inventory-movement.schema.js";
+let vsSeq = 0;
+const vsn = () => `VS-${++vsSeq}`;
+
 
 const OWNER_USER_ID = 1;
 const user = { user_id: OWNER_USER_ID, role_id: 4, email: "test@example.test" };
@@ -69,7 +72,7 @@ test("el movimiento toma la fecha del documento (no la de registro)", async () =
     await receipt(1, "2026-09-12", 50);
     await receipt(2, "2026-09-30", 20);
     await createGoodsIssueService(user, { projectId }, {
-        destination_sector: "S1", destination_level: "N1", destination_block: "B1", recipient_name: "Juan", recipient_dni: "12345678",
+        number: vsn(), destination_sector: "S1", destination_level: "N1", destination_block: "B1", recipient_name: "Juan", recipient_dni: "12345678",
         issue_date: "2026-10-01", items: [{ product_id: productId, total_quantity: 5, locations: [{ bin_id: binId, quantity: 5 }] }],
     });
     assert.deepEqual(await dates({}), ["2026-10-01", "2026-09-30", "2026-09-12"], "más reciente primero, con la fecha del documento");

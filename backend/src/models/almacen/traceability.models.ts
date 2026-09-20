@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 // Trazabilidad DOCUMENTAL (Fase 9 de docs/almacen-ingreso-productos/05-roadmap.md):
 // desde cualquier documento se sigue la cadena requerimiento → cotización → orden →
 // factura → ingreso por LÍNEA (por elemento). Consulta de solo lectura sobre los
@@ -11,8 +12,10 @@ export type TraceDirection = "backward" | "forward" | "all";
 export interface TraceDocument {
     id: number;
     label: string;
+    // Ingreso: `date` es la de recepción (vale de entrada); `delivery_note_date`, la de la guía. Otros documentos: null.
     date: string;
-    supplier: { supplier_id: number; name: string } | null;
+    delivery_note_date: string | null;
+    supplier: { supplier_id: number; ruc: string; name: string } | null;
     has_file: boolean;
     // Solo ingresos: 'normal' | 'rapida'; solo requerimientos: quién lo pidió.
     entry_type: "normal" | "rapida" | null;
@@ -38,13 +41,14 @@ interface TraceLineBase {
     description: string;
 }
 
-export interface TraceRequisitionLine extends TraceLineBase { quantity_requested: string }
+export interface TraceRequisitionLine extends TraceLineBase { quantity_requested: string; estimated_unit_price: string | null }
 export interface TraceQuotationLine extends TraceLineBase { quantity_quoted: string; unit_price: string | null; line_total: string }
 export interface TraceOrderLine extends TraceLineBase { quantity_ordered: string; unit_price: string | null; line_total: string }
 export interface TraceInvoiceLine extends TraceLineBase { quantity_invoiced: string; unit_price: string | null; line_total: string }
 export interface TraceReceiptLine {
     id: number;
     document_id: number;
+    description: string;
     // Lo registrado, los ajustes (Fase 10) y lo EFECTIVO (registrado + ajustes) = quantity_received.
     quantity_registered: string;
     quantity_adjusted: string;
@@ -59,7 +63,7 @@ export interface TraceReceiptLine {
 // órdenes, facturas e ingresos con sus casillas). Un elemento sin vínculos (compra
 // directa, entrada rápida) forma su propio hilo.
 export interface TraceThread {
-    product: { product_id: number; code: string; name: string; unit: string };
+    product: ProductSummary;
     contains_anchor: boolean;
     requisition_items: TraceRequisitionLine[];
     quotation_items: TraceQuotationLine[];

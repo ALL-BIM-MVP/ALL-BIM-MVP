@@ -8,6 +8,16 @@ import { buildModel3DAssetUrl } from "./model-3d-asset.models.js";
 // modelo" tiene que apuntar a algo que de verdad existe (una fila real
 // de model_3d_assets — del usuario que lo subió, no de este proyecto,
 // ver ese archivo).
+// Resumen incrustado en las respuestas de otros recursos (ver utils/product-summary.ts).
+export interface ProductSummary {
+    product_id: number;
+    category_id: number;
+    code: string;
+    display_id: number;
+    name: string;
+    unit: string;
+}
+
 export interface ProductRow {
     product_id: number;
     project_id: number;
@@ -73,7 +83,7 @@ export const transformProductModel3D = (p: ProductRowWithAssetJoin, projectId: n
 // stock total y ubicación principal NO son columnas — se calculan
 // siempre con SUM/MAX sobre bin_contents (ver diseño 2.2).
 export interface ProductListing extends ProductWithModel3D {
-    total_stock: number;
+    total_stock: string;
     main_location: string | null;
 }
 

@@ -971,6 +971,7 @@ Content-Type: application/json
   "items": [
     {
       "purchase_order_item_id": {{directOrderItemId}},
+      "description": "Descripción tal como figura en la guía (opcional: si no se envía se toma la de la línea de la orden)",
       "total_quantity": 6,
       "quantity_per_delivery_note": 6,
       "locations": [ { "bin_id": {{binId2}}, "quantity": 6 } ]
@@ -1152,6 +1153,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
+  "number": "VS-01",
   "destination_sector": "Sector 1",
   "destination_level": "Nivel 2",
   "destination_block": "Bloque A",
@@ -1165,6 +1167,18 @@ Content-Type: application/json
       "locations": [ { "bin_id": {{binId}}, "quantity": 20 } ]
     }
   ]
+}
+
+### 8.1b Número de vale repetido -> 409 GOODS_ISSUE_DUPLICATE_NUMBER
+POST {{baseUrl}}/projects/{{projectId}}/goods-issues
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "number": "VS-01",
+  "destination_sector": "Sector 1", "destination_level": "Nivel 2", "destination_block": "Bloque A",
+  "recipient_name": "Juan Pérez", "recipient_dni": "12345678", "issue_date": "2026-09-15",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 1, "locations": [ { "bin_id": {{binId}}, "quantity": 1 } ] } ]
 }
 
 ###
@@ -1280,6 +1294,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
+  "number": "VS-02",
   "destination_sector": "Sector 2", "destination_level": "Nivel 1", "destination_block": "Bloque C",
   "recipient_name": "Ana Ruiz", "recipient_dni": "87654321", "issue_date": "2026-09-23",
   "items": [ { "product_id": {{productId}}, "total_quantity": 2, "locations": [ { "bin_id": {{binId}}, "quantity": 2 } ] } ]
@@ -1383,6 +1398,7 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 {
+  "number": "VS-03",
   "destination_sector": "Sector 1", "destination_level": "Nivel 2", "destination_block": "Bloque A",
   "recipient_name": "Juan Pérez", "recipient_dni": "12345678", "issue_date": "2026-09-15",
   "items": [ { "product_id": {{productId}}, "total_quantity": 9999, "locations": [ { "bin_id": {{binId}}, "quantity": 9999 } ] } ]
@@ -1694,6 +1710,10 @@ Authorization: Bearer {{accessToken}}
 
 ### 12.3 Baja de un estante: se rechaza mientras tenga casillas (409 RACK_HAS_BINS)
 DELETE {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}
+Authorization: Bearer {{accessToken}}
+
+### 12.3b Baja de un almacén: se rechaza mientras tenga estantes (409 WAREHOUSE_HAS_RACKS)
+DELETE {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}
 Authorization: Bearer {{accessToken}}
 
 ### 12.4 VACIAR TODO ALMACÉN del proyecto (solo dueño/administrador). Conserva las 3 categorías.

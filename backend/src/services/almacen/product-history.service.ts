@@ -42,7 +42,7 @@ export const getProductHistoryService = async (
 
     // Se permite ver la historia de un producto ya dado de baja (su historia existe).
     const productResult = await pool.query<ProductHistory["product"]>(
-        `SELECT product_id, code, name, unit FROM products WHERE product_id = $1 AND project_id = $2`, [productId, projectId]
+        `SELECT product_id, category_id, code, display_id, name, unit FROM products WHERE product_id = $1 AND project_id = $2`, [productId, projectId]
     );
     const product = productResult.rows[0];
     if (!product) throw new AppError(PRODUCT_ERRORS.PRODUCT_NOT_FOUND);
@@ -82,11 +82,11 @@ export const getProductHistoryService = async (
             im.reference_document_type, im.reference_document_id, to_char(im.movement_date, 'YYYY-MM-DD') AS date,
             im.bin_id, ${BIN_LABEL} AS bin_label,
             gr.delivery_note_series, gr.delivery_note_number, gr.entry_type, s.supplier_id, s.name AS supplier_name, o.number AS order_number,
-            gi.destination_sector, gi.destination_level, gi.destination_block, gi.recipient_name,
+            gi.number AS issue_number, gi.destination_sector, gi.destination_level, gi.destination_block, gi.recipient_name,
             ia.reason AS adjustment_reason, ia.goods_receipt_id AS adjusted_receipt_id, ia.goods_issue_id AS adjusted_issue_id,
             CASE WHEN ia.goods_receipt_id IS NOT NULL
                 THEN (SELECT concat(x.delivery_note_series, '-', x.delivery_note_number) FROM goods_receipts x WHERE x.goods_receipt_id = ia.goods_receipt_id)
-                ELSE 'Vale #' || ia.goods_issue_id END AS adjusted_label
+                ELSE (SELECT y.number FROM goods_issues y WHERE y.goods_issue_id = ia.goods_issue_id) END AS adjusted_label
         FROM inventory_movements im
         ${BIN_JOINS.replace("%BIN%", "im.bin_id")}
         LEFT JOIN goods_receipts gr ON im.reference_document_type = 'goods_receipt' AND gr.goods_receipt_id = im.reference_document_id
@@ -121,7 +121,7 @@ export const getProductHistoryService = async (
             document: {
                 type: isReceipt ? "goods_receipt" as const : "goods_issue" as const,
                 id: m.reference_document_id as number,
-                label: isReceipt ? `${m.delivery_note_series}-${m.delivery_note_number}` : `Vale #${m.reference_document_id}`,
+                label: isReceipt ? `${m.delivery_note_series}-${m.delivery_note_number}` : String(m.issue_number),
             },
             supplier: isReceipt && m.supplier_id != null ? { supplier_id: m.supplier_id as number, name: String(m.supplier_name) } : null,
             entry_type: isReceipt ? (m.entry_type as "normal" | "rapida") : null,

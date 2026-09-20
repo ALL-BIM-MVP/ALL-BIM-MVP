@@ -19,6 +19,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+let vsSeq = 0;
+const vsn = () => `VS-${++vsSeq}`;
+
 
 // Carpeta temporal ANTES de cargar dist/ (imports dinámicos): no ensuciar uploads/.
 const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "requisitions-test-"));
@@ -155,7 +158,7 @@ const fast = (number, product, qty, bin, over = {}) => rcsvc.createGoodsReceiptS
     items: [{ product_id: product, total_quantity: qty, locations: [{ bin_id: bin, quantity: qty }] }], ...over,
 });
 const issueOf = (product, qty, bin) => gisvc.createGoodsIssueService(owner(), ctx(), {
-    destination_sector: "Torre A", destination_level: "Piso 3", destination_block: "Bloque B", recipient_name: "Juan Pérez", recipient_dni: "12345678",
+    number: vsn(), destination_sector: "Torre A", destination_level: "Piso 3", destination_block: "Bloque B", recipient_name: "Juan Pérez", recipient_dni: "12345678",
     issue_date: "2026-09-15", items: [{ product_id: product, total_quantity: qty, locations: [{ bin_id: bin, quantity: qty }] }],
 });
 const correct = (rc, lines, over = {}, user = owner()) => asvc.correctGoodsReceiptService(user, ctx(), rc.goods_receipt_id, {
@@ -276,7 +279,7 @@ test("CORREGIR UN VALE: se retiraron 60 pero eran 40 → el ajuste devuelve 20 a
     const item = S.issue1.items[0].goods_issue_item_id;
     const adj = await asvc.correctGoodsIssueService(owner(), ctx(), S.issue1.goods_issue_id, {
         reason: "Solo se retiraron 40", items: [{ goods_issue_item_id: item, bin_id: binA, quantity_delta: -20 }] });
-    assert.equal(adj.reference_document.label, `Vale #${S.issue1.goods_issue_id}`);
+    assert.equal(adj.reference_document.label, S.issue1.number);
     assert.equal(adj.items[0].quantity_delta, "-20.000000", "cambio de lo retirado");
     assert.equal(adj.items[0].stock_effect, "20.000000", "el efecto en el stock es el opuesto");
     assert.equal(await binStock(binA, productId), 30, "10 + 20 devueltos");

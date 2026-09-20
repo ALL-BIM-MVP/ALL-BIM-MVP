@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 import type { PurchaseOrderItemProgress, StatusAlert } from "./document-status.models.js";
 
 // invoices (facturas) — ver database/schema.sql y
@@ -41,7 +42,7 @@ export interface InvoiceItem {
     tax_amount: string | null;
     line_total: string;
     notes: string | null;
-    product: { product_id: number; code: string; name: string; unit: string };
+    product: ProductSummary;
     // Lo que decía la línea de la orden (null = la factura no tiene orden).
     purchase_order_item: { purchase_order_item_id: number; description: string; quantity_ordered: string } | null;
     // Derivado (Fase 8): avance ACUMULADO de la línea de orden que esta línea factura (null sin orden) y avisos.

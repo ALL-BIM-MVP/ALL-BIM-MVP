@@ -32,6 +32,7 @@ import type {
 import type {
     PurchaseOrderDetail, PurchaseOrderFile, PurchaseOrderItem, PurchaseOrderRow,
 } from "../../models/almacen/purchase-order.models.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -51,9 +52,9 @@ const HEADER_COLUMNS_SQL = `
     (SELECT COALESCE(SUM(i.line_total), 0) FROM purchase_order_items i WHERE i.purchase_order_id = o.purchase_order_id) AS lines_total,
     json_build_object('supplier_id', s.supplier_id, 'ruc', s.ruc, 'name', s.name) AS supplier,
     CASE WHEN pr.purchase_requisition_id IS NULL THEN NULL
-        ELSE json_build_object('purchase_requisition_id', pr.purchase_requisition_id, 'number', pr.number) END AS purchase_requisition,
+        ELSE json_build_object('purchase_requisition_id', pr.purchase_requisition_id::text, 'number', pr.number) END AS purchase_requisition,
     CASE WHEN q.quotation_id IS NULL THEN NULL
-        ELSE json_build_object('quotation_id', q.quotation_id, 'number', q.number) END AS quotation,
+        ELSE json_build_object('quotation_id', q.quotation_id::text, 'number', q.number) END AS quotation,
     o.created_at, o.created_by, o.updated_at, o.updated_by`;
 const HEADER_FROM_SQL = `
     FROM purchase_orders o
@@ -65,12 +66,12 @@ const ITEM_SELECT = `
     SELECT i.purchase_order_item_id, i.purchase_order_id, i.quotation_item_id, i.purchase_requisition_item_id,
         i.product_id, i.description, i.quantity_ordered, i.unit_price, i.discount_amount, i.tax_amount,
         i.line_total, i.notes,
-        json_build_object('product_id', p.product_id, 'code', p.code, 'name', p.name, 'unit', p.unit) AS product,
+        ${productSummarySql('p')} AS product,
         CASE WHEN qi.quotation_item_id IS NULL THEN NULL
-            ELSE json_build_object('quotation_item_id', qi.quotation_item_id, 'description', qi.description,
+            ELSE json_build_object('quotation_item_id', qi.quotation_item_id::text, 'description', qi.description,
                 'quantity_quoted', qi.quantity_quoted::text) END AS quotation_item,
         CASE WHEN ri.purchase_requisition_item_id IS NULL THEN NULL
-            ELSE json_build_object('purchase_requisition_item_id', ri.purchase_requisition_item_id,
+            ELSE json_build_object('purchase_requisition_item_id', ri.purchase_requisition_item_id::text,
                 'description', ri.description, 'quantity_requested', ri.quantity_requested::text) END AS requisition_item
     FROM purchase_order_items i
     INNER JOIN products p ON p.product_id = i.product_id

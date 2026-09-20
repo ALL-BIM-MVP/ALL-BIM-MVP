@@ -23,6 +23,7 @@ import type {
     AdjustmentIdParam, CorrectGoodsIssueBody, CorrectGoodsReceiptBody, ListAdjustmentsQuery, VoidDocumentBody,
 } from "../../schemas/almacen/inventory-adjustment.schema.js";
 import type { AdjustedDocumentType, AdjustmentKind, InventoryAdjustment, InventoryAdjustmentItem } from "../../models/almacen/inventory-adjustment.models.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 interface Line { itemId: number | string; productId: number | string; binId: number; delta: number }
 
@@ -94,10 +95,11 @@ const ADJUSTMENT_HEADER_SELECT = `
     SELECT ia.inventory_adjustment_id, ia.project_id, ia.kind, ia.reference_document_type,
         COALESCE(ia.goods_receipt_id, ia.goods_issue_id) AS reference_id,
         CASE WHEN ia.reference_document_type = 'goods_receipt'
-            THEN concat(gr.delivery_note_series, '-', gr.delivery_note_number) ELSE 'Vale #' || ia.goods_issue_id END AS reference_label,
+            THEN concat(gr.delivery_note_series, '-', gr.delivery_note_number) ELSE gi.number END AS reference_label,
         ia.reason, to_char(ia.adjustment_date, 'YYYY-MM-DD') AS adjustment_date, ia.created_at, ia.created_by
     FROM inventory_adjustments ia
-    LEFT JOIN goods_receipts gr ON gr.goods_receipt_id = ia.goods_receipt_id`;
+    LEFT JOIN goods_receipts gr ON gr.goods_receipt_id = ia.goods_receipt_id
+    LEFT JOIN goods_issues gi ON gi.goods_issue_id = ia.goods_issue_id`;
 
 interface HeaderRow {
     inventory_adjustment_id: number; project_id: number; kind: AdjustmentKind; reference_document_type: AdjustedDocumentType;
@@ -116,8 +118,8 @@ const loadItems = async (client: Pick<PoolClient, "query">, adjustmentIds: (numb
     const { rows } = await client.query<InventoryAdjustmentItem & { adjustment_id: string }>(
         `SELECT ai.inventory_adjustment_id AS adjustment_id, ai.inventory_adjustment_item_id,
             COALESCE(ai.goods_receipt_item_id, ai.goods_issue_item_id) AS item_id,
-            json_build_object('product_id', p.product_id, 'code', p.code, 'name', p.name, 'unit', p.unit) AS product,
-            json_build_object('bin_id', b.bin_id, 'label', w.name || ' · ' || r.name || ' · ' || b.location_label) AS bin,
+            ${productSummarySql('p')} AS product,
+            json_build_object('bin_id', b.bin_id::text, 'label', w.name || ' · ' || r.name || ' · ' || b.location_label) AS bin,
             ai.quantity_delta::numeric(18,6)::text AS quantity_delta,
             (CASE WHEN ia.reference_document_type = 'goods_receipt' THEN ai.quantity_delta ELSE -ai.quantity_delta END)::numeric(18,6)::text AS stock_effect
         FROM inventory_adjustment_items ai

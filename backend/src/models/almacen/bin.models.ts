@@ -22,9 +22,12 @@ export interface BinRow {
 // bin ocupado.
 export interface BinContentSummary {
     product_id: number;
+    category_id: number;
     code: string;
+    display_id: number;
     name: string;
-    quantity: number;
+    unit: string;
+    quantity: string;
     model_3d_format: string | null;
     // Lista para usar con Authorization: Bearer normal (ver
     // model-3d-asset.models.ts, buildModel3DAssetUrl) — nunca un path

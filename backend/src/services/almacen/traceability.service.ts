@@ -23,6 +23,7 @@ import type { TraceabilityParam, TraceabilityQuery } from "../../schemas/almacen
 import type {
     TraceDocument, TraceDocumentType, TraceDocuments, TraceThread, Traceability,
 } from "../../models/almacen/traceability.models.js";
+import type { ProductSummary } from "../../models/almacen/product.models.js";
 
 type Db = Pick<Pool | PoolClient, "query">;
 type Row = Record<string, unknown>;
@@ -181,7 +182,7 @@ export const getTraceabilityService = async (
 
     const [rLines, qLines, pLines, iLines, gLines, gLocations] = await Promise.all([
         q(`SELECT ri.purchase_requisition_item_id AS id, ri.purchase_requisition_id AS document_id, ri.product_id, ri.description,
-                ri.quantity_requested::text AS quantity_requested
+                ri.quantity_requested::text AS quantity_requested, ri.estimated_unit_price::text AS estimated_unit_price
             FROM purchase_requisition_items ri WHERE ri.purchase_requisition_item_id = ANY($1::bigint[])`, sets.R),
         q(`SELECT qi.quotation_item_id AS id, qi.quotation_id AS document_id, qi.product_id, qi.purchase_requisition_item_id AS rid, qi.description,
                 qi.quantity_quoted::text AS quantity_quoted, qi.unit_price::text AS unit_price, qi.line_total::text AS line_total
@@ -197,7 +198,7 @@ export const getTraceabilityService = async (
                 gri.total_quantity::text AS quantity_registered,
                 COALESCE((SELECT SUM(a.quantity_delta) FROM inventory_adjustment_items a WHERE a.goods_receipt_item_id = gri.goods_receipt_item_id), 0)::numeric(18,6)::text AS quantity_adjusted,
                 (gri.total_quantity + COALESCE((SELECT SUM(a.quantity_delta) FROM inventory_adjustment_items a WHERE a.goods_receipt_item_id = gri.goods_receipt_item_id), 0))::numeric(18,6)::text AS quantity_received,
-                gri.quantity_per_delivery_note::text AS quantity_per_delivery_note
+                gri.quantity_per_delivery_note::text AS quantity_per_delivery_note, gri.description
             FROM goods_receipt_items gri WHERE gri.goods_receipt_item_id = ANY($1::bigint[])`, sets.G),
         // Casillas EFECTIVAS: lo registrado más los ajustes (Fase 10), sin las que quedaron en cero.
         q(`SELECT t.item_id, t.bin_id, SUM(t.q)::numeric(18,6)::text AS quantity, w.name || ' · ' || r.name || ' · ' || b.location_label AS label
@@ -221,7 +222,8 @@ export const getTraceabilityService = async (
         const rows = await q(sql, list);
         return rows.map((r) => ({
             id: r.id as number, label: String(r.label), date: String(r.date),
-            supplier: r.supplier_id == null ? null : { supplier_id: r.supplier_id as number, name: String(r.supplier_name) },
+            supplier: r.supplier_id == null ? null : { supplier_id: r.supplier_id as number, ruc: String(r.supplier_ruc), name: String(r.supplier_name) },
+            delivery_note_date: (r.delivery_note_date as string | null) ?? null,
             has_file: Boolean(r.has_file),
             entry_type: (r.entry_type as "normal" | "rapida" | null) ?? null,
             requester: (r.requester as string | null) ?? null,
@@ -233,23 +235,23 @@ export const getTraceabilityService = async (
     const documents: TraceDocuments = {
         requisitions: await docsOf("requisition",
             `SELECT purchase_requisition_id AS id, number AS label, to_char(requisition_date, 'YYYY-MM-DD') AS date, requester,
-                NULL::int AS supplier_id, NULL::text AS supplier_name, file_id IS NOT NULL AS has_file, NULL::text AS entry_type, NULL::text AS currency, false AS voided
+                NULL::int AS supplier_id, NULL::text AS supplier_ruc, NULL::text AS supplier_name, NULL::text AS delivery_note_date, file_id IS NOT NULL AS has_file, NULL::text AS entry_type, NULL::text AS currency, false AS voided
             FROM purchase_requisitions WHERE purchase_requisition_id = ANY($1::bigint[])`, docIds(rLines)),
         quotations: await docsOf("quotation",
             `SELECT d.quotation_id AS id, d.number AS label, to_char(d.quotation_date, 'YYYY-MM-DD') AS date, NULL::text AS requester,
-                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
+                s.supplier_id, s.ruc AS supplier_ruc, s.name AS supplier_name, NULL::text AS delivery_note_date, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
             FROM quotations d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.quotation_id = ANY($1::bigint[])`, docIds(qLines)),
         purchase_orders: await docsOf("purchase-order",
             `SELECT d.purchase_order_id AS id, d.number AS label, to_char(d.order_date, 'YYYY-MM-DD') AS date, NULL::text AS requester,
-                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
+                s.supplier_id, s.ruc AS supplier_ruc, s.name AS supplier_name, NULL::text AS delivery_note_date, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
             FROM purchase_orders d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.purchase_order_id = ANY($1::bigint[])`, docIds(pLines)),
         invoices: await docsOf("invoice",
             `SELECT d.invoice_id AS id, concat(d.series, '-', d.number) AS label, to_char(d.invoice_date, 'YYYY-MM-DD') AS date, NULL::text AS requester,
-                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
+                s.supplier_id, s.ruc AS supplier_ruc, s.name AS supplier_name, NULL::text AS delivery_note_date, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
             FROM invoices d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.invoice_id = ANY($1::bigint[])`, docIds(iLines)),
         goods_receipts: await docsOf("goods-receipt",
             `SELECT d.goods_receipt_id AS id, concat(d.delivery_note_series, '-', d.delivery_note_number) AS label, to_char(d.received_date, 'YYYY-MM-DD') AS date,
-                NULL::text AS requester, s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, d.entry_type, NULL::text AS currency, d.voided_at IS NOT NULL AS voided
+                NULL::text AS requester, s.supplier_id, s.ruc AS supplier_ruc, s.name AS supplier_name, to_char(d.delivery_note_date, 'YYYY-MM-DD') AS delivery_note_date, d.file_id IS NOT NULL AS has_file, d.entry_type, NULL::text AS currency, d.voided_at IS NOT NULL AS voided
             FROM goods_receipts d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.goods_receipt_id = ANY($1::bigint[])`, docIds(gLines)),
     };
 
@@ -267,8 +269,8 @@ export const getTraceabilityService = async (
     for (const l of gLines) { uf.find(key("G", l.id)); if (l.pid != null && sets.P.has(String(l.pid))) uf.union(key("G", l.id), key("P", l.pid)); }
 
     const productIds = new Set<string>([...rLines, ...qLines, ...pLines, ...iLines, ...gLines].map((l) => String(l.product_id)));
-    const productRows = productIds.size === 0 ? [] : (await pool.query<{ product_id: number; code: string; name: string; unit: string }>(
-        `SELECT product_id, code, name, unit FROM products WHERE product_id = ANY($1::bigint[])`, [[...productIds]]
+    const productRows = productIds.size === 0 ? [] : (await pool.query<ProductSummary>(
+        `SELECT product_id, category_id, code, display_id, name, unit FROM products WHERE product_id = ANY($1::bigint[])`, [[...productIds]]
     )).rows;
     const products = new Map(productRows.map((p) => [String(p.product_id), p]));
 
@@ -290,7 +292,7 @@ export const getTraceabilityService = async (
 
     for (const l of rLines) {
         const t = threadOf("R", l); mark(t, "requisition", l);
-        t.requisition_items.push({ id: l.id as number, document_id: l.document_id as number, description: String(l.description), quantity_requested: String(l.quantity_requested) });
+        t.requisition_items.push({ id: l.id as number, document_id: l.document_id as number, description: String(l.description), quantity_requested: String(l.quantity_requested), estimated_unit_price: (l.estimated_unit_price as string | null) ?? null });
     }
     for (const l of qLines) {
         const t = threadOf("Q", l); mark(t, "quotation", l);
@@ -307,7 +309,7 @@ export const getTraceabilityService = async (
     for (const l of gLines) {
         const t = threadOf("G", l); mark(t, "goods-receipt", l);
         t.receipt_items.push({
-            id: l.id as number, document_id: l.document_id as number, quantity_received: String(l.quantity_received),
+            id: l.id as number, document_id: l.document_id as number, description: String(l.description), quantity_received: String(l.quantity_received),
             quantity_registered: String(l.quantity_registered), quantity_adjusted: String(l.quantity_adjusted),
             quantity_per_delivery_note: (l.quantity_per_delivery_note as string | null) ?? null,
             locations: gLocations.filter((loc) => String(loc.item_id) === String(l.id)).map((loc) => ({ bin_id: loc.bin_id as number, label: String(loc.label), quantity: String(loc.quantity) })),

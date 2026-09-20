@@ -1,3 +1,4 @@
+import type { ProductSummary } from "./product.models.js";
 // inventory_adjustments (Ajustes de inventario) — Fase 10 de
 // docs/almacen-ingreso-productos/05-roadmap.md. Corrigen las cantidades de un ingreso o
 // de un vale YA registrados SIN reescribirlos: el original queda igual y el ajuste es un
@@ -10,7 +11,7 @@ export interface InventoryAdjustmentItem {
     inventory_adjustment_item_id: number;
     // Línea corregida: goods_receipt_item_id (ingreso) o goods_issue_item_id (vale).
     item_id: number;
-    product: { product_id: number; code: string; name: string; unit: string };
+    product: ProductSummary;
     bin: { bin_id: number; label: string };
     // Cambio de la cantidad DEL DOCUMENTO en esa casilla (+ más recibido / más retirado).
     quantity_delta: string;
@@ -22,7 +23,7 @@ export interface InventoryAdjustment {
     inventory_adjustment_id: number;
     project_id: number;
     kind: AdjustmentKind;
-    // Documento corregido ("T001-5" para un ingreso, "Vale #12" para un vale).
+    // Documento corregido ("T001-5" para un ingreso, "VS-01" para un vale (su número)).
     reference_document: { type: AdjustedDocumentType; id: number; label: string };
     reason: string;
     // Fecha de la corrección "AAAA-MM-DD" (la de sus movimientos de Kardex).

@@ -28,6 +28,7 @@ import type {
     UpdateInvoiceBody, UpdateInvoiceItemBody,
 } from "../../schemas/almacen/invoice.schema.js";
 import type { InvoiceDetail, InvoiceFile, InvoiceItem, InvoiceRow } from "../../models/almacen/invoice.models.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 const UNIQUE_VIOLATION = "23505";
 
@@ -47,7 +48,7 @@ const HEADER_COLUMNS_SQL = `
     (SELECT COALESCE(SUM(i.line_total), 0) FROM invoice_items i WHERE i.invoice_id = v.invoice_id) AS lines_total,
     json_build_object('supplier_id', s.supplier_id, 'ruc', s.ruc, 'name', s.name) AS supplier,
     CASE WHEN o.purchase_order_id IS NULL THEN NULL
-        ELSE json_build_object('purchase_order_id', o.purchase_order_id, 'number', o.number) END AS purchase_order,
+        ELSE json_build_object('purchase_order_id', o.purchase_order_id::text, 'number', o.number) END AS purchase_order,
     v.created_at, v.created_by, v.updated_at, v.updated_by`;
 const HEADER_FROM_SQL = `
     FROM invoices v
@@ -57,9 +58,9 @@ const HEADER_FROM_SQL = `
 const ITEM_SELECT = `
     SELECT i.invoice_item_id, i.invoice_id, i.purchase_order_item_id, i.product_id, i.description,
         i.quantity_invoiced, i.unit_price, i.discount_amount, i.tax_amount, i.line_total, i.notes,
-        json_build_object('product_id', p.product_id, 'code', p.code, 'name', p.name, 'unit', p.unit) AS product,
+        ${productSummarySql('p')} AS product,
         CASE WHEN oi.purchase_order_item_id IS NULL THEN NULL
-            ELSE json_build_object('purchase_order_item_id', oi.purchase_order_item_id, 'description', oi.description,
+            ELSE json_build_object('purchase_order_item_id', oi.purchase_order_item_id::text, 'description', oi.description,
                 'quantity_ordered', oi.quantity_ordered::text) END AS purchase_order_item
     FROM invoice_items i
     INNER JOIN products p ON p.product_id = i.product_id

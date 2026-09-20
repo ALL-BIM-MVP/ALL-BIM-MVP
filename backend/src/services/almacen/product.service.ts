@@ -69,7 +69,7 @@ export const listProductsService = async (
 
     const { rows } = await pool.query<ProductListing & ProductRowWithAssetJoin>(
         `SELECT p.*, ma.name AS model_3d_name, ma.format AS model_3d_format,
-            COALESCE(stock.total, 0) AS total_stock, loc.label AS main_location
+            COALESCE(stock.total, 0)::numeric(18,6)::text AS total_stock, loc.label AS main_location
         FROM products p
         ${PRODUCT_JOINS}
         WHERE p.project_id = $1 AND p.deleted_at IS NULL
@@ -92,7 +92,7 @@ export const getProductByIdService = async (
     const { rows } = await pool.query<ProductListing & ProductRowWithAssetJoin & { category_type: "fijo" | "relacional" }>(
         `SELECT p.*, ma.name AS model_3d_name, ma.format AS model_3d_format,
             cat.type AS category_type,
-            COALESCE(stock.total, 0) AS total_stock, loc.label AS main_location
+            COALESCE(stock.total, 0)::numeric(18,6)::text AS total_stock, loc.label AS main_location
         FROM products p
         INNER JOIN categories cat ON cat.category_id = p.category_id
         ${PRODUCT_JOINS}
