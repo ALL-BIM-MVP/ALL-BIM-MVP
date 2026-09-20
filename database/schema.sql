@@ -101,7 +101,20 @@ CREATE TABLE projects (
     end_date DATE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     owner_id INT NOT NULL REFERENCES users(user_id),
-    created_by INT NOT NULL REFERENCES users(user_id)
+    created_by INT NOT NULL REFERENCES users(user_id),
+    -- Portada del proyecto: NO es un archivo de `files` (no es un
+    -- "documento del proyecto" de ningún módulo, y se sirve pública
+    -- desde uploads/public/covers/) — mismo criterio que
+    -- users.profile_picture_path. Todas NULL = el proyecto no tiene
+    -- portada propia y el backend sirve la imagen por defecto
+    -- (uploads/public/default/). Así TODO lo que queda en `files`
+    -- pertenece a algún módulo (files.module_id NOT NULL). Se quitó la
+    -- tabla project_images (su tipo 'gallery' nunca lo usó ningún código).
+    cover_image_path TEXT,
+    cover_image_name VARCHAR(150),
+    cover_image_mime_type VARCHAR(255),
+    CONSTRAINT chk_projects_cover_image
+        CHECK ((cover_image_path IS NULL) = (cover_image_name IS NULL))
 );
 -- Postgres no indexa automático las columnas de FK (solo el lado
 -- referenciado) — GET /projects (scope mine/member) filtra por esto
@@ -221,6 +234,16 @@ CREATE TABLE project_invitation_module_roles (
 CREATE TABLE files (
     file_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Módulo dueño del archivo (Metrados, Almacén, futuros): un archivo
+    -- es de UN proyecto Y de UN módulo. Subir/borrar exige el permiso de
+    -- ese módulo (assertModulePermission), no solo ser miembro del
+    -- proyecto. Los archivos que genera el propio backend (Excel
+    -- exportado, .frag) lo fijan en el servidor; en una subida manual lo
+    -- manda el cliente (module_code) y el backend NUNCA asume uno. Sin
+    -- ON DELETE explícito a propósito: las filas de `modules` no se
+    -- borran nunca. La portada del proyecto ya no vive acá (ver
+    -- projects.cover_image_path).
+    module_id INT NOT NULL REFERENCES modules(module_id),
     -- 'fragments': migración del visor a ThatOpen (ver
     -- docs/roadmap/migracion-visor-thatopen-backend.md, B1/B2) — un
     -- .frag generado a partir de un 'ifc' ya procesado, mismo patrón
@@ -453,25 +476,6 @@ CREATE TABLE elemento_conjunto_config_fields (
     ),
     UNIQUE (project_id, position)
 );
-
--- "files" es el archivo físico (metadata + ruta en disco); esta tabla
--- es el ROL que cumple ese archivo para un proyecto — hoy solo se usa
--- 'cover' (la portada, una sola por proyecto, ver el índice único de
--- abajo), 'gallery' queda armado desde ya para cuando haga falta una
--- galería de varias imágenes, pero todavía no tiene endpoint propio.
--- Si el proyecto no tiene fila 'cover' acá, el backend sirve una
--- imagen por defecto (uploads/default/) — ver project-images.service.ts.
-CREATE TABLE project_images (
-    project_image_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
-    file_id BIGINT NOT NULL UNIQUE REFERENCES files(file_id) ON DELETE CASCADE,
-    image_type VARCHAR(30) NOT NULL DEFAULT 'gallery'
-        CHECK (image_type IN ('cover', 'gallery')),
-    sort_order INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE UNIQUE INDEX idx_un_project_cover ON project_images (project_id) WHERE image_type = 'cover';
-
 
 -- ------------------------------------------------------------
 -- ELEMENTOS Y PARTIDAS
@@ -931,14 +935,19 @@ CREATE TABLE categories (
     -- base de otra (5.1.1).
     base_category_id INT REFERENCES categories(category_id) ON DELETE RESTRICT,
     CHECK ((prefix IS NULL) = (base_category_id IS NULL)),
-    -- Contador de tag por categoría, embebido acá — cada categoría ya
-    -- pertenece a un solo proyecto, una tabla aparte para 1 columna no
-    -- se justifica (diseño 2.1, [decisión]). El incremento SIEMPRE
-    -- tiene que hacerse en la misma transacción que el INSERT del
-    -- producto nuevo (leer, sumar 1, guardar, atómico) — si no, dos
-    -- altas simultáneas se pisan el mismo tag. Eso es responsabilidad
-    -- del código de la aplicación, no de esta columna.
-    next_tag INT NOT NULL DEFAULT 1 CHECK (next_tag > 0),
+    -- Contador de display_id por categoría, embebido acá — cada
+    -- categoría ya pertenece a un solo proyecto, una tabla aparte para 1
+    -- columna no se justifica (diseño 2.1, [decisión]). El incremento
+    -- SIEMPRE tiene que hacerse en la misma transacción que el INSERT
+    -- del producto nuevo (leer, sumar 1, guardar, atómico) — si no, dos
+    -- altas simultáneas se pisan el mismo display_id. Eso es
+    -- responsabilidad del código de la aplicación, no de esta columna.
+    -- Renombrado de `next_tag`: "tag" no decía nada de que esto es el
+    -- ID que se muestra al usuario en el frontend (encabezado "ID"),
+    -- ni de que es propio del sistema (nada que ver con el `tag` de
+    -- Revit que sí usa metrado_elements/ifc_elements, un campo
+    -- completamente distinto).
+    next_display_id INT NOT NULL DEFAULT 1 CHECK (next_display_id > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id),
     updated_at TIMESTAMPTZ,
@@ -949,6 +958,52 @@ CREATE TABLE categories (
 -- nombre de categoría dentro de un proyecto — mismo criterio de
 -- "único mientras esté activo" que warehouses/racks. [decisión mía]
 CREATE UNIQUE INDEX idx_un_categories_name_active ON categories (project_id, name) WHERE deleted_at IS NULL;
+
+-- Catálogo de modelos 3D reales (Almacén BIM) — a propósito NO es una
+-- tabla de extensión de `files` (a diferencia de la primera versión de
+-- este diseño): un modelo 3D es del USUARIO que lo sube, no de un
+-- proyecto, y `files` es SIEMPRE de un proyecto en el resto de esta
+-- app (IFC, Excel, documentos) — forzar esto ahí adentro habría
+-- significado tocar una tabla que usan muchos módulos para servir a un
+-- caso nuevo y angosto. Mismo criterio que ya usa `users.
+-- profile_picture_path` (tampoco pasa por `files`, tiene su propio
+-- guardado — ver utils/avatar.ts): cuando el dueño real es un usuario
+-- y no un proyecto, se guarda aparte.
+--
+-- Visibilidad (sin tabla de relación — se resuelve con estas 2
+-- columnas + un JOIN a products, ver model-3d-asset.service.ts):
+--   1) `owner_id = <yo>` — mi propia biblioteca personal.
+--   2) `is_system = true` — repositorio del sistema, visible siempre.
+--   3) ya usado en algún producto del proyecto que estoy mirando
+--      (join a products.model_3d_asset_id) — se resuelve al vuelo, no
+--      es una columna de acá.
+CREATE TABLE model_3d_assets (
+    model_3d_asset_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name VARCHAR(150) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    -- El único código real que abre esto (GLTFLoader, en
+    -- prueba-BIM/ALMACEN-BIM/app.html) solo sabe cargar estos 2.
+    format VARCHAR(20) NOT NULL CHECK (format IN ('glb', 'gltf')),
+    -- Ubicación real en disco — privada, nunca se expone tal cual al
+    -- cliente (se sirve vía GET .../model-3d-assets/:id/content, con
+    -- el mismo chequeo de visibilidad de arriba en CADA pedido, nunca
+    -- una URL firmada: acá el archivo puede vivir mucho tiempo y
+    -- reusarse en muchos productos/proyectos, una URL que vence a los
+    -- 5 minutos no tiene sentido para este caso).
+    file_path TEXT NOT NULL,
+    -- SIEMPRE alguien real, incluso para un modelo de sistema (lo sube
+    -- un usuario que en ese momento es admin — ver is_system abajo).
+    owner_id INT NOT NULL REFERENCES users(user_id),
+    -- CONGELADO al momento de subir (¿el que lo sube es admin de la
+    -- app EN ESE MOMENTO?) — nunca se recalcula después. Mismo
+    -- criterio ya usado en `products.is_fixed`: si más adelante a esa
+    -- persona le cambian el rol, este modelo YA subido no se mueve del
+    -- repositorio del sistema ni al revés — evita que el repositorio
+    -- "pierda" contenido por un cambio de rol de otra persona, sin
+    -- necesitar ningún candado especial sobre el sistema de roles.
+    is_system BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_model_3d_assets_owner_id ON model_3d_assets (owner_id);
 
 -- Si la categoría es relacional, `code` es la concatenación completa
 -- (prefix + código de la partida) YA guardada acá — no se arma con un
@@ -980,9 +1035,14 @@ CREATE TABLE products (
     -- de cualquier forma casi no se usa) — la aplicación valida que
     -- matchee el código de algún producto con categories.type='fijo'.
     base_product_code VARCHAR(100) CHECK (base_product_code IS NULL OR LENGTH(TRIM(base_product_code)) > 0),
-    -- Valor de categories.next_tag en el momento de crear ESTE
-    -- producto — snapshot, no se recalcula después.
-    tag INT NOT NULL CHECK (tag > 0),
+    -- Valor de categories.next_display_id en el momento de crear ESTE
+    -- producto — snapshot, no se recalcula después. Renombrado de
+    -- `tag`: es el ID que ve el usuario (encabezado "ID" en el
+    -- frontend), un correlativo propio de este sistema por categoría —
+    -- "tag" confundía porque no tiene ninguna relación con el `tag` de
+    -- Revit que sí usa metrado_elements/ifc_elements (campo distinto,
+    -- de otro módulo).
+    display_id INT NOT NULL CHECK (display_id > 0),
     name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
     -- Normalizada a minúsculas por la aplicación antes de guardar.
     -- Texto libre a propósito, NO un enum cerrado — mismo criterio que
@@ -991,21 +1051,21 @@ CREATE TABLE products (
     -- varían demasiado entre proyectos/proveedores para forzar un
     -- catálogo fijo, ninguna otra tabla de este sistema lo hace.
     unit VARCHAR(20) NOT NULL CHECK (LENGTH(TRIM(unit)) > 0),
-    -- Modelo 3D asignado — NULL = todavía sin modelo. Ver
-    -- prueba-BIM/ALMACEN-BIM (sección BIM/Modelos del prototipo).
-    model_3d_path TEXT,
-    -- A diferencia de unit (arriba), esto NO es un dato libre que
-    -- tipea el usuario — es el formato real del archivo, y el único
-    -- código que lo consume (GLTFLoader en prueba-BIM/ALMACEN-BIM/
-    -- app.html y modulo.html) solo sabe cargar estos 2. Guardar
-    -- cualquier otro string acá dejaría un modelo "asignado" que
-    -- ningún visor real puede abrir.
-    model_3d_format VARCHAR(20) CHECK (model_3d_format IS NULL OR model_3d_format IN ('glb', 'gltf')),
-    -- Valores en español a propósito (dato real, ya existe así en el
-    -- prototipo de BIM/Modelos).
-    model_3d_source VARCHAR(20) CHECK (model_3d_source IN ('repositorio', 'subido', 'generado_ia')),
+    -- Modelo 3D asignado — NULL = todavía sin modelo. Referencia una
+    -- fila real de `model_3d_assets` (archivo real en `files` +
+    -- formato + dueño) — nunca un path/formato sueltos acá. Corregido:
+    -- la primera versión de este campo era un `model_3d_path` de texto
+    -- libre, sin ningún archivo real detrás cuando se marcaba como
+    -- "subido". Error real, no de estilo: un producto "con modelo"
+    -- tiene que apuntar a algo que de verdad existe.
+    -- RESTRICT: no se puede borrar de motor un asset que todavía es el
+    -- modelo de algún producto (5.1.1) — hay que sacarlo del producto
+    -- primero.
+    model_3d_asset_id BIGINT REFERENCES model_3d_assets(model_3d_asset_id) ON DELETE RESTRICT,
+    -- Cuándo se le asignó el modelo ACTUAL a ESTE producto — distinto
+    -- de model_3d_assets.created_at (cuándo se subió/creó el asset en
+    -- sí, que puede ser antes y reusarse en varios productos).
     model_3d_assigned_at TIMESTAMPTZ,
-    CHECK ((model_3d_path IS NULL) = (model_3d_format IS NULL)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id),
     updated_at TIMESTAMPTZ,
@@ -1023,6 +1083,7 @@ CREATE INDEX idx_products_project_id ON products (project_id);
 -- "Productos relacionados" (una Partida → sus Materiales/Equipos) —
 -- Catálogo, endpoint de detalle (ver Fase 3 del roadmap).
 CREATE INDEX idx_products_category_id ON products (category_id);
+CREATE INDEX idx_products_model_3d_asset_id ON products (model_3d_asset_id);
 -- Stock total y ubicación principal (SUM/MAX sobre bin_contents) NO
 -- son columnas acá — se calculan siempre en el momento.
 
@@ -1101,13 +1162,21 @@ CREATE TABLE bin_merge_members (
 --    salida), simétricos, + Kardex (inventory movements)
 -- ------------------------------------------------------------
 
--- Reducido para esta etapa a "4 datos de compra" + elegir
--- ubicación(es)+cantidad por ítem, sin Órdenes de Compra. Registro de
--- movimiento INMUTABLE: no se edita, no se da de baja (no tiene
--- deleted_at) — un error se corrige con un movimiento nuevo, nunca
--- reescribiendo este.
-CREATE TABLE goods_receipts (
-    goods_receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+-- ------------------------------------------------------------
+-- Proveedores (por proyecto) — Fase 2 de
+-- docs/almacen-ingreso-productos/05-roadmap.md
+-- ------------------------------------------------------------
+-- Un proveedor pertenece a UN proyecto: no hay catálogo global (cada
+-- proyecto puede ser una obra/cliente distinto, y aunque dos proyectos
+-- tengan el mismo RUC en el mundo real, cada uno mantiene su registro).
+-- El RUC y la razón social viven SOLO acá: los documentos (ingresos hoy;
+-- órdenes de compra, cotizaciones y facturas después) referencian
+-- supplier_id y nunca repiten el RUC ni el nombre. Editar el nombre
+-- cambia lo que muestran los documentos antiguos (no se copia en cada
+-- uno); el RUC solo se puede cambiar mientras el proveedor no tenga
+-- documentos (regla de la aplicación, no del esquema).
+CREATE TABLE suppliers (
+    supplier_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     -- RUC = "Registro Único de Contribuyentes", el identificador
     -- tributario peruano (lo asigna SUNAT) — jerga de dominio
@@ -1115,43 +1184,374 @@ CREATE TABLE goods_receipts (
     -- nombre de columna traducible. Formato REAL, no genérico: SIEMPRE
     -- 11 dígitos numéricos exactos (2 dígitos de tipo de contribuyente
     -- + 8 de cuerpo + 1 dígito verificador) — nunca letras, guiones ni
-    -- espacios, nunca menos ni más de 11. `VARCHAR(20)` sin CHECK
-    -- dejaba pasar cualquier cosa, incluido "1" — corregido. El
-    -- dígito verificador (checksum módulo 11 con pesos fijos) NO se
-    -- valida acá a propósito: implementarlo mal en un CHECK de SQL
-    -- rechazaría RUCs reales válidos, un daño peor que no validarlo —
-    -- si hace falta a futuro, con una referencia/librería confiable en
-    -- la aplicación, no adivinado en el esquema.
-    supplier_ruc VARCHAR(11) NOT NULL CHECK (supplier_ruc ~ '^\d{11}$'),
-    supplier_name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(supplier_name)) > 0),
-    -- "Guía de remisión" — el documento de despacho real; su NÚMERO sí
-    -- se traduce (a diferencia del RUC, acá no se pierde nada
-    -- específico del dominio). A propósito SIN un formato fijo tipo
-    -- RUC/DNI: a diferencia de esos (identificador emitido por una
-    -- entidad única con una regla nacional), el número de guía lo
-    -- define cada proveedor en SU propio documento físico/electrónico
-    -- — puede traer serie+correlativo con guion, sin guion, con
-    -- letras, etc. Acá solo se transcribe lo que dice el papel, no se
-    -- valida contra SUNAT.
-    delivery_note_number VARCHAR(50) NOT NULL CHECK (LENGTH(TRIM(delivery_note_number)) > 0),
-    -- Fecha del documento — distinta de created_at (cuándo se registró
-    -- en el sistema, puede no ser el mismo día).
-    purchase_date DATE NOT NULL,
+    -- espacios, nunca menos ni más de 11. El dígito verificador
+    -- (checksum módulo 11 con pesos fijos) NO se valida acá a propósito:
+    -- implementarlo mal en un CHECK de SQL rechazaría RUCs reales
+    -- válidos, un daño peor que no validarlo — si hace falta a futuro,
+    -- con una referencia/librería confiable en la aplicación, no
+    -- adivinado en el esquema.
+    ruc VARCHAR(11) NOT NULL CHECK (ruc ~ '^\d{11}$'),
+    -- Razón social tal como figura en los documentos.
+    name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by INT NOT NULL REFERENCES users(user_id)
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+-- Único mientras esté activo. También sirve para buscar por RUC dentro de
+-- un proyecto (project_id es su columna líder), por eso no hay un índice
+-- aparte solo por project_id.
+CREATE UNIQUE INDEX idx_un_suppliers_ruc_active ON suppliers (project_id, ruc) WHERE deleted_at IS NULL;
+
+-- Requerimiento: primer documento de la cadena de trazabilidad (Fase 3 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Es el pedido de "la obra
+-- necesita estos materiales"; NO mueve stock ni compra nada. Se conserva
+-- con baja lógica (auditoría): dar de baja borra además su archivo
+-- escaneado (ver purchase-requisition.service.ts).
+CREATE TABLE purchase_requisitions (
+    purchase_requisition_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Número tal como figura en el documento de la empresa (no hay formato
+    -- estándar: cada empresa numera distinto, "REQ-001", "RQ-2026-0034"…),
+    -- por eso solo se exige que no esté vacío.
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
+    requisition_date DATE NOT NULL,
+    -- Quién lo pidió: persona o área, como texto (no siempre es un usuario
+    -- del sistema).
+    requester VARCHAR(150) NOT NULL CHECK (LENGTH(TRIM(requester)) > 0),
+    notes VARCHAR(1000) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0),
+    -- Escaneo/foto del documento físico, en `files` (módulo almacen). NULL =
+    -- registrado, archivo pendiente. RESTRICT: un archivo en uso no se
+    -- borra desde files; se reemplaza o quita desde el documento. El
+    -- índice único garantiza un archivo por documento.
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX idx_un_purchase_requisitions_number_active
+    ON purchase_requisitions (project_id, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_purchase_requisitions_file_id
+    ON purchase_requisitions (file_id) WHERE file_id IS NOT NULL;
+
+CREATE TABLE purchase_requisition_items (
+    purchase_requisition_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Compositiva: una línea no existe sin su requerimiento.
+    purchase_requisition_id BIGINT NOT NULL REFERENCES purchase_requisitions(purchase_requisition_id) ON DELETE CASCADE,
+    -- Siempre un producto real del catálogo: así toda la cadena (hasta la
+    -- ubicación) apunta a algo que existe. Si el producto aún no existe, se
+    -- crea antes en el catálogo (lo guía el frontend). El texto libre va en
+    -- `description`. RESTRICT: no se borra de motor un producto que algún
+    -- requerimiento pidió.
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- Descripción tal como dice el documento (siempre, aunque haya producto).
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_requested NUMERIC(18,6) NOT NULL CHECK (quantity_requested > 0),
+    -- Precio ESTIMADO (no es precio de compra; ese vive en cotización/factura).
+    estimated_unit_price NUMERIC(18,6) CHECK (estimated_unit_price IS NULL OR estimated_unit_price >= 0)
+);
+CREATE INDEX idx_purchase_requisition_items_requisition_id ON purchase_requisition_items (purchase_requisition_id);
+CREATE INDEX idx_purchase_requisition_items_product_id ON purchase_requisition_items (product_id);
+
+-- Cotización: un proveedor responde a UN requerimiento con precios (Fase 4 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Un requerimiento puede tener
+-- varias cotizaciones y cada una cubre solo algunas de sus líneas. Todavía no
+-- elige a quién comprar (eso es la orden de compra). Los montos son los que
+-- dice el documento: no se convierten ni se recalculan.
+CREATE TABLE quotations (
+    quotation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- A qué requerimiento responde. RESTRICT: no se borra de motor un
+    -- requerimiento con cotizaciones (vaciar Almacén las borra antes).
+    purchase_requisition_id BIGINT NOT NULL REFERENCES purchase_requisitions(purchase_requisition_id) ON DELETE RESTRICT,
+    -- Número de la cotización tal como lo puso el proveedor (formato libre).
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
+    quotation_date DATE NOT NULL,
+    -- Moneda del documento (solo para dejar constancia, no hay conversión):
+    -- lista cerrada; agregar otra es cambiar este CHECK y su espejo en Zod.
+    currency VARCHAR(3) NOT NULL CHECK (currency IN ('PEN', 'USD')),
+    commercial_terms VARCHAR(1000) CHECK (commercial_terms IS NULL OR LENGTH(TRIM(commercial_terms)) > 0),
+    -- Hasta cuándo vale la oferta.
+    valid_until DATE,
+    -- Total tal como figura en el documento (NULL = no lo indica). No se
+    -- compara con la suma de las líneas: la respuesta trae ambos.
+    total_amount NUMERIC(18,6) CHECK (total_amount IS NULL OR total_amount >= 0),
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ,
+    CONSTRAINT chk_quotations_valid_until CHECK (valid_until IS NULL OR valid_until >= quotation_date)
+);
+-- Una misma cotización (proveedor + número) no se registra dos veces.
+CREATE UNIQUE INDEX idx_un_quotations_number_active
+    ON quotations (project_id, supplier_id, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_quotations_file_id ON quotations (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_quotations_supplier_id ON quotations (supplier_id);
+CREATE INDEX idx_quotations_purchase_requisition_id ON quotations (purchase_requisition_id);
+
+CREATE TABLE quotation_items (
+    quotation_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    quotation_id BIGINT NOT NULL REFERENCES quotations(quotation_id) ON DELETE CASCADE,
+    -- Línea del requerimiento que se cotiza (la relación es POR LÍNEA). Que
+    -- sea de ESTE requerimiento lo valida el servicio. RESTRICT: una línea
+    -- cotizada no se borra de motor.
+    purchase_requisition_item_id BIGINT NOT NULL
+        REFERENCES purchase_requisition_items(purchase_requisition_item_id) ON DELETE RESTRICT,
+    -- Producto real del catálogo: hoy siempre el de la línea del requerimiento
+    -- (el servicio lo exige; relajarlo después es quitar esa validación).
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- Texto tal como lo dice la cotización (snapshot).
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_quoted NUMERIC(18,6) NOT NULL CHECK (quantity_quoted > 0),
+    -- Solo si el documento lo muestra: hay cotizaciones que dan únicamente el
+    -- total de la línea ("20 kg a S/ 340"). NULL = no figura.
+    unit_price NUMERIC(18,6) CHECK (unit_price IS NULL OR unit_price >= 0),
+    discount_amount NUMERIC(18,6) CHECK (discount_amount IS NULL OR discount_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    -- Monto de la línea tal como figura en el documento. No se valida contra
+    -- precio x cantidad (los proveedores redondean distinto).
+    line_total NUMERIC(18,6) NOT NULL CHECK (line_total >= 0),
+    notes VARCHAR(500) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0),
+    -- Una cotización no cotiza dos veces la misma línea del requerimiento.
+    UNIQUE (quotation_id, purchase_requisition_item_id)
+);
+CREATE INDEX idx_quotation_items_quotation_id ON quotation_items (quotation_id);
+CREATE INDEX idx_quotation_items_requisition_item_id ON quotation_items (purchase_requisition_item_id);
+CREATE INDEX idx_quotation_items_product_id ON quotation_items (product_id);
+
+-- Orden de compra: lo que la empresa decide comprar y a quién (Fase 5 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Un requerimiento puede
+-- generar varias órdenes (adjudicación por línea). Es el EJE de la
+-- trazabilidad: la factura y el ingreso apuntarán a sus líneas. Es un
+-- registro de auditoría: sin aprobaciones ni estados administrativos, y el
+-- origen (requerimiento/cotización) es opcional (compra directa/urgente).
+CREATE TABLE purchase_orders (
+    purchase_order_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Una orden es de UN solo proveedor.
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- Origen opcional. RESTRICT: no se borra de motor un documento del que
+    -- viene una orden (vaciar Almacén borra las órdenes antes).
+    purchase_requisition_id BIGINT REFERENCES purchase_requisitions(purchase_requisition_id) ON DELETE RESTRICT,
+    quotation_id BIGINT REFERENCES quotations(quotation_id) ON DELETE RESTRICT,
+    -- Número que la EMPRESA le pone a su orden (formato libre). Único por
+    -- proyecto: distinto del de la cotización, que lo pone el proveedor.
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
+    order_date DATE NOT NULL,
+    -- Moneda del documento (constancia, sin conversión); mismo criterio que quotations.currency.
+    currency VARCHAR(3) NOT NULL CHECK (currency IN ('PEN', 'USD')),
+    commercial_terms VARCHAR(1000) CHECK (commercial_terms IS NULL OR LENGTH(TRIM(commercial_terms)) > 0),
+    -- Total tal como figura en el documento (NULL = no lo indica).
+    total_amount NUMERIC(18,6) CHECK (total_amount IS NULL OR total_amount >= 0),
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX idx_un_purchase_orders_number_active ON purchase_orders (project_id, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_purchase_orders_file_id ON purchase_orders (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_purchase_orders_supplier_id ON purchase_orders (supplier_id);
+CREATE INDEX idx_purchase_orders_purchase_requisition_id ON purchase_orders (purchase_requisition_id);
+CREATE INDEX idx_purchase_orders_quotation_id ON purchase_orders (quotation_id);
+
+CREATE TABLE purchase_order_items (
+    purchase_order_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    purchase_order_id BIGINT NOT NULL REFERENCES purchase_orders(purchase_order_id) ON DELETE CASCADE,
+    -- Vínculos OPCIONALES a los documentos anteriores (la línea puede no tener
+    -- origen). Si se indican, el servicio comprueba que la línea pertenezca a
+    -- la cotización/requerimiento de la cabecera y que el producto coincida.
+    -- Una misma línea de cotización puede estar en varias órdenes (pedidos
+    -- escalonados): por eso no hay UNIQUE. RESTRICT: una línea citada no se
+    -- borra de motor.
+    quotation_item_id BIGINT REFERENCES quotation_items(quotation_item_id) ON DELETE RESTRICT,
+    purchase_requisition_item_id BIGINT REFERENCES purchase_requisition_items(purchase_requisition_item_id) ON DELETE RESTRICT,
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- SNAPSHOT: la orden guarda lo suyo (texto, cantidad y precios); no cambia
+    -- si después se corrige la cotización o se renombra el producto.
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_ordered NUMERIC(18,6) NOT NULL CHECK (quantity_ordered > 0),
+    -- Mismo esquema de montos que quotation_items: line_total obligatorio,
+    -- lo demás solo si el documento lo muestra (NULL = no figura).
+    unit_price NUMERIC(18,6) CHECK (unit_price IS NULL OR unit_price >= 0),
+    discount_amount NUMERIC(18,6) CHECK (discount_amount IS NULL OR discount_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    line_total NUMERIC(18,6) NOT NULL CHECK (line_total >= 0),
+    notes VARCHAR(500) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0)
+);
+CREATE INDEX idx_purchase_order_items_order_id ON purchase_order_items (purchase_order_id);
+CREATE INDEX idx_purchase_order_items_quotation_item_id ON purchase_order_items (quotation_item_id);
+CREATE INDEX idx_purchase_order_items_requisition_item_id ON purchase_order_items (purchase_requisition_item_id);
+CREATE INDEX idx_purchase_order_items_product_id ON purchase_order_items (product_id);
+
+-- Factura: el documento de cobro del proveedor (Fase 6 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Distinta de la guía de remisión
+-- (goods_receipts): no se asume relación 1:1 entre ellas; se relacionan por la
+-- línea de la orden de compra. Registro de auditoría: no paga ni concilia. El
+-- origen (orden de compra) es opcional (factura que llega directa); si existe,
+-- cada línea cita la línea de esa orden (las mismas líneas hasta el almacén).
+CREATE TABLE invoices (
+    invoice_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- Orden de origen opcional. RESTRICT: no se borra de motor una orden con
+    -- facturas (vaciar Almacén borra las facturas antes).
+    purchase_order_id BIGINT REFERENCES purchase_orders(purchase_order_id) ON DELETE RESTRICT,
+    -- Serie y número SEPARADOS como vienen en el documento (F001-00000123).
+    -- Formato REAL (SUNAT, verificado): la factura electrónica lleva una serie
+    -- alfanumérica de 4 caracteres que empieza con F y un correlativo de 1 a 8
+    -- dígitos. Por si circulan comprobantes impresos o de otra serie, se acepta
+    -- de 1 a 4 alfanuméricos. Se guarda SIEMPRE en mayúsculas (la aplicación lo
+    -- normaliza y el CHECK lo exige): así la unicidad de abajo no se burla con
+    -- "f001" vs "F001".
+    series VARCHAR(4) NOT NULL CHECK (series ~ '^[A-Z0-9]{1,4}$'),
+    number VARCHAR(8) NOT NULL CHECK (number ~ '^\d{1,8}$'),
+    -- Fecha de emisión que dice la factura.
+    invoice_date DATE NOT NULL,
+    -- Moneda del documento (constancia, sin conversión); mismo criterio que quotations.currency.
+    currency VARCHAR(3) NOT NULL CHECK (currency IN ('PEN', 'USD')),
+    -- Montos tal como figuran en el documento (NULL = no figura); no se
+    -- recalculan ni se validan entre sí.
+    subtotal_amount NUMERIC(18,6) CHECK (subtotal_amount IS NULL OR subtotal_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    total_amount NUMERIC(18,6) CHECK (total_amount IS NULL OR total_amount >= 0),
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+-- La misma factura (proveedor + serie + número) no se registra dos veces.
+CREATE UNIQUE INDEX idx_un_invoices_number_active ON invoices (project_id, supplier_id, series, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_invoices_file_id ON invoices (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_invoices_supplier_id ON invoices (supplier_id);
+CREATE INDEX idx_invoices_purchase_order_id ON invoices (purchase_order_id);
+
+CREATE TABLE invoice_items (
+    invoice_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    invoice_id BIGINT NOT NULL REFERENCES invoices(invoice_id) ON DELETE CASCADE,
+    -- Línea de la orden que se factura (NULL solo si la factura no tiene orden).
+    -- Puede haber varias facturas por línea de orden (facturación parcial):
+    -- por eso no hay UNIQUE. RESTRICT: una línea citada no se borra de motor.
+    purchase_order_item_id BIGINT REFERENCES purchase_order_items(purchase_order_item_id) ON DELETE RESTRICT,
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- SNAPSHOT: texto, cantidad y montos tal como dice la factura.
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_invoiced NUMERIC(18,6) NOT NULL CHECK (quantity_invoiced > 0),
+    unit_price NUMERIC(18,6) CHECK (unit_price IS NULL OR unit_price >= 0),
+    discount_amount NUMERIC(18,6) CHECK (discount_amount IS NULL OR discount_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    line_total NUMERIC(18,6) NOT NULL CHECK (line_total >= 0),
+    notes VARCHAR(500) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0)
+);
+CREATE INDEX idx_invoice_items_invoice_id ON invoice_items (invoice_id);
+CREATE INDEX idx_invoice_items_purchase_order_item_id ON invoice_items (purchase_order_item_id);
+CREATE INDEX idx_invoice_items_product_id ON invoice_items (product_id);
+
+-- Registro de movimiento INMUTABLE en lo físico: no se da de baja (no tiene
+-- deleted_at) ni se editan cantidades, productos, casillas ni la fecha de
+-- recepción — un error de esos datos se corrige con un movimiento nuevo (Fase 10),
+-- nunca reescribiendo este. Sí se corrigen, con auditoría (updated_at/by), los
+-- datos administrativos (serie, número y fecha de la guía), el vínculo con la
+-- orden de compra y el archivo. Guía y recepción son UNA sola entidad (la
+-- cabecera guarda los datos de la guía; cada línea guarda lo recibido).
+CREATE TABLE goods_receipts (
+    goods_receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Solo el id: el RUC y la razón social viven en `suppliers`.
+    -- RESTRICT: no se puede borrar de motor un proveedor con ingresos.
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- Tipo de entrada. 'rapida' = sin documentos previos (compra urgente, entrada
+    -- directa): los pasos anteriores simplemente no existen para ese ingreso.
+    -- 'normal' = sigue el proceso; su orden de compra puede estar todavía
+    -- PENDIENTE de vincular ("falta registrar la orden" no es "no hay orden").
+    -- Valores en español a propósito (dato que se muestra, como inventory_movements.type).
+    entry_type VARCHAR(10) NOT NULL CHECK (entry_type IN ('normal', 'rapida')),
+    -- Orden de compra de origen, opcional. RESTRICT: una orden con ingresos no se
+    -- borra de motor. Una entrada rápida no cita orden.
+    purchase_order_id BIGINT REFERENCES purchase_orders(purchase_order_id) ON DELETE RESTRICT,
+    CONSTRAINT chk_goods_receipts_rapid_without_order CHECK (entry_type = 'normal' OR purchase_order_id IS NULL),
+    -- "Guía de remisión" — el documento de despacho real, con su serie y
+    -- su número SEPARADOS como vienen en el documento ("T001-00000123"
+    -- es solo la forma de escribirlos juntos, con un guion). Formato REAL
+    -- (SUNAT, verificado): la serie tiene 4 caracteres alfanuméricos
+    -- (guía electrónica: 'T###' del remitente, 'V###' del transportista,
+    -- 'EG##' emitida desde el portal SUNAT) y el correlativo va de 1 a 8
+    -- dígitos. De la guía IMPRESA no se pudo confirmar el largo exacto de
+    -- la serie: se acepta de 1 a 4 alfanuméricos, sin guiones ni espacios
+    -- (la aplicación la normaliza a mayúsculas y el CHECK lo exige: así la
+    -- unicidad de más abajo no se burla con "t001" vs "T001"). Lo que sí no se
+    -- acepta es texto libre: un valor como "vvv" o "GR-23144141" no es una guía.
+    delivery_note_series VARCHAR(4) NOT NULL CHECK (delivery_note_series ~ '^[A-Z0-9]{1,4}$'),
+    delivery_note_number VARCHAR(8) NOT NULL CHECK (delivery_note_number ~ '^\d{1,8}$'),
+    -- Fecha de emisión que dice la guía.
+    delivery_note_date DATE NOT NULL,
+    -- Fecha en que el material llegó de verdad (recepción física) —
+    -- distinta de la fecha de la guía y de created_at (cuándo se
+    -- registró en el sistema, puede no ser el mismo día).
+    received_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    -- Escaneo/foto de la guía firmada, en `files` (módulo almacen). NULL =
+    -- archivo pendiente. RESTRICT + índice único: un archivo por documento.
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    -- Auditoría de las correcciones administrativas permitidas.
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    -- ANULADO (Fase 10): un ingreso registrado por error se anula con un ajuste que
+    -- revierte su stock (inventory_adjustments); aquí solo queda la marca
+    -- administrativa. Las cantidades originales NO se tocan. Un ingreso anulado ya
+    -- no cuenta para la unicidad de la guía ni para los candados de la orden.
+    voided_at TIMESTAMPTZ,
+    voided_by INT REFERENCES users(user_id)
 );
 CREATE INDEX idx_goods_receipts_project_id ON goods_receipts (project_id);
+-- La misma guía (proveedor + serie + número) no se registra dos veces: sumaría
+-- el stock dos veces. Los ingresos no se dan de baja, pero SÍ se anulan: una guía
+-- anulada se puede volver a registrar bien (por eso el índice excluye anulados).
+CREATE UNIQUE INDEX idx_un_goods_receipts_delivery_note
+    ON goods_receipts (project_id, supplier_id, delivery_note_series, delivery_note_number)
+    WHERE voided_at IS NULL;
+CREATE UNIQUE INDEX idx_un_goods_receipts_file_id ON goods_receipts (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_goods_receipts_purchase_order_id ON goods_receipts (purchase_order_id);
+-- "¿Este proveedor ya tiene documentos?" (RUC bloqueado, baja bloqueada) y
+-- el conteo por proveedor filtran por esto.
+CREATE INDEX idx_goods_receipts_supplier_id ON goods_receipts (supplier_id);
 
 CREATE TABLE goods_receipt_items (
     goods_receipt_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- Compositiva: un ítem no existe sin su goods receipt.
     goods_receipt_id BIGINT NOT NULL REFERENCES goods_receipts(goods_receipt_id) ON DELETE CASCADE,
+    -- Línea de la orden de compra que se recibe (NULL solo si el ingreso no
+    -- tiene orden: entrada rápida o normal aún pendiente). Varias entregas
+    -- pueden citar la misma línea (recepción parcial): sin UNIQUE. RESTRICT:
+    -- una línea citada no se borra de motor.
+    purchase_order_item_id BIGINT REFERENCES purchase_order_items(purchase_order_item_id) ON DELETE RESTRICT,
     -- RESTRICT: no se puede borrar de motor un producto con historial
     -- de ingresos.
     product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
-    total_quantity NUMERIC(18,6) NOT NULL CHECK (total_quantity > 0)
+    -- Descripción de la línea tal como la muestra la guía (la del cliente: "Descripción de la
+    -- Compra"). Si no se envía, se toma la de la línea de orden citada o el nombre del producto.
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    -- Lo que se RECIBIÓ físicamente (es lo que suma al stock). Se repartió
+    -- entre ubicaciones en goods_receipt_item_locations.
+    total_quantity NUMERIC(18,6) NOT NULL CHECK (total_quantity > 0),
+    -- Lo que decía la guía, cuando se quiere registrar: puede diferir de
+    -- lo recibido (faltantes, mermas, roturas). NULL = no se registró.
+    -- Son dos conceptos distintos: nunca se mezclan en una sola columna.
+    quantity_per_delivery_note NUMERIC(18,6)
+        CHECK (quantity_per_delivery_note IS NULL OR quantity_per_delivery_note > 0)
 );
 CREATE INDEX idx_goods_receipt_items_receipt_id ON goods_receipt_items (goods_receipt_id);
+CREATE INDEX idx_goods_receipt_items_purchase_order_item_id ON goods_receipt_items (purchase_order_item_id);
 CREATE INDEX idx_goods_receipt_items_product_id ON goods_receipt_items (product_id);
 
 -- Reparto entre varias ubicaciones. SUM(quantity) agrupado por
@@ -1180,6 +1580,9 @@ CREATE INDEX idx_goods_receipt_item_locations_bin_id ON goods_receipt_item_locat
 CREATE TABLE goods_issues (
     goods_issue_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Número del vale ("VS-01"): lo escribe el usuario, formato libre de la empresa. Único por
+    -- proyecto entre los vales NO anulados (el de un vale anulado se puede reutilizar).
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
     destination_sector VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_sector)) > 0),
     destination_level VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_level)) > 0),
     destination_block VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(destination_block)) > 0),
@@ -1194,9 +1597,13 @@ CREATE TABLE goods_issues (
     recipient_dni VARCHAR(8) NOT NULL CHECK (recipient_dni ~ '^\d{8}$'),
     issue_date DATE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by INT NOT NULL REFERENCES users(user_id)
+    created_by INT NOT NULL REFERENCES users(user_id),
+    -- ANULADO (Fase 10): el material vuelve al stock con un ajuste; aquí solo la marca.
+    voided_at TIMESTAMPTZ,
+    voided_by INT REFERENCES users(user_id)
 );
 CREATE INDEX idx_goods_issues_project_id ON goods_issues (project_id);
+CREATE UNIQUE INDEX uq_goods_issues_number ON goods_issues (project_id, number) WHERE voided_at IS NULL;
 
 CREATE TABLE goods_issue_items (
     goods_issue_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1219,6 +1626,60 @@ CREATE TABLE goods_issue_item_locations (
 );
 CREATE INDEX idx_goods_issue_item_locations_item_id ON goods_issue_item_locations (goods_issue_item_id);
 CREATE INDEX idx_goods_issue_item_locations_bin_id ON goods_issue_item_locations (bin_id);
+
+-- AJUSTE de inventario (Fase 10 de docs/almacen-ingreso-productos/05-roadmap.md): corrige
+-- las cantidades de un ingreso o de un vale YA registrados SIN reescribirlos: el original
+-- queda tal cual y el ajuste es un documento nuevo, con su motivo, que genera movimientos
+-- de stock normales (inventory_movements con reference_document_type = 'inventory_adjustment').
+-- No tiene baja ni edición: un ajuste equivocado se corrige con otro ajuste.
+CREATE TABLE inventory_adjustments (
+    inventory_adjustment_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Valores en español a propósito (dato que se muestra): 'correccion' = corrige
+    -- cantidades por línea y casilla; 'anulacion' = revierte todo el documento.
+    kind VARCHAR(10) NOT NULL CHECK (kind IN ('correccion', 'anulacion')),
+    -- Documento corregido: uno solo (ingreso o vale). RESTRICT: un documento con
+    -- ajustes no se borra de motor (vaciar Almacén los borra antes).
+    reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue')),
+    goods_receipt_id BIGINT REFERENCES goods_receipts(goods_receipt_id) ON DELETE RESTRICT,
+    goods_issue_id BIGINT REFERENCES goods_issues(goods_issue_id) ON DELETE RESTRICT,
+    CONSTRAINT chk_inventory_adjustments_one_reference CHECK (
+        (reference_document_type = 'goods_receipt' AND goods_receipt_id IS NOT NULL AND goods_issue_id IS NULL)
+        OR (reference_document_type = 'goods_issue' AND goods_issue_id IS NOT NULL AND goods_receipt_id IS NULL)
+    ),
+    -- Motivo obligatorio: sin él, un ajuste es un cambio de stock sin explicación.
+    reason VARCHAR(500) NOT NULL CHECK (LENGTH(TRIM(reason)) > 0),
+    -- Fecha de la corrección (por defecto hoy): es la fecha de sus movimientos de Kardex.
+    adjustment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id)
+);
+CREATE INDEX idx_inventory_adjustments_project_id ON inventory_adjustments (project_id);
+CREATE INDEX idx_inventory_adjustments_goods_receipt_id ON inventory_adjustments (goods_receipt_id);
+CREATE INDEX idx_inventory_adjustments_goods_issue_id ON inventory_adjustments (goods_issue_id);
+
+CREATE TABLE inventory_adjustment_items (
+    inventory_adjustment_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    inventory_adjustment_id BIGINT NOT NULL REFERENCES inventory_adjustments(inventory_adjustment_id) ON DELETE CASCADE,
+    -- Línea corregida (una sola: la del tipo de documento del ajuste).
+    goods_receipt_item_id BIGINT REFERENCES goods_receipt_items(goods_receipt_item_id) ON DELETE RESTRICT,
+    goods_issue_item_id BIGINT REFERENCES goods_issue_items(goods_issue_item_id) ON DELETE RESTRICT,
+    CONSTRAINT chk_inventory_adjustment_items_one_line CHECK (
+        (goods_receipt_item_id IS NOT NULL AND goods_issue_item_id IS NULL)
+        OR (goods_receipt_item_id IS NULL AND goods_issue_item_id IS NOT NULL)
+    ),
+    -- Producto de la línea corregida (el de la línea: no se elige aparte).
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    bin_id BIGINT NOT NULL REFERENCES bins(bin_id) ON DELETE RESTRICT,
+    -- Cambio de la cantidad DEL DOCUMENTO en esa casilla (mismo sentido que su cantidad):
+    -- + más recibido / más retirado, - menos. El efecto en el stock lo decide el tipo de
+    -- documento (en un vale, retirar de más BAJA el stock). Nunca 0.
+    quantity_delta NUMERIC(18,6) NOT NULL CHECK (quantity_delta <> 0)
+);
+CREATE INDEX idx_inventory_adjustment_items_adjustment_id ON inventory_adjustment_items (inventory_adjustment_id);
+CREATE INDEX idx_inventory_adjustment_items_receipt_item_id ON inventory_adjustment_items (goods_receipt_item_id);
+CREATE INDEX idx_inventory_adjustment_items_issue_item_id ON inventory_adjustment_items (goods_issue_item_id);
+CREATE INDEX idx_inventory_adjustment_items_bin_id ON inventory_adjustment_items (bin_id);
 
 -- Historial inmutable de movimientos — snapshot del saldo resultante
 -- en el momento (no se recalcula después leyendo hacia atrás).
@@ -1246,12 +1707,17 @@ CREATE TABLE inventory_movements (
     -- es un discriminador TÉCNICO de a qué tabla apunta
     -- reference_document_id — en inglés, matcheando el nombre real de
     -- esas tablas (nunca se muestra tal cual a un usuario).
-    reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue')),
+    reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue', 'inventory_adjustment')),
     reference_document_id BIGINT NOT NULL,
+    -- Fecha REAL del movimiento: la del documento que lo origina
+    -- (received_date del ingreso, issue_date del vale), sin hora. Es la que
+    -- muestra y filtra el Kardex. `created_at` es solo cuándo se registró en
+    -- el sistema (puede ser otro día): no se usa para filtrar por fecha.
+    movement_date DATE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id)
 );
 -- Kardex filtrable por producto/fecha (Fase 4) — la consulta central
 -- de este historial.
-CREATE INDEX idx_inventory_movements_product_id ON inventory_movements (product_id, created_at);
+CREATE INDEX idx_inventory_movements_product_id ON inventory_movements (product_id, movement_date);
 CREATE INDEX idx_inventory_movements_bin_id ON inventory_movements (bin_id);

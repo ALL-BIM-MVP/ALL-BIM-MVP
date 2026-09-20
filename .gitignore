@@ -112,3 +112,9 @@ frontend/dist/
 # Fragments (docs/report/solve/) — no es parte de la app, nunca se
 # commitea.
 herramienta-comparacion-visor/
+
+
+#Documentacion aun sin Aprobacion ni consulta con el resto del Equipo
+AGENTS.md 
+CLAUDE.md
+/agent-guide

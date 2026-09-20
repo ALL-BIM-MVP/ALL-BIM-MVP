@@ -11,7 +11,7 @@ export interface CategoryRow {
     type: "fijo" | "relacional";
     prefix: string | null;
     base_category_id: number | null;
-    next_tag: number;
+    next_display_id: number;
     created_at: Date;
     created_by: number;
     updated_at: Date | null;

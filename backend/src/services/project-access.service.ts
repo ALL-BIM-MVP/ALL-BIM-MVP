@@ -15,9 +15,26 @@ import { PROJECT_ERRORS } from "../models/errors/project.errors.js";
 import { PERMISSION_ERRORS } from "../models/errors/permission.errors.js";
 import { MODULE_ERRORS } from "../models/errors/modules.errors.js";
 import type { ModuleAccess, PermissionMap } from "../models/modules.models.js";
-import { assertProjectAccess } from "./files.service.js";
 
-export { assertProjectAccess };
+// Dueño del proyecto o miembro — el mínimo para tocar CUALQUIER cosa del
+// proyecto. Vivía en files.service.ts; se mudó acá para que
+// files.service.ts pueda usar assertModulePermission sin un import
+// circular (project-access.service.ts ya no importa de files.service.ts).
+export const assertProjectAccess = async (projectId : number, userId : number) : Promise<void> => {
+    const result = await pool.query(
+        `SELECT 1 FROM projects p
+            WHERE p.project_id = $1 AND (
+                p.owner_id = $2
+                OR EXISTS (
+                    SELECT 1 FROM project_members pm
+                    WHERE pm.project_id = p.project_id AND pm.user_id = $2
+                )
+            )`,
+        [projectId, userId]
+    );
+
+    if (result.rowCount === 0) throw new AppError(PROJECT_ERRORS.PROJECT_NOT_FOUND);
+};
 
 // Dueño o is_admin=true — acceso TOTAL al proyecto (miembros,
 // invitaciones, configuración), sin consultar ninguna tabla de

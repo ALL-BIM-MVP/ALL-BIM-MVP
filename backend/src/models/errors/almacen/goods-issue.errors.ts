@@ -10,4 +10,12 @@ export const GOODS_ISSUE_ERRORS = {
         }
     },
 
+    DUPLICATE_NUMBER: {
+        statusCode: 409,
+        response: {
+            code: "GOODS_ISSUE_DUPLICATE_NUMBER",
+            message: "Ya existe un vale de salida con ese número en este proyecto."
+        }
+    },
+
 } satisfies Record<string, ErrorFormat>;

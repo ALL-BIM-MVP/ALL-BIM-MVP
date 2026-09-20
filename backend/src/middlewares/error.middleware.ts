@@ -15,6 +15,18 @@ export const errorHandler = ( err: unknown, req: Request, res: Response, next: N
         return;
     }
 
+    // Errores de express.json() (body-parser): son culpa del cliente, no del
+    // servidor. Sin esto un JSON mal formado terminaba como un 500 opaco.
+    const bodyParserType = (err as { type?: string } | null)?.type;
+    if (bodyParserType === "entity.parse.failed") {
+        res.status(COMMON_ERRORS.INVALID_JSON_BODY.statusCode).json(COMMON_ERRORS.INVALID_JSON_BODY.response);
+        return;
+    }
+    if (bodyParserType === "entity.too.large") {
+        res.status(COMMON_ERRORS.PAYLOAD_TOO_LARGE.statusCode).json(COMMON_ERRORS.PAYLOAD_TOO_LARGE.response);
+        return;
+    }
+
     // Excepción NO atrapada por ningún AppError explícito — el único
     // lugar donde algo así se entera de que pasó es acá, ahora en JSON
     // estructurado (docker compose logs backend) en vez de texto

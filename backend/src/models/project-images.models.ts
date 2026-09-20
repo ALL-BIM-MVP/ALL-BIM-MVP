@@ -25,11 +25,10 @@ export interface ProjectImageContent {
 // GET /projects/:id — "traiga la imagen siempre": nunca es null, si no
 // hay portada propia cae en la de por defecto acá mismo (no es
 // responsabilidad del frontend distinguir esos dos casos, no le hace
-// falta). file_id SÍ puede ser null (no hay fila real de la que salga
-// un id cuando es la default) — es la única excepción a "no castear
-// BIGINT ids" porque acá no hay ID que castear, no hay fila.
+// falta). Sin file_id: la portada no es una fila de `files` (vive en
+// columnas de `projects`, ver database/schema.sql), no hay ningún id que
+// exponer.
 export interface ProjectCoverImage {
-    file_id : string | null;
     name : string;
     mime_type : string | null;
     // Ruta pública servida por el mount estático de /uploads (ver
@@ -44,11 +43,8 @@ export interface ProjectCoverImage {
 // Respuesta de PUT /projects/:id/image — mismo shape que ProjectCoverImage
 // (así el frontend puede pisar directo su cover_image en memoria sin
 // tener que re-pedir el proyecto entero) más file_size, que solo
-// importa justo después de subir. file_id nunca es null acá (siempre
-// hay una fila real recién insertada) — a diferencia de ProjectCoverImage,
-// donde sí puede ser la portada por defecto.
-export interface ProjectCoverImageInfo extends Omit<ProjectCoverImage, "file_id"> {
-    file_id : string;
+// importa justo después de subir.
+export interface ProjectCoverImageInfo extends ProjectCoverImage {
     file_size : number | null;
 };
 
@@ -67,7 +63,6 @@ export const toPublicUploadsUrl = (filePath : string) : string => {
 };
 
 export const buildDefaultCoverImage = () : ProjectCoverImage => ({
-    file_id: null,
     name: DEFAULT_COVER_NAME,
     mime_type: DEFAULT_COVER_MIME_TYPE,
     url: toPublicUploadsUrl(DEFAULT_COVER_IMAGE_PATH),

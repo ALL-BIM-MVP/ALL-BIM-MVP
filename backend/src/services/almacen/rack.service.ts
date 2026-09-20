@@ -128,7 +128,7 @@ export const getRackByIdService = async (
     await getWarehouseRowOrThrow(projectId, warehouseId);
     const rack = await getRackRowOrThrow(pool, warehouseId, rackId);
 
-    const bins = await listBinsForRack(rackId);
+    const bins = await listBinsForRack(rackId, projectId);
     return { ...toRackFull(rack), bins };
 };
 
@@ -164,6 +164,17 @@ export const createRackService = async (
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
+
+        // Lock de fila sobre el warehouse — serializa la creación de
+        // racks de un mismo almacén: sin esto, 2 altas concurrentes
+        // podrían leer las dos "sin nada cerca" en assertClearance ANTES
+        // de que cualquiera confirme, y terminar pegadas/superpuestas
+        // pese al chequeo. Mismo tipo de carrera que el
+        // next_display_id de categories (ver createProductService),
+        // resuelta igual: con
+        // FOR UPDATE en vez de leer y confiar en que nadie más inserte
+        // en el medio.
+        await client.query(`SELECT 1 FROM warehouses WHERE warehouse_id = $1 FOR UPDATE`, [warehouseId]);
 
         await assertClearance(client, warehouseId, geom);
 

@@ -15,6 +15,7 @@ import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 import type { ListInventoryMovementsQuery } from "../../schemas/almacen/inventory-movement.schema.js";
 import type { InventoryMovementRow } from "../../models/almacen/inventory-movement.models.js";
+import { productSummarySql } from "../../utils/product-summary.js";
 
 interface ApplyStockMovementParams {
     productId: number;
@@ -22,8 +23,10 @@ interface ApplyStockMovementParams {
     // Siempre positiva — el signo real lo decide `direction`.
     quantity: number;
     direction: "entrada" | "salida";
-    referenceDocumentType: "goods_receipt" | "goods_issue";
+    referenceDocumentType: "goods_receipt" | "goods_issue" | "inventory_adjustment";
     referenceDocumentId: number;
+    // Fecha del documento (received_date / issue_date) como "AAAA-MM-DD".
+    movementDate: string;
     userId: number;
 }
 
@@ -73,11 +76,12 @@ export const applyStockMovement = async (
 
     await client.query(
         `INSERT INTO inventory_movements
-            (product_id, type, quantity, bin_id, resulting_balance, reference_document_type, reference_document_id, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            (product_id, type, quantity, bin_id, resulting_balance, reference_document_type, reference_document_id,
+             movement_date, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8::date,$9)`,
         [
             params.productId, params.direction, params.quantity, params.binId, resultingBalance,
-            params.referenceDocumentType, params.referenceDocumentId, params.userId,
+            params.referenceDocumentType, params.referenceDocumentId, params.movementDate, params.userId,
         ]
     );
 };
@@ -88,13 +92,17 @@ export const listInventoryMovementsService = async (
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
 
     const { rows } = await pool.query<InventoryMovementRow>(
-        `SELECT im.* FROM inventory_movements im
+        `SELECT im.inventory_movement_id, im.product_id, im.type, im.quantity, im.bin_id, im.resulting_balance,
+            im.reference_document_type, im.reference_document_id,
+            to_char(im.movement_date, 'YYYY-MM-DD') AS movement_date, im.created_at, im.created_by,
+            ${productSummarySql('p')} AS product
+        FROM inventory_movements im
         INNER JOIN products p ON p.product_id = im.product_id
         WHERE p.project_id = $1
             AND ($2::bigint IS NULL OR im.product_id = $2)
-            AND ($3::timestamptz IS NULL OR im.created_at >= $3)
-            AND ($4::timestamptz IS NULL OR im.created_at < $4 + INTERVAL '1 day')
-        ORDER BY im.created_at DESC`,
+            AND ($3::date IS NULL OR im.movement_date >= $3::date)
+            AND ($4::date IS NULL OR im.movement_date <= $4::date)
+        ORDER BY im.movement_date DESC, im.inventory_movement_id DESC`,
         [projectId, query.product_id ?? null, query.from ?? null, query.to ?? null]
     );
     return rows;

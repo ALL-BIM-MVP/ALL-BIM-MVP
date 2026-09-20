@@ -15,7 +15,7 @@ import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 import pool from "../dist/db/database.js";
-import { resolveClassificationForProcessing } from "../dist/services/ifc-classification.service.js";
+import { resolveClassificationForProcessing } from "../dist/services/metrados/ifc-classification.service.js";
 
 // Usuario real ya existente en la BD de desarrollo (usado en el resto
 // de la sesión como usuario de prueba conocido) — projects.owner_id y

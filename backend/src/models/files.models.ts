@@ -1,5 +1,5 @@
 import type { FileType } from "../schemas/file.schema.js";
-import type { IfcProcessingStatus } from "./ifc-files.models.js";
+import type { IfcProcessingStatus } from "./metrados/ifc-files.models.js";
 import { buildSignedFileUrl } from "../utils/file-signing.js";
 
 // Sin imagen a propósito — es atribución (quién subió el archivo), no
@@ -15,6 +15,9 @@ interface FileUploader {
 export interface FileBase {
     file_id : number;
     project_id : number;
+    // Módulo dueño del archivo (modules.code) — ver files.module_id en
+    // database/schema.sql.
+    module_code : string;
     file_type : FileType;
     name : string;
     file_size : number | null;
@@ -75,6 +78,7 @@ export const transformFileToFull = (f : FileRow) : FileFull => {
     return {
         file_id: f.file_id,
         project_id: f.project_id,
+        module_code: f.module_code,
         file_type: f.file_type,
         name: f.name,
         file_size: f.file_size,

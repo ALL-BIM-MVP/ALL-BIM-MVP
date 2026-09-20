@@ -20,8 +20,9 @@ import { RACK_ERRORS } from "../../models/errors/almacen/rack.errors.js";
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { ALMACEN_MODULE_CODE, getWarehouseRowOrThrow } from "./warehouse.service.js";
+import { buildModel3DAssetUrl } from "../../models/almacen/model-3d-asset.models.js";
 import type { BinIdParam, UpdateBinBody } from "../../schemas/almacen/bin.schema.js";
-import type { BinRow, BinWithContents } from "../../models/almacen/bin.models.js";
+import type { BinContentSummary, BinRow, BinWithContents } from "../../models/almacen/bin.models.js";
 
 // Bahía/nivel se muestran 1-based en `location_label` (más legible que
 // empezar en 0), aunque se guarden 0-based en las columnas — mismo
@@ -70,16 +71,28 @@ export const insertBinsForRack = async (
 // goods-issue) hasta que se pidió explícito poder verlo acá. Un solo
 // query con `json_agg`/`FILTER` en vez de N+1 — trae también el modelo
 // 3D del producto (si tiene) para no necesitar una consulta aparte por
-// cada bin ocupado.
-export const listBinsForRack = async (rackId: number): Promise<BinWithContents[]> => {
-    const { rows } = await pool.query<BinWithContents>(
+// cada bin ocupado. Recibe `projectId` (no se puede sacar de `rackId`
+// sin otro JOIN) porque la URL del modelo 3D siempre es relativa a
+// "desde qué proyecto se está mirando esto" (ver
+// model-3d-asset.service.ts, VISIBILITY_CLAUSE) — OJO, esto NO valida
+// que el modelo sea visible desde este proyecto (rack/bin ya están
+// bien acotados a su propio proyecto por getRackByIdService antes de
+// llegar acá), solo arma la URL con la forma correcta.
+export const listBinsForRack = async (rackId: number, projectId: number): Promise<BinWithContents[]> => {
+    // model_3d_asset_id viaja crudo en el JSON del query (Postgres no
+    // puede llamar a buildModel3DAssetUrl, es JS) — se resuelve a
+    // model_3d_url recién abajo, después de leer, mismo criterio que
+    // transformProductModel3D en product.models.ts (nunca se guarda,
+    // siempre se recalcula al leer).
+    const { rows } = await pool.query<Omit<BinWithContents, "contents"> & { contents: (Omit<BinContentSummary, "model_3d_url"> & { model_3d_asset_id: number | null })[] }>(
         `SELECT b.*,
             COALESCE(
                 json_agg(
                     json_build_object(
-                        'product_id', p.product_id, 'code', p.code, 'name', p.name,
-                        'quantity', bc.quantity,
-                        'model_3d_path', p.model_3d_path, 'model_3d_format', p.model_3d_format
+                        'product_id', p.product_id::text, 'category_id', p.category_id, 'code', p.code, 'display_id', p.display_id,
+                        'name', p.name, 'unit', p.unit,
+                        'quantity', bc.quantity::numeric(18,6)::text,
+                        'model_3d_asset_id', p.model_3d_asset_id, 'model_3d_format', ma.format
                     )
                 ) FILTER (WHERE bc.bin_content_id IS NOT NULL),
                 '[]'
@@ -87,12 +100,19 @@ export const listBinsForRack = async (rackId: number): Promise<BinWithContents[]
         FROM bins b
         LEFT JOIN bin_contents bc ON bc.bin_id = b.bin_id AND bc.quantity > 0
         LEFT JOIN products p ON p.product_id = bc.product_id
+        LEFT JOIN model_3d_assets ma ON ma.model_3d_asset_id = p.model_3d_asset_id
         WHERE b.rack_id = $1 AND b.deleted_at IS NULL
         GROUP BY b.bin_id
         ORDER BY b.face, b.level, b.bay`,
         [rackId]
     );
-    return rows;
+    return rows.map((row) => ({
+        ...row,
+        contents: row.contents.map(({ model_3d_asset_id, ...content }) => ({
+            ...content,
+            model_3d_url: model_3d_asset_id !== null ? buildModel3DAssetUrl(projectId, model_3d_asset_id) : null,
+        })),
+    }));
 };
 
 export const updateBinService = async (

@@ -9,12 +9,11 @@ import { authorizeFileAccess } from '../middlewares/file-access.middleware.js';
 
 const router = Router();
 
-// Sin chequeo de rol de cuenta (Fase 2) — la autorización real sigue
-// siendo assertProjectAccess (owner o miembro) dentro del service, sin
-// cambios. Archivos todavía NO están atados a un módulo puntual (eso
-// es la Fase 6, "archivos por módulo", deliberadamente al final del
-// roadmap) — por eso acá NO se agregó ningún assertModulePermission
-// todavía, a diferencia de ifc-metrados.routes.ts.
+// Cada archivo es de un proyecto Y de un módulo (files.module_id): subir
+// exige `module_code` en el body y el permiso "upload" de ese módulo;
+// listar/descargar exigen "ver"; borrar exige "delete" (más ser quien lo
+// subió o el dueño del proyecto). La autorización real vive en el
+// service (assertModulePermission), no acá.
 router.post('/:projectId/files', requireAuth, uploadSingleFile, saveFileController);
 
 router.get('/:projectId/files', requireAuth, getProjectFilesController);

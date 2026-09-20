@@ -15,8 +15,15 @@ export type FileType = (typeof FILE_TYPES)[number];
 // invisibles para el propio usuario que las subió.
 export const UPLOADABLE_FILE_TYPES = ["ifc", "excel", "pdf", "txt", "image", "other"] as const;
 
+// Módulo dueño del archivo (modules.code, VARCHAR(40)) — OBLIGATORIO en
+// una subida manual: el backend nunca asume uno (asumir "metrados"
+// rompería el aislamiento entre módulos). Los archivos que genera el
+// propio backend (IFC procesado, Excel, .frag) lo fijan en el servidor.
+const moduleCodeSchema = z.string().trim().min(1).max(40);
+
 export const saveFileBodySchema = z.object({
     file_type: z.enum(UPLOADABLE_FILE_TYPES).optional(),
+    module_code: moduleCodeSchema,
 });
 
 export type SaveFileBody = z.infer<typeof saveFileBodySchema>;
@@ -45,6 +52,9 @@ export const optionalBooleanFlag = z.enum(["true", "false"])
 
 export const GetProjectFilesQuerySchema = z.object({
     file_type: z.enum(FILE_TYPES).optional(),
+    // Filtro opcional por módulo; sin él se listan los archivos de todos
+    // los módulos donde el usuario tiene "ver".
+    module_code: moduleCodeSchema.optional(),
     processed: optionalBooleanFlag,
     // Fase 3 (versionado de IFC) — sin este filtro, la lista trae TODAS
     // las versiones vivas de cada documento IFC (viejas incluidas, como
