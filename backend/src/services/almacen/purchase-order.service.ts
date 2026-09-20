@@ -335,12 +335,16 @@ export const deletePurchaseOrderService = async (
     try {
         await client.query("BEGIN");
         await lockOrder(client, projectId, purchaseOrderId);
-        // Una orden con facturas activas no se da de baja: se dan de baja primero
-        // ellas. (El bloqueo de arriba serializa contra crear una factura, que
-        // toma la orden con FOR SHARE.) Cuando existan ingresos que citen la
-        // orden se suman aquí.
+        // Una orden con facturas activas o con ingresos no se da de baja: se dan de
+        // baja primero las facturas. (El bloqueo de arriba serializa contra crear una
+        // factura o un ingreso, que toman la orden con FOR SHARE.)
+        // Los ingresos no se dan de baja: una orden con ingresos no se da de baja nunca.
         const invoiced = await client.query(
-            `SELECT 1 FROM invoices WHERE purchase_order_id = $1 AND deleted_at IS NULL LIMIT 1`, [purchaseOrderId]
+            `SELECT 1 FROM invoices WHERE purchase_order_id = $1 AND deleted_at IS NULL
+            UNION ALL
+            SELECT 1 FROM goods_receipts WHERE purchase_order_id = $1
+            LIMIT 1`,
+            [purchaseOrderId]
         );
         if (invoiced.rowCount) throw new AppError(PURCHASE_ORDER_ERRORS.HAS_DOCUMENTS);
         removed = await softDeleteDocument(client, ORDER_DOC, projectId, purchaseOrderId, user.user_id);
@@ -422,13 +426,16 @@ export const updatePurchaseOrderItemService = async (
         await client.query("BEGIN");
         await lockOrder(client, projectId, purchaseOrderId);
 
-        // Cantidad y montos son lo que las facturas ya tomaron: con una factura
-        // ACTIVA sobre esta línea no cambian (descripción y observaciones sí). Las
-        // facturas dadas de baja no cuentan.
+        // Cantidad y montos son lo que las facturas y los ingresos ya tomaron: con una
+        // factura ACTIVA o un ingreso sobre esta línea no cambian (descripción y
+        // observaciones sí). Las facturas dadas de baja no cuentan.
         if (LOCKED_ITEM_COLUMNS.some((column) => body[column] !== undefined)) {
             const invoiced = await client.query(
                 `SELECT 1 FROM invoice_items ii INNER JOIN invoices v ON v.invoice_id = ii.invoice_id
-                WHERE ii.purchase_order_item_id = $1 AND v.deleted_at IS NULL LIMIT 1`,
+                WHERE ii.purchase_order_item_id = $1 AND v.deleted_at IS NULL
+                UNION ALL
+                SELECT 1 FROM goods_receipt_items gri WHERE gri.purchase_order_item_id = $1
+                LIMIT 1`,
                 [itemId]
             );
             if (invoiced.rowCount) throw new AppError(PURCHASE_ORDER_ERRORS.ITEM_LOCKED);
@@ -453,8 +460,7 @@ export const updatePurchaseOrderItemService = async (
     }
 };
 
-// Las facturas que citan la línea la protegen con un NOT EXISTS (cuando existan
-// ingresos que la citen se suman aquí).
+// Las facturas y los ingresos que citan la línea la protegen con un NOT EXISTS.
 export const deletePurchaseOrderItemService = async (
     user: DecodedToken, { projectId, purchaseOrderId, itemId }: PurchaseOrderItemIdParam
 ): Promise<PurchaseOrderDetail> => {
@@ -474,11 +480,12 @@ export const deletePurchaseOrderItemService = async (
         );
         if (count.rows[0]!.total <= 1) throw new AppError(PURCHASE_ORDER_ERRORS.LAST_ITEM);
 
-        // Ninguna factura (ni las dadas de baja, que se conservan) puede citarla.
+        // Ningún documento (ni las facturas dadas de baja, que se conservan) puede citarla.
         const { rowCount: deleted } = await client.query(
             `DELETE FROM purchase_order_items
             WHERE purchase_order_item_id = $1
-                AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.purchase_order_item_id = $1)`,
+                AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.purchase_order_item_id = $1)
+                AND NOT EXISTS (SELECT 1 FROM goods_receipt_items gri WHERE gri.purchase_order_item_id = $1)`,
             [itemId]
         );
         if (deleted === 0) throw new AppError(PURCHASE_ORDER_ERRORS.ITEM_LOCKED);

@@ -103,6 +103,7 @@ after(async () => {
 
 const receiptBody = (overrides = {}) => ({
     supplier_id: state.supplierA?.supplier_id,
+    entry_type: "rapida",
     delivery_note_series: "T001",
     delivery_note_number: "00000123",
     delivery_note_date: "2026-09-10",
@@ -120,7 +121,7 @@ test("Zod: el RUC se normaliza (espacios y guiones) y solo acepta 11 dígitos", 
 });
 
 test("Zod: la guía se valida como serie + número (formato SUNAT) y no admite texto libre", () => {
-    const base = { supplier_id: 1, delivery_note_date: "2026-09-10", items: receiptBody().items };
+    const base = { supplier_id: 1, entry_type: "rapida", delivery_note_date: "2026-09-10", items: receiptBody().items };
     const ok = CreateGoodsReceiptBodySchema.parse({ ...base, delivery_note_series: " t001 ", delivery_note_number: "123" });
     assert.equal(ok.delivery_note_series, "T001", "la serie se normaliza a mayúsculas");
     for (const [series, number] of [["GR-1", "123"], ["T001", "123456789"], ["T001", "12a"], ["", "123"], ["T00001", "123"], ["T001", ""]]) {
@@ -246,7 +247,7 @@ test("ingreso: proveedor embebido, serie/número de guía, fecha de recepción p
     assert.equal(second.items[0].quantity_per_delivery_note, null);
     assert.equal(second.received_date, "2026-09-12");
 
-    const listed = await listGoodsReceiptsService(asUser(plainId), { projectId });
+    const listed = await listGoodsReceiptsService(asUser(plainId), { projectId }, {});
     assert.equal(listed.length, 2);
     assert.ok(listed.every((r) => r.supplier.ruc === "20123456789"), "el listado también trae el proveedor");
     assert.equal((await getGoodsReceiptByIdService(asUser(plainId), { projectId, goodsReceiptId: receipt.goods_receipt_id })).supplier.name, "Cementos del Sur SAC");

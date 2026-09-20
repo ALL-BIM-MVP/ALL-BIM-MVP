@@ -95,7 +95,7 @@ export const PURCHASE_ORDER_ERRORS = {
         statusCode: 409,
         response: {
             code: "PURCHASE_ORDER_ITEM_LOCKED",
-            message: "La línea ya está en una factura: no se puede cambiar su cantidad ni sus montos, ni quitarla."
+            message: "La línea ya está en una factura o en un ingreso: no se puede cambiar su cantidad ni sus montos, ni quitarla."
         }
     },
 
@@ -103,7 +103,7 @@ export const PURCHASE_ORDER_ERRORS = {
         statusCode: 409,
         response: {
             code: "PURCHASE_ORDER_HAS_DOCUMENTS",
-            message: "No se puede dar de baja la orden de compra porque tiene facturas registradas."
+            message: "No se puede dar de baja la orden de compra porque tiene facturas o ingresos registrados."
         }
     },
 

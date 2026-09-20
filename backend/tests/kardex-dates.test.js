@@ -56,7 +56,7 @@ after(async () => {
 });
 
 const receipt = (number, receivedDate, quantity) => createGoodsReceiptService(user, { projectId }, {
-    supplier_id: supplierId, delivery_note_series: "T001", delivery_note_number: String(number), delivery_note_date: "2026-09-01",
+    supplier_id: supplierId, entry_type: "rapida", delivery_note_series: "T001", delivery_note_number: String(number), delivery_note_date: "2026-09-01",
     ...(receivedDate ? { received_date: receivedDate } : {}),
     items: [{ product_id: productId, total_quantity: quantity, locations: [{ bin_id: binId, quantity }] }],
 });

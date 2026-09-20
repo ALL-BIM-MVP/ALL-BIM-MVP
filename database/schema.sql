@@ -1456,17 +1456,29 @@ CREATE INDEX idx_invoice_items_invoice_id ON invoice_items (invoice_id);
 CREATE INDEX idx_invoice_items_purchase_order_item_id ON invoice_items (purchase_order_item_id);
 CREATE INDEX idx_invoice_items_product_id ON invoice_items (product_id);
 
--- Registro de movimiento INMUTABLE: no se edita, no se da de baja (no
--- tiene deleted_at) — un error se corrige con un movimiento nuevo,
--- nunca reescribiendo este. Los vínculos a documentos previos (orden de
--- compra, factura) se agregan en fases siguientes como columnas
--- opcionales.
+-- Registro de movimiento INMUTABLE en lo físico: no se da de baja (no tiene
+-- deleted_at) ni se editan cantidades, productos, casillas ni la fecha de
+-- recepción — un error de esos datos se corrige con un movimiento nuevo (Fase 10),
+-- nunca reescribiendo este. Sí se corrigen, con auditoría (updated_at/by), los
+-- datos administrativos (serie, número y fecha de la guía), el vínculo con la
+-- orden de compra y el archivo. Guía y recepción son UNA sola entidad (la
+-- cabecera guarda los datos de la guía; cada línea guarda lo recibido).
 CREATE TABLE goods_receipts (
     goods_receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     -- Solo el id: el RUC y la razón social viven en `suppliers`.
     -- RESTRICT: no se puede borrar de motor un proveedor con ingresos.
     supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- Tipo de entrada. 'rapida' = sin documentos previos (compra urgente, entrada
+    -- directa): los pasos anteriores simplemente no existen para ese ingreso.
+    -- 'normal' = sigue el proceso; su orden de compra puede estar todavía
+    -- PENDIENTE de vincular ("falta registrar la orden" no es "no hay orden").
+    -- Valores en español a propósito (dato que se muestra, como inventory_movements.type).
+    entry_type VARCHAR(10) NOT NULL CHECK (entry_type IN ('normal', 'rapida')),
+    -- Orden de compra de origen, opcional. RESTRICT: una orden con ingresos no se
+    -- borra de motor. Una entrada rápida no cita orden.
+    purchase_order_id BIGINT REFERENCES purchase_orders(purchase_order_id) ON DELETE RESTRICT,
+    CONSTRAINT chk_goods_receipts_rapid_without_order CHECK (entry_type = 'normal' OR purchase_order_id IS NULL),
     -- "Guía de remisión" — el documento de despacho real, con su serie y
     -- su número SEPARADOS como vienen en el documento ("T001-00000123"
     -- es solo la forma de escribirlos juntos, con un guion). Formato REAL
@@ -1475,9 +1487,10 @@ CREATE TABLE goods_receipts (
     -- 'EG##' emitida desde el portal SUNAT) y el correlativo va de 1 a 8
     -- dígitos. De la guía IMPRESA no se pudo confirmar el largo exacto de
     -- la serie: se acepta de 1 a 4 alfanuméricos, sin guiones ni espacios
-    -- (la aplicación la normaliza a mayúsculas). Lo que sí no se acepta
-    -- es texto libre: un valor como "vvv" o "GR-23144141" no es una guía.
-    delivery_note_series VARCHAR(4) NOT NULL CHECK (delivery_note_series ~ '^[A-Za-z0-9]{1,4}$'),
+    -- (la aplicación la normaliza a mayúsculas y el CHECK lo exige: así la
+    -- unicidad de más abajo no se burla con "t001" vs "T001"). Lo que sí no se
+    -- acepta es texto libre: un valor como "vvv" o "GR-23144141" no es una guía.
+    delivery_note_series VARCHAR(4) NOT NULL CHECK (delivery_note_series ~ '^[A-Z0-9]{1,4}$'),
     delivery_note_number VARCHAR(8) NOT NULL CHECK (delivery_note_number ~ '^\d{1,8}$'),
     -- Fecha de emisión que dice la guía.
     delivery_note_date DATE NOT NULL,
@@ -1485,10 +1498,22 @@ CREATE TABLE goods_receipts (
     -- distinta de la fecha de la guía y de created_at (cuándo se
     -- registró en el sistema, puede no ser el mismo día).
     received_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    -- Escaneo/foto de la guía firmada, en `files` (módulo almacen). NULL =
+    -- archivo pendiente. RESTRICT + índice único: un archivo por documento.
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by INT NOT NULL REFERENCES users(user_id)
+    created_by INT NOT NULL REFERENCES users(user_id),
+    -- Auditoría de las correcciones administrativas permitidas.
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id)
 );
 CREATE INDEX idx_goods_receipts_project_id ON goods_receipts (project_id);
+-- La misma guía (proveedor + serie + número) no se registra dos veces: sumaría
+-- el stock dos veces. Sin filtro de baja: los ingresos no se dan de baja.
+CREATE UNIQUE INDEX idx_un_goods_receipts_delivery_note
+    ON goods_receipts (project_id, supplier_id, delivery_note_series, delivery_note_number);
+CREATE UNIQUE INDEX idx_un_goods_receipts_file_id ON goods_receipts (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_goods_receipts_purchase_order_id ON goods_receipts (purchase_order_id);
 -- "¿Este proveedor ya tiene documentos?" (RUC bloqueado, baja bloqueada) y
 -- el conteo por proveedor filtran por esto.
 CREATE INDEX idx_goods_receipts_supplier_id ON goods_receipts (supplier_id);
@@ -1497,6 +1522,11 @@ CREATE TABLE goods_receipt_items (
     goods_receipt_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- Compositiva: un ítem no existe sin su goods receipt.
     goods_receipt_id BIGINT NOT NULL REFERENCES goods_receipts(goods_receipt_id) ON DELETE CASCADE,
+    -- Línea de la orden de compra que se recibe (NULL solo si el ingreso no
+    -- tiene orden: entrada rápida o normal aún pendiente). Varias entregas
+    -- pueden citar la misma línea (recepción parcial): sin UNIQUE. RESTRICT:
+    -- una línea citada no se borra de motor.
+    purchase_order_item_id BIGINT REFERENCES purchase_order_items(purchase_order_item_id) ON DELETE RESTRICT,
     -- RESTRICT: no se puede borrar de motor un producto con historial
     -- de ingresos.
     product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
@@ -1510,6 +1540,7 @@ CREATE TABLE goods_receipt_items (
         CHECK (quantity_per_delivery_note IS NULL OR quantity_per_delivery_note > 0)
 );
 CREATE INDEX idx_goods_receipt_items_receipt_id ON goods_receipt_items (goods_receipt_id);
+CREATE INDEX idx_goods_receipt_items_purchase_order_item_id ON goods_receipt_items (purchase_order_item_id);
 CREATE INDEX idx_goods_receipt_items_product_id ON goods_receipt_items (product_id);
 
 -- Reparto entre varias ubicaciones. SUM(quantity) agrupado por

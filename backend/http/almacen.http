@@ -629,6 +629,7 @@ Content-Type: application/json
 
 ###
 @directOrderId = {{directOrder.response.body.$.purchase_order_id}}
+@directOrderItemId = {{directOrder.response.body.$.items[0].purchase_order_item_id}}
 
 ### 6C.4 Solo con requerimiento de origen: la línea cita una línea del requerimiento
 # @name requisitionOrder
@@ -898,14 +899,23 @@ Content-Type: application/json
 { "file_id": {{scanInvoiceId}} }
 
 ### =====================================================================
-### 7. INGRESOS (goods receipts) — suman stock; no se editan ni se borran
+### 7. INGRESOS (goods receipts = guía de remisión + ubicación) — suman stock
 ### =====================================================================
 # La cantidad recibida (total_quantity) se reparte entre casillas (locations)
 # y la suma tiene que dar EXACTO el total. quantity_per_delivery_note es lo
 # que decía la guía (opcional).
-# Guía de remisión: serie (1-4 letras/números, se pasa a mayúsculas) + número (1-8 dígitos).
+# Guía de remisión: serie (1-4 letras/números, se guarda en MAYÚSCULAS) + número (1-8
+# dígitos). La misma guía (proveedor + serie + número) no se registra dos veces.
+# - entry_type: "rapida" = sin documentos previos (no cita orden); "normal" = sigue el
+#   proceso (su orden puede estar PENDIENTE de vincular y vincularse después).
+# - Con orden de compra, CADA línea cita una línea de esa orden (purchase_order_item_id)
+#   y usa su producto; el proveedor del ingreso es el de la orden. Sin orden, la línea trae
+#   su product_id. Se puede recibir menos o más de lo ordenado (entregas parciales).
+# - No se editan cantidades, productos, casillas ni la fecha de recepción, ni se dan de
+#   baja: un error de esos datos se corrige con un movimiento nuevo (Fase 10). Sí se
+#   corrigen (PATCH) la serie/número/fecha de la guía, la orden (PUT) y el archivo (PUT).
 
-### 7.1 Crear ingreso
+### 7.1 Crear ingreso (entrada rápida: sin orden ni documentos previos)
 # @name receipt
 POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
 Authorization: Bearer {{accessToken}}
@@ -913,6 +923,7 @@ Content-Type: application/json
 
 {
   "supplier_id": {{supplierId}},
+  "entry_type": "rapida",
   "delivery_note_series": "t001",
   "delivery_note_number": "123",
   "delivery_note_date": "2026-09-10",
@@ -939,6 +950,111 @@ Authorization: Bearer {{accessToken}}
 
 ###
 GET {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}
+Authorization: Bearer {{accessToken}}
+
+### 7.3 Ingreso NORMAL con orden de compra (la línea cita la de la orden; el producto se deduce)
+# Recibe las 10 unidades de la orden de compra directa OC-2026-0003 de 6C.3.
+# @name receiptWithOrder
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "entry_type": "normal",
+  "purchase_order_id": {{directOrderId}},
+  "delivery_note_series": "T001",
+  "delivery_note_number": "124",
+  "delivery_note_date": "2026-09-16",
+  "received_date": "2026-09-17",
+  "items": [
+    {
+      "purchase_order_item_id": {{directOrderItemId}},
+      "total_quantity": 6,
+      "quantity_per_delivery_note": 6,
+      "locations": [ { "bin_id": {{binId2}}, "quantity": 6 } ]
+    }
+  ]
+}
+
+###
+@receiptWithOrderId = {{receiptWithOrder.response.body.$.goods_receipt_id}}
+
+### 7.4 Ingreso NORMAL con la orden pendiente de vincular (llegó antes del papeleo)
+# @name pendingReceipt
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "entry_type": "normal",
+  "delivery_note_series": "T001",
+  "delivery_note_number": "125",
+  "delivery_note_date": "2026-09-18",
+  "items": [
+    { "product_id": {{productId}}, "total_quantity": 4, "locations": [ { "bin_id": {{binId2}}, "quantity": 4 } ] }
+  ]
+}
+
+###
+@pendingReceiptId = {{pendingReceipt.response.body.$.goods_receipt_id}}
+@pendingReceiptItemId = {{pendingReceipt.response.body.$.items[0].goods_receipt_item_id}}
+
+### 7.5 Vincular la orden DESPUÉS: se indica la línea de orden de CADA línea del ingreso (no toca el stock)
+PUT {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{pendingReceiptId}}/purchase-order
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "purchase_order_id": {{directOrderId}},
+  "items": [ { "goods_receipt_item_id": {{pendingReceiptItemId}}, "purchase_order_item_id": {{directOrderItemId}} } ]
+}
+
+### 7.6 Corregir datos ADMINISTRATIVOS de la guía (PATCH; serie, número y fecha de la guía; deja auditoría)
+PATCH {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{pendingReceiptId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "delivery_note_number": "126", "delivery_note_date": "2026-09-17" }
+
+### 7.7 Escaneo de la guía: subir a `files` y adjuntar (reemplazar o quitar elimina el anterior)
+# @name scanReceipt
+POST {{baseUrl}}/projects/{{projectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----Almacen
+
+------Almacen
+Content-Disposition: form-data; name="module_code"
+
+almacen
+------Almacen
+Content-Disposition: form-data; name="file"; filename="guia-T001-123.pdf"
+Content-Type: application/pdf
+
+< ./ejemplos/documento.pdf
+------Almacen--
+
+###
+@scanReceiptId = {{scanReceipt.response.body.$.file_id}}
+
+###
+PUT {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}/file
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": {{scanReceiptId}} }
+
+### 7.8 Listar con filtros (proveedor, orden, tipo de entrada, texto "serie-número" o proveedor)
+GET {{baseUrl}}/projects/{{projectId}}/goods-receipts?entry_type=normal
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/goods-receipts?purchase_order_id={{directOrderId}}
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/goods-receipts?search=T001-12
 Authorization: Bearer {{accessToken}}
 
 ### =====================================================================
@@ -1039,6 +1155,7 @@ Content-Type: application/json
 
 {
   "supplier_id": {{supplierId}},
+  "entry_type": "rapida",
   "delivery_note_series": "T001",
   "delivery_note_number": "124",
   "delivery_note_date": "2026-09-10",
@@ -1052,6 +1169,7 @@ Content-Type: application/json
 
 {
   "supplier_id": {{supplierId}},
+  "entry_type": "rapida",
   "delivery_note_series": "GR-23144141",
   "delivery_note_number": "abc",
   "delivery_note_date": "2026-09-10",
@@ -1227,6 +1345,54 @@ Content-Type: application/json
 DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}
 Authorization: Bearer {{accessToken}}
 
+### 11.10r Misma guía repetida (proveedor + serie + número) → 409 GOODS_RECEIPT_DUPLICATE_DELIVERY_NOTE
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "entry_type": "rapida", "delivery_note_series": "T001", "delivery_note_number": "123", "delivery_note_date": "2026-09-10",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 1, "locations": [ { "bin_id": {{binId}}, "quantity": 1 } ] } ]
+}
+
+### 11.10s Entrada rápida que cita una orden → 400 INVALID_REQUEST_DATA (una entrada rápida no tiene documentos previos)
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "entry_type": "rapida", "purchase_order_id": {{directOrderId}}, "delivery_note_series": "T001", "delivery_note_number": "300", "delivery_note_date": "2026-09-10",
+  "items": [ { "purchase_order_item_id": {{directOrderItemId}}, "total_quantity": 1, "locations": [ { "bin_id": {{binId}}, "quantity": 1 } ] } ]
+}
+
+### 11.10t Línea sin citar la orden en un ingreso que tiene orden → 400 GOODS_RECEIPT_LINK_REQUIRED
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "entry_type": "normal", "purchase_order_id": {{directOrderId}}, "delivery_note_series": "T001", "delivery_note_number": "301", "delivery_note_date": "2026-09-10",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 1, "locations": [ { "bin_id": {{binId}}, "quantity": 1 } ] } ]
+}
+
+### 11.10u Corregir la fecha de recepción o las cantidades por PATCH → 400 INVALID_REQUEST_DATA (no se editan)
+PATCH {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "received_date": "2026-01-01" }
+
+### 11.10v Dar de baja una orden que ya tiene ingresos → 409 PURCHASE_ORDER_HAS_DOCUMENTS
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}
+Authorization: Bearer {{accessToken}}
+
+### 11.10w Cambiar la cantidad ordenada de una línea que ya tiene ingresos → 409 PURCHASE_ORDER_ITEM_LOCKED
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}/items/{{directOrderItemId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "quantity_ordered": 999 }
+
 ### 11.11 Eliminar un proyecto con Almacén con contenido → 409 ALMACEN_CONTENT_NOT_EMPTY
 DELETE {{baseUrl}}/projects/{{projectId}}
 Authorization: Bearer {{accessToken}}
@@ -1248,15 +1414,13 @@ DELETE {{baseUrl}}/projects/{{projectId}}/invoices/{{directInvoiceId}}
 Authorization: Bearer {{accessToken}}
 
 ### 12.00 Baja de las órdenes de compra (exige configure; elimina también su archivo). Antes que la cotización y el requerimiento.
+# La orden de compra directa (OC-2026-0003) NO se da de baja aquí: ya tiene ingresos y los ingresos no se dan de baja.
+# Se elimina al vaciar Almacén (12.4).
 DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}
 Authorization: Bearer {{accessToken}}
 
 ###
 DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrder2Id}}
-Authorization: Bearer {{accessToken}}
-
-###
-DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}
 Authorization: Bearer {{accessToken}}
 
 ###

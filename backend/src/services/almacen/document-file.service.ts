@@ -14,7 +14,7 @@ import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 // Tablas de documentos que guardan file_id. Cada documento nuevo con archivo
 // se suma acá: es lo que impide adjuntar un mismo archivo a dos documentos
 // de tablas distintas. Nombres fijos del servidor (nunca entrada del usuario).
-const DOCUMENT_FILE_TABLES = ["purchase_requisitions", "quotations", "purchase_orders", "invoices"];
+const DOCUMENT_FILE_TABLES = ["purchase_requisitions", "quotations", "purchase_orders", "invoices", "goods_receipts"];
 
 export interface FileBytes {
     file_path: string;
@@ -64,6 +64,9 @@ export interface DocumentConfig {
     table: string;
     idColumn: string;
     notFoundError: ErrorFormat;
+    // false = la tabla no tiene baja lógica (ej. goods_receipts: los ingresos no se
+    // dan de baja). Por defecto se asume que sí (deleted_at).
+    softDelete?: boolean;
 }
 
 // Bloquea el documento ACTIVO del proyecto (FOR UPDATE) y devuelve su file_id:
@@ -73,7 +76,7 @@ export const lockDocument = async (
 ): Promise<{ file_id: number | null }> => {
     const { rows } = await client.query<{ file_id: number | null }>(
         `SELECT file_id FROM ${doc.table}
-        WHERE ${doc.idColumn} = $1 AND project_id = $2 AND deleted_at IS NULL FOR UPDATE`,
+        WHERE ${doc.idColumn} = $1 AND project_id = $2 ${doc.softDelete === false ? "" : "AND deleted_at IS NULL"} FOR UPDATE`,
         [documentId, projectId]
     );
     if (!rows[0]) throw new AppError(doc.notFoundError);
