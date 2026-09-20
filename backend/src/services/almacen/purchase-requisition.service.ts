@@ -209,11 +209,14 @@ export const deletePurchaseRequisitionService = async (
     try {
         await client.query("BEGIN");
         await lockRequisition(client, projectId, purchaseRequisitionId);
-        // Un requerimiento con cotizaciones activas no se da de baja: se dan de
+        // Un requerimiento con cotizaciones u órdenes activas no se da de baja: se dan de
         // baja primero ellas. (El bloqueo de arriba serializa contra crear una
         // cotización, que toma el requerimiento con FOR SHARE.)
         const quoted = await client.query(
-            `SELECT 1 FROM quotations WHERE purchase_requisition_id = $1 AND deleted_at IS NULL LIMIT 1`,
+            `SELECT 1 FROM quotations WHERE purchase_requisition_id = $1 AND deleted_at IS NULL
+            UNION ALL
+            SELECT 1 FROM purchase_orders WHERE purchase_requisition_id = $1 AND deleted_at IS NULL
+            LIMIT 1`,
             [purchaseRequisitionId]
         );
         if (quoted.rowCount) throw new AppError(PURCHASE_REQUISITION_ERRORS.HAS_DOCUMENTS);
@@ -291,13 +294,17 @@ export const updatePurchaseRequisitionItemService = async (
         await lockRequisition(client, projectId, purchaseRequisitionId);
         if (body.product_id !== undefined) await assertProductInProject(client, projectId, body.product_id);
 
-        // Cantidad y producto son lo que las cotizaciones ya cotizaron: con una
-        // cotización ACTIVA sobre esta línea no cambian (la descripción y el
+        // Cantidad y producto son lo que las cotizaciones y órdenes ya tomaron: con
+        // una cotización u orden ACTIVA sobre esta línea no cambian (la descripción y el
         // precio estimado sí). Las líneas de cotizaciones dadas de baja no cuentan.
         if (body.quantity_requested !== undefined || body.product_id !== undefined) {
             const quoted = await client.query(
                 `SELECT 1 FROM quotation_items qi INNER JOIN quotations q ON q.quotation_id = qi.quotation_id
-                WHERE qi.purchase_requisition_item_id = $1 AND q.deleted_at IS NULL LIMIT 1`,
+                WHERE qi.purchase_requisition_item_id = $1 AND q.deleted_at IS NULL
+                UNION ALL
+                SELECT 1 FROM purchase_order_items poi INNER JOIN purchase_orders po ON po.purchase_order_id = poi.purchase_order_id
+                WHERE poi.purchase_requisition_item_id = $1 AND po.deleted_at IS NULL
+                LIMIT 1`,
                 [itemId]
             );
             if (quoted.rowCount) throw new AppError(PURCHASE_REQUISITION_ERRORS.ITEM_LOCKED);
@@ -348,11 +355,12 @@ export const deletePurchaseRequisitionItemService = async (
         if (exists.rowCount === 0) throw new AppError(PURCHASE_REQUISITION_ERRORS.ITEM_NOT_FOUND);
         if (count.rows[0]!.total <= 1) throw new AppError(PURCHASE_REQUISITION_ERRORS.LAST_ITEM);
 
-        // Ninguna cotización (ni las dadas de baja, que se conservan) puede referirla.
+        // Ningún documento (ni los dados de baja, que se conservan) puede referirla.
         const { rowCount: deleted } = await client.query(
             `DELETE FROM purchase_requisition_items
             WHERE purchase_requisition_item_id = $1
-                AND NOT EXISTS (SELECT 1 FROM quotation_items qi WHERE qi.purchase_requisition_item_id = $1)`,
+                AND NOT EXISTS (SELECT 1 FROM quotation_items qi WHERE qi.purchase_requisition_item_id = $1)
+                AND NOT EXISTS (SELECT 1 FROM purchase_order_items poi WHERE poi.purchase_requisition_item_id = $1)`,
             [itemId]
         );
         if (deleted === 0) throw new AppError(PURCHASE_REQUISITION_ERRORS.ITEM_LOCKED);

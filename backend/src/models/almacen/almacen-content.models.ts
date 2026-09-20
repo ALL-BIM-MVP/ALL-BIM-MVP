@@ -6,6 +6,7 @@ export interface AlmacenContentCounts {
     suppliers: number;
     purchase_requisitions: number;
     quotations: number;
+    purchase_orders: number;
     warehouses: number;
     racks: number;
     bins: number;

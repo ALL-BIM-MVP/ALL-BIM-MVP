@@ -12,7 +12,7 @@
 #
 # Permisos (módulo almacen): ver = view; crear/editar/adjuntar = process;
 # bajas de estructura/catálogo = delete; bajas de documentos de auditoría
-# (proveedor, requerimiento) y vaciar = configure / dueño o admin del proyecto.
+# (proveedor, requerimiento, cotización, orden) y vaciar = configure / dueño o admin del proyecto.
 
 @baseUrl = http://localhost:4000/api
 # @projectId = 1
@@ -544,6 +544,195 @@ DELETE {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}/items/{{quo
 Authorization: Bearer {{accessToken}}
 
 ### =====================================================================
+### 6C. ÓRDENES DE COMPRA (lo que la empresa decide comprar y a quién)
+### =====================================================================
+# El origen es OPCIONAL (compra directa/urgente), pero si la orden lo tiene, LAS MISMAS
+# LÍNEAS del requerimiento deben llegar hasta el almacén (pedido del cliente):
+# - Puede venir de una cotización (el requerimiento se deduce), solo de un
+#   requerimiento, o de ninguno (compra directa).
+# - Con cotización: CADA línea cita una línea de esa cotización (quotation_item_id).
+#   Solo con requerimiento: CADA línea cita una línea del requerimiento
+#   (purchase_requisition_item_id). No se admiten líneas ajenas al origen: lo que no
+#   estaba se agrega antes al requerimiento (y se cotiza), o va en otra orden.
+#   El producto es el de la línea citada (no hace falta enviar product_id).
+# - Sin origen (compra directa): sin vínculos; cada línea trae su product_id.
+# - La orden guarda SU PROPIA copia (cantidad, descripción y montos): no cambia si
+#   luego se corrige la cotización. line_total obligatorio; el resto de montos opcional.
+# - El número lo pone la empresa: único por proyecto entre las activas.
+# - Una misma línea de cotización puede estar en varias órdenes (pedidos escalonados).
+# - Una orden pertenece a UN proveedor; si cita una cotización, es el de esa cotización.
+
+### 6C.1 Crear desde una cotización (solo la línea que se compra; se piden 60 de 100 cotizadas)
+# @name purchaseOrder
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "quotation_id": {{quotationId}},
+  "number": "OC-2026-0001",
+  "order_date": "2026-09-15",
+  "currency": "PEN",
+  "commercial_terms": "Entrega en obra en 5 días",
+  "total_amount": 1800,
+  "items": [
+    {
+      "quotation_item_id": {{quotationItemId}},
+      "description": "Cemento Sol bolsa 42.5 kg",
+      "quantity_ordered": 60,
+      "unit_price": 30,
+      "line_total": 1800
+    }
+  ]
+}
+
+###
+@purchaseOrderId = {{purchaseOrder.response.body.$.purchase_order_id}}
+@purchaseOrderItemId = {{purchaseOrder.response.body.$.items[0].purchase_order_item_id}}
+
+### 6C.2 Segunda orden con la MISMA línea de cotización (pedido escalonado: las 40 restantes)
+# @name purchaseOrder2
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "quotation_id": {{quotationId}},
+  "number": "OC-2026-0002",
+  "order_date": "2026-09-29",
+  "currency": "PEN",
+  "items": [
+    { "quotation_item_id": {{quotationItemId}}, "description": "Cemento Sol bolsa 42.5 kg (saldo)", "quantity_ordered": 40, "line_total": 1200 }
+  ]
+}
+
+###
+@purchaseOrder2Id = {{purchaseOrder2.response.body.$.purchase_order_id}}
+
+### 6C.3 Compra directa: sin requerimiento ni cotización (las líneas traen su producto)
+# @name directOrder
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "number": "OC-2026-0003",
+  "order_date": "2026-09-16",
+  "currency": "PEN",
+  "items": [
+    { "product_id": {{productId}}, "description": "Compra urgente de cemento", "quantity_ordered": 10, "line_total": 320 }
+  ]
+}
+
+###
+@directOrderId = {{directOrder.response.body.$.purchase_order_id}}
+
+### 6C.4 Solo con requerimiento de origen: la línea cita una línea del requerimiento
+# @name requisitionOrder
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "purchase_requisition_id": {{requisitionId}},
+  "number": "OC-2026-0004",
+  "order_date": "2026-09-17",
+  "currency": "PEN",
+  "items": [
+    { "purchase_requisition_item_id": {{requisitionItem3Id}}, "description": "Alambre N°16", "quantity_ordered": 5, "line_total": 40 }
+  ]
+}
+
+###
+@requisitionOrderId = {{requisitionOrder.response.body.$.purchase_order_id}}
+
+### 6C.5 Listar (filtros opcionales: proveedor, requerimiento, cotización, texto) / obtener
+GET {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/purchase-orders?purchase_requisition_id={{requisitionId}}
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/purchase-orders?quotation_id={{quotationId}}&supplier_id={{supplierId}}
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/purchase-orders?search=OC-2026
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}
+Authorization: Bearer {{accessToken}}
+
+### 6C.6 Editar la cabecera (PATCH parcial; null limpia el total). El proveedor y el origen no se cambian.
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "commercial_terms": "Pago contra entrega", "total_amount": null }
+
+### 6C.7 Líneas: agregar una a la compra directa (sin origen, trae su producto). En una orden con origen la línea debe citarlo.
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "product_id": {{productId}}, "description": "Flete", "quantity_ordered": 1, "line_total": 80 }
+
+###
+# Editar la línea (parcial)
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}/items/{{purchaseOrderItemId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "notes": "Incluye descarga", "discount_amount": 0 }
+
+###
+# @name orderNow
+GET {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}
+Authorization: Bearer {{accessToken}}
+
+###
+@orderLastItemId = {{orderNow.response.body.$.items[1].purchase_order_item_id}}
+
+###
+# Quitar la línea agregada (una orden no puede quedarse sin líneas)
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}/items/{{orderLastItemId}}
+Authorization: Bearer {{accessToken}}
+
+### 6C.8 Documento físico de la orden: subir a `files` y adjuntar
+# @name scanOrder
+POST {{baseUrl}}/projects/{{projectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----Almacen
+
+------Almacen
+Content-Disposition: form-data; name="module_code"
+
+almacen
+------Almacen
+Content-Disposition: form-data; name="file"; filename="orden-0001.pdf"
+Content-Type: application/pdf
+
+< ./ejemplos/documento.pdf
+------Almacen--
+
+###
+@scanOrderId = {{scanOrder.response.body.$.file_id}}
+
+###
+PUT {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}/file
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": {{scanOrderId}} }
+
+### =====================================================================
 ### 7. INGRESOS (goods receipts) — suman stock; no se editan ni se borran
 ### =====================================================================
 # La cantidad recibida (total_quantity) se reparte entre casillas (locations)
@@ -787,6 +976,54 @@ Content-Type: application/json
 DELETE {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}
 Authorization: Bearer {{accessToken}}
 
+### 11.10g Número de orden repetido en el proyecto → 409 PURCHASE_ORDER_DUPLICATE_NUMBER
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "number": "OC-2026-0001", "order_date": "2026-09-15", "currency": "PEN",
+  "items": [ { "product_id": {{productId}}, "description": "x", "quantity_ordered": 1, "line_total": 1 } ]
+}
+
+### 11.10h Línea sin producto y sin citar nada → 400 PURCHASE_ORDER_PRODUCT_REQUIRED
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "number": "OC-SIN-PRODUCTO", "order_date": "2026-09-15", "currency": "PEN",
+  "items": [ { "description": "x", "quantity_ordered": 1, "line_total": 1 } ]
+}
+
+### 11.10i Citar una línea de cotización en una orden que no tiene cotización → 400 PURCHASE_ORDER_LINK_INVALID
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "number": "OC-SIN-COT", "order_date": "2026-09-15", "currency": "PEN",
+  "items": [ { "quotation_item_id": {{quotationItemId}}, "description": "x", "quantity_ordered": 1, "line_total": 1 } ]
+}
+
+### 11.10l Línea sin citar la cotización en una orden que tiene cotización de origen → 400 PURCHASE_ORDER_LINK_REQUIRED
+POST {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "product_id": {{productId}}, "description": "Flete no cotizado", "quantity_ordered": 1, "line_total": 80 }
+
+### 11.10j Cambiar la cantidad cotizada de una línea que ya está en una orden → 409 QUOTATION_ITEM_LOCKED
+PATCH {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}/items/{{quotationItemId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "quantity_quoted": 999 }
+
+### 11.10k Dar de baja una cotización que tiene órdenes activas → 409 QUOTATION_HAS_DOCUMENTS
+DELETE {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}
+Authorization: Bearer {{accessToken}}
+
 ### 11.11 Eliminar un proyecto con Almacén con contenido → 409 ALMACEN_CONTENT_NOT_EMPTY
 DELETE {{baseUrl}}/projects/{{projectId}}
 Authorization: Bearer {{accessToken}}
@@ -794,6 +1031,22 @@ Authorization: Bearer {{accessToken}}
 ### =====================================================================
 ### 12. BAJAS Y VACIAR ALMACÉN  (DESTRUCTIVO)
 ### =====================================================================
+
+### 12.00 Baja de las órdenes de compra (exige configure; elimina también su archivo). Antes que la cotización y el requerimiento.
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrder2Id}}
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{requisitionOrderId}}
+Authorization: Bearer {{accessToken}}
 
 ### 12.0 Baja de la cotización (exige configure; elimina también su archivo). Antes que el requerimiento.
 DELETE {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}

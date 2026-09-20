@@ -1325,6 +1325,72 @@ CREATE INDEX idx_quotation_items_quotation_id ON quotation_items (quotation_id);
 CREATE INDEX idx_quotation_items_requisition_item_id ON quotation_items (purchase_requisition_item_id);
 CREATE INDEX idx_quotation_items_product_id ON quotation_items (product_id);
 
+-- Orden de compra: lo que la empresa decide comprar y a quién (Fase 5 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Un requerimiento puede
+-- generar varias órdenes (adjudicación por línea). Es el EJE de la
+-- trazabilidad: la factura y el ingreso apuntarán a sus líneas. Es un
+-- registro de auditoría: sin aprobaciones ni estados administrativos, y el
+-- origen (requerimiento/cotización) es opcional (compra directa/urgente).
+CREATE TABLE purchase_orders (
+    purchase_order_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Una orden es de UN solo proveedor.
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- Origen opcional. RESTRICT: no se borra de motor un documento del que
+    -- viene una orden (vaciar Almacén borra las órdenes antes).
+    purchase_requisition_id BIGINT REFERENCES purchase_requisitions(purchase_requisition_id) ON DELETE RESTRICT,
+    quotation_id BIGINT REFERENCES quotations(quotation_id) ON DELETE RESTRICT,
+    -- Número que la EMPRESA le pone a su orden (formato libre). Único por
+    -- proyecto: distinto del de la cotización, que lo pone el proveedor.
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
+    order_date DATE NOT NULL,
+    -- Moneda del documento (constancia, sin conversión); mismo criterio que quotations.currency.
+    currency VARCHAR(3) NOT NULL CHECK (currency IN ('PEN', 'USD')),
+    commercial_terms VARCHAR(1000) CHECK (commercial_terms IS NULL OR LENGTH(TRIM(commercial_terms)) > 0),
+    -- Total tal como figura en el documento (NULL = no lo indica).
+    total_amount NUMERIC(18,6) CHECK (total_amount IS NULL OR total_amount >= 0),
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX idx_un_purchase_orders_number_active ON purchase_orders (project_id, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_purchase_orders_file_id ON purchase_orders (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_purchase_orders_supplier_id ON purchase_orders (supplier_id);
+CREATE INDEX idx_purchase_orders_purchase_requisition_id ON purchase_orders (purchase_requisition_id);
+CREATE INDEX idx_purchase_orders_quotation_id ON purchase_orders (quotation_id);
+
+CREATE TABLE purchase_order_items (
+    purchase_order_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    purchase_order_id BIGINT NOT NULL REFERENCES purchase_orders(purchase_order_id) ON DELETE CASCADE,
+    -- Vínculos OPCIONALES a los documentos anteriores (la línea puede no tener
+    -- origen). Si se indican, el servicio comprueba que la línea pertenezca a
+    -- la cotización/requerimiento de la cabecera y que el producto coincida.
+    -- Una misma línea de cotización puede estar en varias órdenes (pedidos
+    -- escalonados): por eso no hay UNIQUE. RESTRICT: una línea citada no se
+    -- borra de motor.
+    quotation_item_id BIGINT REFERENCES quotation_items(quotation_item_id) ON DELETE RESTRICT,
+    purchase_requisition_item_id BIGINT REFERENCES purchase_requisition_items(purchase_requisition_item_id) ON DELETE RESTRICT,
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- SNAPSHOT: la orden guarda lo suyo (texto, cantidad y precios); no cambia
+    -- si después se corrige la cotización o se renombra el producto.
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_ordered NUMERIC(18,6) NOT NULL CHECK (quantity_ordered > 0),
+    -- Mismo esquema de montos que quotation_items: line_total obligatorio,
+    -- lo demás solo si el documento lo muestra (NULL = no figura).
+    unit_price NUMERIC(18,6) CHECK (unit_price IS NULL OR unit_price >= 0),
+    discount_amount NUMERIC(18,6) CHECK (discount_amount IS NULL OR discount_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    line_total NUMERIC(18,6) NOT NULL CHECK (line_total >= 0),
+    notes VARCHAR(500) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0)
+);
+CREATE INDEX idx_purchase_order_items_order_id ON purchase_order_items (purchase_order_id);
+CREATE INDEX idx_purchase_order_items_quotation_item_id ON purchase_order_items (quotation_item_id);
+CREATE INDEX idx_purchase_order_items_requisition_item_id ON purchase_order_items (purchase_requisition_item_id);
+CREATE INDEX idx_purchase_order_items_product_id ON purchase_order_items (product_id);
+
 -- Registro de movimiento INMUTABLE: no se edita, no se da de baja (no
 -- tiene deleted_at) — un error se corrige con un movimiento nuevo,
 -- nunca reescribiendo este. Los vínculos a documentos previos (orden de

@@ -34,6 +34,7 @@ export const countAlmacenContent = async (
     const { rows } = await client.query<AlmacenContentCounts>(
         `SELECT
             (SELECT COUNT(*) FROM suppliers WHERE project_id = $1)::int AS suppliers,
+            (SELECT COUNT(*) FROM purchase_orders WHERE project_id = $1)::int AS purchase_orders,
             (SELECT COUNT(*) FROM quotations WHERE project_id = $1)::int AS quotations,
             (SELECT COUNT(*) FROM purchase_requisitions WHERE project_id = $1)::int AS purchase_requisitions,
             (SELECT COUNT(*) FROM warehouses WHERE project_id = $1)::int AS warehouses,
@@ -100,6 +101,9 @@ export const emptyAlmacenContentService = async (
         // Los ítems y sus repartos por casilla se van solos (ON DELETE CASCADE).
         const receipts = await client.query(`DELETE FROM goods_receipts WHERE project_id = $1`, [projectId]);
         const issues = await client.query(`DELETE FROM goods_issues WHERE project_id = $1`, [projectId]);
+        // Órdenes de compra (baja lógica incluida); sus líneas se van solas (CASCADE).
+        // Van ANTES de cotizaciones, requerimientos y proveedores (RESTRICT).
+        const orders = await client.query(`DELETE FROM purchase_orders WHERE project_id = $1`, [projectId]);
         // Cotizaciones (baja lógica incluida); sus líneas se van solas (CASCADE).
         // Van ANTES de los requerimientos y de los proveedores (RESTRICT).
         const quotations = await client.query(`DELETE FROM quotations WHERE project_id = $1`, [projectId]);
@@ -162,6 +166,7 @@ export const emptyAlmacenContentService = async (
 
         return {
             suppliers: suppliers.rowCount ?? 0,
+            purchase_orders: orders.rowCount ?? 0,
             quotations: quotations.rowCount ?? 0,
             purchase_requisitions: requisitions.rowCount ?? 0,
             warehouses: warehouses.rowCount ?? 0,

@@ -14,7 +14,7 @@ import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 // Tablas de documentos que guardan file_id. Cada documento nuevo con archivo
 // se suma acá: es lo que impide adjuntar un mismo archivo a dos documentos
 // de tablas distintas. Nombres fijos del servidor (nunca entrada del usuario).
-const DOCUMENT_FILE_TABLES = ["purchase_requisitions", "quotations"];
+const DOCUMENT_FILE_TABLES = ["purchase_requisitions", "quotations", "purchase_orders"];
 
 export interface FileBytes {
     file_path: string;

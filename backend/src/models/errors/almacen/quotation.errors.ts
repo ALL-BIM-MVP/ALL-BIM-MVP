@@ -70,4 +70,21 @@ export const QUOTATION_ERRORS = {
         }
     },
 
+    // Una línea con una orden de compra activa no cambia de cantidad/precios ni se quita.
+    ITEM_LOCKED: {
+        statusCode: 409,
+        response: {
+            code: "QUOTATION_ITEM_LOCKED",
+            message: "La línea ya está en una orden de compra: no se puede cambiar su cantidad ni sus montos, ni quitarla."
+        }
+    },
+
+    HAS_DOCUMENTS: {
+        statusCode: 409,
+        response: {
+            code: "QUOTATION_HAS_DOCUMENTS",
+            message: "No se puede dar de baja la cotización porque tiene órdenes de compra registradas."
+        }
+    },
+
 } satisfies Record<string, ErrorFormat>;

@@ -241,6 +241,14 @@ export const deleteQuotationService = async (
     let removed = null;
     try {
         await client.query("BEGIN");
+        await lockQuotation(client, projectId, quotationId);
+        // Una cotización con órdenes activas no se da de baja: se dan de baja
+        // primero ellas. (El bloqueo de arriba serializa contra crear una orden,
+        // que toma la cotización con FOR SHARE.)
+        const ordered = await client.query(
+            `SELECT 1 FROM purchase_orders WHERE quotation_id = $1 AND deleted_at IS NULL LIMIT 1`, [quotationId]
+        );
+        if (ordered.rowCount) throw new AppError(QUOTATION_ERRORS.HAS_DOCUMENTS);
         removed = await softDeleteDocument(client, QUOTATION_DOC, projectId, quotationId, user.user_id);
         await client.query("COMMIT");
     } catch (error) {
@@ -305,6 +313,7 @@ export const addQuotationItemService = async (
 };
 
 const ITEM_COLUMNS = ["description", "quantity_quoted", "unit_price", "discount_amount", "tax_amount", "line_total", "notes"] as const;
+const LOCKED_ITEM_COLUMNS = ["quantity_quoted", "unit_price", "discount_amount", "tax_amount", "line_total"] as const;
 
 export const updateQuotationItemService = async (
     user: DecodedToken, { projectId, quotationId, itemId }: QuotationItemIdParam, body: UpdateQuotationItemBody
@@ -315,6 +324,18 @@ export const updateQuotationItemService = async (
     try {
         await client.query("BEGIN");
         await lockQuotation(client, projectId, quotationId);
+
+        // Cantidad y montos son lo que las órdenes ya tomaron: con una orden
+        // ACTIVA sobre esta línea no cambian (descripción y observaciones sí).
+        // Las órdenes dadas de baja no cuentan.
+        if (LOCKED_ITEM_COLUMNS.some((column) => body[column] !== undefined)) {
+            const ordered = await client.query(
+                `SELECT 1 FROM purchase_order_items poi INNER JOIN purchase_orders po ON po.purchase_order_id = poi.purchase_order_id
+                WHERE poi.quotation_item_id = $1 AND po.deleted_at IS NULL LIMIT 1`,
+                [itemId]
+            );
+            if (ordered.rowCount) throw new AppError(QUOTATION_ERRORS.ITEM_LOCKED);
+        }
 
         const { set, values } = buildSet(ITEM_COLUMNS, body, 3);
         const { rowCount } = await client.query(
@@ -335,9 +356,6 @@ export const updateQuotationItemService = async (
     }
 };
 
-// Cuando existan órdenes de compra que referencien la línea, aquí se bloquea
-// quitarla con un NOT EXISTS (mismo patrón que el candado de las líneas del
-// requerimiento).
 export const deleteQuotationItemService = async (
     user: DecodedToken, { projectId, quotationId, itemId }: QuotationItemIdParam
 ): Promise<QuotationDetail> => {
@@ -357,7 +375,14 @@ export const deleteQuotationItemService = async (
         );
         if (count.rows[0]!.total <= 1) throw new AppError(QUOTATION_ERRORS.LAST_ITEM);
 
-        await client.query(`DELETE FROM quotation_items WHERE quotation_item_id = $1`, [itemId]);
+        // Ninguna orden (ni las dadas de baja, que se conservan) puede citarla.
+        const { rowCount: deleted } = await client.query(
+            `DELETE FROM quotation_items
+            WHERE quotation_item_id = $1
+                AND NOT EXISTS (SELECT 1 FROM purchase_order_items poi WHERE poi.quotation_item_id = $1)`,
+            [itemId]
+        );
+        if (deleted === 0) throw new AppError(QUOTATION_ERRORS.ITEM_LOCKED);
         await touchQuotation(client, quotationId, user.user_id);
         const detail = await loadDetail(client, projectId, quotationId);
         await client.query("COMMIT");
