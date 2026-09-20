@@ -13,7 +13,7 @@ export interface InventoryMovementRow {
     resulting_balance: number;
     // Discriminador técnico (a qué tabla apunta reference_document_id)
     // — en inglés, matcheando el nombre real de esas tablas.
-    reference_document_type: "goods_receipt" | "goods_issue";
+    reference_document_type: "goods_receipt" | "goods_issue" | "inventory_adjustment";
     reference_document_id: number;
     // Fecha del documento que originó el movimiento, "AAAA-MM-DD" (es la que
     // usa el filtro del Kardex). created_at es cuándo se registró.

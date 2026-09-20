@@ -3,7 +3,8 @@
 // ingreso y avisos. Todo se calcula por consulta (sin columnas nuevas, no puede
 // quedar desactualizado) y los avisos NUNCA bloquean (el sistema se acopla al
 // proceso del cliente). Solo cuentan los documentos ACTIVOS (sin baja lógica),
-// salvo los ingresos, que no se dan de baja. Las sumas y comparaciones se hacen en
+// salvo los ingresos, que no se dan de baja. Lo RECIBIDO es lo efectivo: la cantidad registrada más
+// los ajustes (Fase 10); un ingreso anulado queda en cero. Las sumas y comparaciones se hacen en
 // SQL: las cantidades son NUMERIC y llegan como string.
 import type { Pool, PoolClient } from "pg";
 import type {
@@ -92,7 +93,7 @@ export const getPurchaseOrderItemStatus = async (
             WHERE ii.purchase_order_item_id = p.purchase_order_item_id
         ) inv ON true
         LEFT JOIN LATERAL (
-            SELECT SUM(gri.total_quantity) AS q FROM goods_receipt_items gri
+            SELECT SUM(gri.total_quantity + COALESCE((SELECT SUM(a.quantity_delta) FROM inventory_adjustment_items a WHERE a.goods_receipt_item_id = gri.goods_receipt_item_id), 0)) AS q FROM goods_receipt_items gri
             WHERE gri.purchase_order_item_id = p.purchase_order_item_id
         ) rec ON true
         LEFT JOIN quotation_items qi ON qi.quotation_item_id = p.quotation_item_id
@@ -167,7 +168,7 @@ export const getRequisitionItemStatus = async (
             WHERE poi.purchase_requisition_item_id = ri.purchase_requisition_item_id
         ) inv ON true
         LEFT JOIN LATERAL (
-            SELECT SUM(gri.total_quantity) AS q FROM goods_receipt_items gri
+            SELECT SUM(gri.total_quantity + COALESCE((SELECT SUM(a.quantity_delta) FROM inventory_adjustment_items a WHERE a.goods_receipt_item_id = gri.goods_receipt_item_id), 0)) AS q FROM goods_receipt_items gri
             INNER JOIN purchase_order_items poi ON poi.purchase_order_item_id = gri.purchase_order_item_id
             INNER JOIN purchase_orders po ON po.purchase_order_id = poi.purchase_order_id AND po.deleted_at IS NULL
             WHERE poi.purchase_requisition_item_id = ri.purchase_requisition_item_id
@@ -269,12 +270,13 @@ export const getReceiptStatus = async (
     if (goodsReceiptIds.length === 0) return result;
 
     const { rows } = await db.query<{
-        goods_receipt_id: string; entry_type: "normal" | "rapida"; has_order: boolean; has_file: boolean;
+        goods_receipt_id: string; entry_type: "normal" | "rapida"; has_order: boolean; has_file: boolean; voided: boolean;
         order_has_requisition: boolean; order_has_quotation: boolean; has_invoice: boolean;
     }>(
         `SELECT gr.goods_receipt_id, gr.entry_type,
             gr.purchase_order_id IS NOT NULL AS has_order,
             gr.file_id IS NOT NULL AS has_file,
+            gr.voided_at IS NOT NULL AS voided,
             COALESCE(o.purchase_requisition_id IS NOT NULL, false) AS order_has_requisition,
             COALESCE(o.quotation_id IS NOT NULL, false) AS order_has_quotation,
             EXISTS (
@@ -309,7 +311,8 @@ export const getReceiptStatus = async (
             if (!r.has_invoice) alerts.push({ code: "INVOICE_PENDING", message: "Falta registrar la factura de este ingreso." });
         }
         if (!r.has_file) alerts.push(filePendingAlert());
-        result.set(key(r.goods_receipt_id), { documents, alerts });
+        // Un ingreso anulado ya no espera documentos: no genera avisos pendientes.
+        result.set(key(r.goods_receipt_id), { documents, alerts: r.voided ? [] : alerts });
     }
     return result;
 };

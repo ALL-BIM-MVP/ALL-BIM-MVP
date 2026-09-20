@@ -943,6 +943,7 @@ Content-Type: application/json
 
 ###
 @receiptId = {{receipt.response.body.$.goods_receipt_id}}
+@receiptItemId = {{receipt.response.body.$.items[0].goods_receipt_item_id}}
 
 ### 7.2 Listar / obtener
 GET {{baseUrl}}/projects/{{projectId}}/goods-receipts
@@ -1168,6 +1169,7 @@ Content-Type: application/json
 
 ###
 @issueId = {{issue.response.body.$.goods_issue_id}}
+@issueItemId = {{issue.response.body.$.items[0].goods_issue_item_id}}
 
 ### 8.2 Listar / obtener
 GET {{baseUrl}}/projects/{{projectId}}/goods-issues
@@ -1176,6 +1178,122 @@ Authorization: Bearer {{accessToken}}
 ###
 GET {{baseUrl}}/projects/{{projectId}}/goods-issues/{{issueId}}
 Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 8B. AJUSTES DE INVENTARIO (Fase 10) — corregir o anular sin reescribir lo registrado
+### =====================================================================
+# Un ingreso o un vale ya registrado NO se edita ni se borra. Un error de cantidades o de casilla se corrige con un
+# AJUSTE: un documento nuevo, con motivo obligatorio, que genera movimientos de Kardex normales. El original queda
+# tal cual; el detalle trae `adjusted_quantity`, `effective_quantity` (registrado + ajustes), `effective_locations`
+# y la lista de `adjustments` de cada línea.
+# - Solo el Administrador del módulo (permiso configure) o el dueño/administrador del proyecto ajusta.
+# - quantity_delta = cambio de la cantidad DEL DOCUMENTO en esa casilla (+ más recibido / más retirado; - menos).
+#   En un vale, retirar de más BAJA el stock. Nunca 0.
+# - Lo efectivo de una línea en una casilla nunca es negativo, y el stock nunca queda negativo (si el material ya
+#   salió, no se puede bajar ni anular el ingreso).
+# - Mover lo recibido a otra casilla = dos líneas del mismo ajuste (-N en una, +N en otra): cambia las casillas,
+#   no la cantidad.
+# - Anular = revierte todo lo efectivo y marca el documento; un ingreso anulado ya no se edita y su guía
+#   (proveedor + serie + número) se puede volver a registrar.
+
+### 8B.1 Corregir la cantidad de un ingreso: se registraron 97 y llegaron 100 (+3 en la casilla A1)
+# @name adjustment
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}/adjustments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Llegaron 100 bolsas, se digitaron 97",
+  "items": [ { "goods_receipt_item_id": {{receiptItemId}}, "bin_id": {{binId}}, "quantity_delta": 3 } ]
+}
+
+###
+@adjustmentId = {{adjustment.response.body.$.inventory_adjustment_id}}
+
+### 8B.2 Se guardó en la casilla equivocada: 10 pasan de A1 a A2 (la cantidad efectiva no cambia)
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}/adjustments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Diez bolsas se guardaron en la casilla equivocada",
+  "adjustment_date": "2026-09-22",
+  "items": [
+    { "goods_receipt_item_id": {{receiptItemId}}, "bin_id": {{binId}}, "quantity_delta": -10 },
+    { "goods_receipt_item_id": {{receiptItemId}}, "bin_id": {{binId2}}, "quantity_delta": 10 }
+  ]
+}
+
+### 8B.3 Ver cómo queda el ingreso: lo registrado no cambia; lo efectivo sí
+GET {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}
+Authorization: Bearer {{accessToken}}
+
+### 8B.4 Corregir un VALE de salida: se registraron 20 pero solo se retiraron 15 (-5 devuelve 5 al stock)
+POST {{baseUrl}}/projects/{{projectId}}/goods-issues/{{issueId}}/adjustments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Solo se retiraron 15 bolsas",
+  "items": [ { "goods_issue_item_id": {{issueItemId}}, "bin_id": {{binId}}, "quantity_delta": -5 } ]
+}
+
+### 8B.5 Listar y filtrar los ajustes (por ingreso, por vale o por tipo) / ver uno
+GET {{baseUrl}}/projects/{{projectId}}/inventory-adjustments
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/inventory-adjustments?goods_receipt_id={{receiptId}}&kind=correccion
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/inventory-adjustments/{{adjustmentId}}
+Authorization: Bearer {{accessToken}}
+
+### 8B.6 ANULAR un ingreso registrado por error (revierte su stock y lo marca anulado)
+# Es el ingreso "normal" con la orden que se vinculó y corrigió en 7.4 a 7.6.
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{pendingReceiptId}}/void
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "reason": "Se registró contra el proveedor equivocado" }
+
+### 8B.7 La guía anulada se puede volver a registrar bien (mismo proveedor, serie y número)
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "entry_type": "rapida",
+  "delivery_note_series": "T001",
+  "delivery_note_number": "126",
+  "delivery_note_date": "2026-09-17",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 4, "locations": [ { "bin_id": {{binId2}}, "quantity": 4 } ] } ]
+}
+
+### 8B.8 ANULAR un vale (devuelve todo su material al stock)
+# Se crea un vale de prueba y se anula.
+# @name issueToVoid
+POST {{baseUrl}}/projects/{{projectId}}/goods-issues
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "destination_sector": "Sector 2", "destination_level": "Nivel 1", "destination_block": "Bloque C",
+  "recipient_name": "Ana Ruiz", "recipient_dni": "87654321", "issue_date": "2026-09-23",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 2, "locations": [ { "bin_id": {{binId}}, "quantity": 2 } ] } ]
+}
+
+###
+@issueToVoidId = {{issueToVoid.response.body.$.goods_issue_id}}
+
+###
+POST {{baseUrl}}/projects/{{projectId}}/goods-issues/{{issueToVoidId}}/void
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "reason": "El vale se emitió por error" }
 
 ### =====================================================================
 ### 9. KARDEX (movimientos de inventario)
@@ -1491,6 +1609,42 @@ Authorization: Bearer {{accessToken}}
 ### 11.10zz Hoja de vida con una fecha con formato inválido → 400 INVALID_QUERY_PARAMETER
 GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?from=01/09/2026
 Authorization: Bearer {{accessToken}}
+
+### 11.10aa Ajuste sin motivo → 400 INVALID_REQUEST_DATA (el motivo es obligatorio)
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}/adjustments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "reason": "", "items": [ { "goods_receipt_item_id": {{receiptItemId}}, "bin_id": {{binId}}, "quantity_delta": 1 } ] }
+
+### 11.10ab Ajuste que dejaría la línea en la casilla por debajo de cero → 409 INVENTORY_ADJUSTMENT_EFFECTIVE_BELOW_ZERO
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}/adjustments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "reason": "Prueba", "items": [ { "goods_receipt_item_id": {{receiptItemId}}, "bin_id": {{binId}}, "quantity_delta": -9999 } ] }
+
+### 11.10ac Ajustar un ingreso ya anulado → 409 INVENTORY_ADJUSTMENT_ALREADY_VOIDED
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{pendingReceiptId}}/adjustments
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "reason": "Prueba", "items": [ { "goods_receipt_item_id": {{pendingReceiptItemId}}, "bin_id": {{binId2}}, "quantity_delta": 1 } ] }
+
+### 11.10ad Corregir la guía de un ingreso anulado → 409 GOODS_RECEIPT_ALREADY_VOIDED
+PATCH {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{pendingReceiptId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "delivery_note_number": "127" }
+
+### 11.10ae Anular un ingreso cuyo material ya salió → 409 INSUFFICIENT_STOCK (no se anula nada)
+# El ingreso 7.1 puso 60 en A1; el vale de 8.1 ya retiró parte de esa casilla.
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}/void
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "reason": "Prueba de anulación con el material ya fuera" }
 
 ### 11.11 Eliminar un proyecto con Almacén con contenido → 409 ALMACEN_CONTENT_NOT_EMPTY
 DELETE {{baseUrl}}/projects/{{projectId}}

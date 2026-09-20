@@ -18,6 +18,8 @@ export interface TraceDocument {
     entry_type: "normal" | "rapida" | null;
     requester: string | null;
     currency: string | null;
+    // Solo ingresos: anulado (Fase 10). Sus líneas efectivas quedan en cero.
+    voided: boolean;
     is_anchor: boolean;
 }
 
@@ -43,10 +45,13 @@ export interface TraceInvoiceLine extends TraceLineBase { quantity_invoiced: str
 export interface TraceReceiptLine {
     id: number;
     document_id: number;
-    // Lo recibido físicamente y lo que decía la guía (null si no se registró).
+    // Lo registrado, los ajustes (Fase 10) y lo EFECTIVO (registrado + ajustes) = quantity_received.
+    quantity_registered: string;
+    quantity_adjusted: string;
     quantity_received: string;
+    // Lo que decía la guía (null si no se registró).
     quantity_per_delivery_note: string | null;
-    // Dónde quedó lo recibido.
+    // Dónde queda efectivamente lo recibido (lo registrado más los ajustes, sin casillas en cero).
     locations: { bin_id: number; label: string; quantity: string }[];
 }
 

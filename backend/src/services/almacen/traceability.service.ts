@@ -194,15 +194,23 @@ export const getTraceabilityService = async (
                 ii.quantity_invoiced::text AS quantity_invoiced, ii.unit_price::text AS unit_price, ii.line_total::text AS line_total
             FROM invoice_items ii WHERE ii.invoice_item_id = ANY($1::bigint[])`, sets.I),
         q(`SELECT gri.goods_receipt_item_id AS id, gri.goods_receipt_id AS document_id, gri.product_id, gri.purchase_order_item_id AS pid,
-                gri.total_quantity::text AS quantity_received, gri.quantity_per_delivery_note::text AS quantity_per_delivery_note
+                gri.total_quantity::text AS quantity_registered,
+                COALESCE((SELECT SUM(a.quantity_delta) FROM inventory_adjustment_items a WHERE a.goods_receipt_item_id = gri.goods_receipt_item_id), 0)::numeric(18,6)::text AS quantity_adjusted,
+                (gri.total_quantity + COALESCE((SELECT SUM(a.quantity_delta) FROM inventory_adjustment_items a WHERE a.goods_receipt_item_id = gri.goods_receipt_item_id), 0))::numeric(18,6)::text AS quantity_received,
+                gri.quantity_per_delivery_note::text AS quantity_per_delivery_note
             FROM goods_receipt_items gri WHERE gri.goods_receipt_item_id = ANY($1::bigint[])`, sets.G),
-        q(`SELECT girl.goods_receipt_item_id AS item_id, girl.bin_id, girl.quantity::text AS quantity,
-                w.name || ' · ' || r.name || ' · ' || b.location_label AS label
-            FROM goods_receipt_item_locations girl
-            INNER JOIN bins b ON b.bin_id = girl.bin_id
+        // Casillas EFECTIVAS: lo registrado más los ajustes (Fase 10), sin las que quedaron en cero.
+        q(`SELECT t.item_id, t.bin_id, SUM(t.q)::numeric(18,6)::text AS quantity, w.name || ' · ' || r.name || ' · ' || b.location_label AS label
+            FROM (
+                SELECT goods_receipt_item_id AS item_id, bin_id, quantity AS q FROM goods_receipt_item_locations WHERE goods_receipt_item_id = ANY($1::bigint[])
+                UNION ALL
+                SELECT goods_receipt_item_id, bin_id, quantity_delta FROM inventory_adjustment_items WHERE goods_receipt_item_id = ANY($1::bigint[])
+            ) t
+            INNER JOIN bins b ON b.bin_id = t.bin_id
             INNER JOIN racks r ON r.rack_id = b.rack_id
             INNER JOIN warehouses w ON w.warehouse_id = r.warehouse_id
-            WHERE girl.goods_receipt_item_id = ANY($1::bigint[]) ORDER BY girl.goods_receipt_item_location_id`, sets.G),
+            GROUP BY t.item_id, t.bin_id, w.name, r.name, b.location_label HAVING SUM(t.q) <> 0
+            ORDER BY t.item_id, t.bin_id`, sets.G),
     ]);
 
     // ---- documentos del recorrido ----------------------------------------------------------
@@ -218,29 +226,30 @@ export const getTraceabilityService = async (
             entry_type: (r.entry_type as "normal" | "rapida" | null) ?? null,
             requester: (r.requester as string | null) ?? null,
             currency: (r.currency as string | null) ?? null,
+            voided: Boolean(r.voided),
             is_anchor: isAnchor(type, r.id),
         })).sort(byId);
     };
     const documents: TraceDocuments = {
         requisitions: await docsOf("requisition",
             `SELECT purchase_requisition_id AS id, number AS label, to_char(requisition_date, 'YYYY-MM-DD') AS date, requester,
-                NULL::int AS supplier_id, NULL::text AS supplier_name, file_id IS NOT NULL AS has_file, NULL::text AS entry_type, NULL::text AS currency
+                NULL::int AS supplier_id, NULL::text AS supplier_name, file_id IS NOT NULL AS has_file, NULL::text AS entry_type, NULL::text AS currency, false AS voided
             FROM purchase_requisitions WHERE purchase_requisition_id = ANY($1::bigint[])`, docIds(rLines)),
         quotations: await docsOf("quotation",
             `SELECT d.quotation_id AS id, d.number AS label, to_char(d.quotation_date, 'YYYY-MM-DD') AS date, NULL::text AS requester,
-                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency
+                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
             FROM quotations d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.quotation_id = ANY($1::bigint[])`, docIds(qLines)),
         purchase_orders: await docsOf("purchase-order",
             `SELECT d.purchase_order_id AS id, d.number AS label, to_char(d.order_date, 'YYYY-MM-DD') AS date, NULL::text AS requester,
-                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency
+                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
             FROM purchase_orders d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.purchase_order_id = ANY($1::bigint[])`, docIds(pLines)),
         invoices: await docsOf("invoice",
             `SELECT d.invoice_id AS id, concat(d.series, '-', d.number) AS label, to_char(d.invoice_date, 'YYYY-MM-DD') AS date, NULL::text AS requester,
-                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency
+                s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, NULL::text AS entry_type, d.currency, false AS voided
             FROM invoices d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.invoice_id = ANY($1::bigint[])`, docIds(iLines)),
         goods_receipts: await docsOf("goods-receipt",
             `SELECT d.goods_receipt_id AS id, concat(d.delivery_note_series, '-', d.delivery_note_number) AS label, to_char(d.received_date, 'YYYY-MM-DD') AS date,
-                NULL::text AS requester, s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, d.entry_type, NULL::text AS currency
+                NULL::text AS requester, s.supplier_id, s.name AS supplier_name, d.file_id IS NOT NULL AS has_file, d.entry_type, NULL::text AS currency, d.voided_at IS NOT NULL AS voided
             FROM goods_receipts d INNER JOIN suppliers s ON s.supplier_id = d.supplier_id WHERE d.goods_receipt_id = ANY($1::bigint[])`, docIds(gLines)),
     };
 
@@ -299,6 +308,7 @@ export const getTraceabilityService = async (
         const t = threadOf("G", l); mark(t, "goods-receipt", l);
         t.receipt_items.push({
             id: l.id as number, document_id: l.document_id as number, quantity_received: String(l.quantity_received),
+            quantity_registered: String(l.quantity_registered), quantity_adjusted: String(l.quantity_adjusted),
             quantity_per_delivery_note: (l.quantity_per_delivery_note as string | null) ?? null,
             locations: gLocations.filter((loc) => String(loc.item_id) === String(l.id)).map((loc) => ({ bin_id: loc.bin_id as number, label: String(loc.label), quantity: String(loc.quantity) })),
         });

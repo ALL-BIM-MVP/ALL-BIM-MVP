@@ -11,6 +11,7 @@ import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertProductInProject } from "./product.service.js";
 import { assertBinInProject } from "./bin.service.js";
 import { applyStockMovement } from "./inventory-movement.service.js";
+import { getItemAdjustmentSummaries } from "./adjustment-summary.service.js";
 import type { CreateGoodsIssueBody, GoodsIssueIdParam } from "../../schemas/almacen/goods-issue.schema.js";
 import type {
     GoodsIssueDetail, GoodsIssueItemLocationRow, GoodsIssueItemRow, GoodsIssueRow,
@@ -21,7 +22,8 @@ import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 // Date, no depende de la zona horaria del servidor. Fragmento fijo.
 const GOODS_ISSUE_SELECT = `
     SELECT goods_issue_id, project_id, destination_sector, destination_level, destination_block,
-        recipient_name, recipient_dni, to_char(issue_date, 'YYYY-MM-DD') AS issue_date, created_at, created_by
+        recipient_name, recipient_dni, to_char(issue_date, 'YYYY-MM-DD') AS issue_date, created_at, created_by,
+        voided_at IS NOT NULL AS voided, voided_at
     FROM goods_issues`;
 
 export const listGoodsIssuesService = async (
@@ -60,8 +62,12 @@ export const getGoodsIssueByIdService = async (
         [goodsIssueId]
     );
 
+    // Ajustes (Fase 10): lo registrado no cambia; se agrega lo efectivo y dónde queda.
+    const adjustments = await getItemAdjustmentSummaries(pool, "goods_issue", itemsResult.rows.map((i) => i.goods_issue_item_id));
+
     const items = itemsResult.rows.map((item) => ({
         ...item,
+        ...adjustments.get(String(item.goods_issue_item_id))!,
         locations: locationsResult.rows.filter((loc) => loc.goods_issue_item_id === item.goods_issue_item_id),
     }));
 

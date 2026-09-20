@@ -20,7 +20,7 @@ import type { ProductHistory, ProductHistoryEvent, ProductHistoryKind } from "..
 export const HISTORY_MAX_EVENTS = 1000;
 
 // Orden dentro de un mismo día: lo último de la cadena primero.
-const KIND_RANK: Record<ProductHistoryKind, number> = { issued: 0, received: 1, invoiced: 2, ordered: 3, requested: 4 };
+const KIND_RANK: Record<ProductHistoryKind, number> = { issued: 0, adjusted: 1, received: 2, invoiced: 3, ordered: 4, requested: 5 };
 
 type Row = Record<string, unknown>;
 
@@ -32,6 +32,7 @@ const BIN_JOINS = `INNER JOIN bins b ON b.bin_id = %BIN%
 const blank = (): Omit<ProductHistoryEvent, "kind" | "date" | "document" | "quantity"> => ({
     bin: null, balance_after: null, supplier: null, unit_price: null, line_total: null, currency: null, requester: null,
     entry_type: null, purchase_order: null, destination: null, recipient_name: null,
+    direction: null, reason: null, adjusted_document: null,
 });
 
 export const getProductHistoryService = async (
@@ -81,13 +82,18 @@ export const getProductHistoryService = async (
             im.reference_document_type, im.reference_document_id, to_char(im.movement_date, 'YYYY-MM-DD') AS date,
             im.bin_id, ${BIN_LABEL} AS bin_label,
             gr.delivery_note_series, gr.delivery_note_number, gr.entry_type, s.supplier_id, s.name AS supplier_name, o.number AS order_number,
-            gi.destination_sector, gi.destination_level, gi.destination_block, gi.recipient_name
+            gi.destination_sector, gi.destination_level, gi.destination_block, gi.recipient_name,
+            ia.reason AS adjustment_reason, ia.goods_receipt_id AS adjusted_receipt_id, ia.goods_issue_id AS adjusted_issue_id,
+            CASE WHEN ia.goods_receipt_id IS NOT NULL
+                THEN (SELECT concat(x.delivery_note_series, '-', x.delivery_note_number) FROM goods_receipts x WHERE x.goods_receipt_id = ia.goods_receipt_id)
+                ELSE 'Vale #' || ia.goods_issue_id END AS adjusted_label
         FROM inventory_movements im
         ${BIN_JOINS.replace("%BIN%", "im.bin_id")}
         LEFT JOIN goods_receipts gr ON im.reference_document_type = 'goods_receipt' AND gr.goods_receipt_id = im.reference_document_id
         LEFT JOIN suppliers s ON s.supplier_id = gr.supplier_id
         LEFT JOIN purchase_orders o ON o.purchase_order_id = gr.purchase_order_id
         LEFT JOIN goods_issues gi ON im.reference_document_type = 'goods_issue' AND gi.goods_issue_id = im.reference_document_id
+        LEFT JOIN inventory_adjustments ia ON im.reference_document_type = 'inventory_adjustment' AND ia.inventory_adjustment_id = im.reference_document_id
         WHERE ${movementFilter}
         ORDER BY im.movement_date DESC, im.inventory_movement_id DESC LIMIT ${HISTORY_MAX_EVENTS + 1}`,
         [productId, binId, from, to]
@@ -95,19 +101,28 @@ export const getProductHistoryService = async (
 
     let truncated = movements.rows.length > HISTORY_MAX_EVENTS;
     const events: ProductHistoryEvent[] = movements.rows.slice(0, HISTORY_MAX_EVENTS).map((m) => {
-        const isReceipt = m.reference_document_type === "goods_receipt";
+        const referenceType = m.reference_document_type as "goods_receipt" | "goods_issue" | "inventory_adjustment";
+        const base = { ...blank(), date: String(m.date), quantity: String(m.quantity), bin: { bin_id: m.bin_id as number, label: String(m.bin_label) },
+            balance_after: String(m.balance), direction: m.type as "entrada" | "salida" };
+        if (referenceType === "inventory_adjustment") {
+            // Ajuste (Fase 10): corrige un ingreso o un vale sin reescribirlo.
+            const isReceipt = m.adjusted_receipt_id != null;
+            return {
+                ...base, kind: "adjusted" as const,
+                document: { type: "inventory_adjustment" as const, id: m.reference_document_id as number, label: `Ajuste #${m.reference_document_id}` },
+                reason: String(m.adjustment_reason),
+                adjusted_document: { type: isReceipt ? "goods_receipt" as const : "goods_issue" as const, id: (isReceipt ? m.adjusted_receipt_id : m.adjusted_issue_id) as number, label: String(m.adjusted_label) },
+            };
+        }
+        const isReceipt = referenceType === "goods_receipt";
         return {
-            ...blank(),
-            kind: isReceipt ? "received" : "issued",
-            date: String(m.date),
+            ...base,
+            kind: isReceipt ? "received" as const : "issued" as const,
             document: {
-                type: isReceipt ? "goods_receipt" : "goods_issue" as const,
+                type: isReceipt ? "goods_receipt" as const : "goods_issue" as const,
                 id: m.reference_document_id as number,
                 label: isReceipt ? `${m.delivery_note_series}-${m.delivery_note_number}` : `Vale #${m.reference_document_id}`,
             },
-            quantity: String(m.quantity),
-            bin: { bin_id: m.bin_id as number, label: String(m.bin_label) },
-            balance_after: String(m.balance),
             supplier: isReceipt && m.supplier_id != null ? { supplier_id: m.supplier_id as number, name: String(m.supplier_name) } : null,
             entry_type: isReceipt ? (m.entry_type as "normal" | "rapida") : null,
             purchase_order: isReceipt ? ((m.order_number as string | null) ?? null) : null,

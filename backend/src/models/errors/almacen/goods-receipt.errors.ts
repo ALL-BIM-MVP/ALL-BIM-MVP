@@ -81,4 +81,13 @@ export const GOODS_RECEIPT_ERRORS = {
         }
     },
 
+    // Un ingreso anulado (Fase 10) ya no se edita, ni se vincula, ni cambia de archivo.
+    ALREADY_VOIDED: {
+        statusCode: 409,
+        response: {
+            code: "GOODS_RECEIPT_ALREADY_VOIDED",
+            message: "El ingreso fue anulado: ya no admite cambios."
+        }
+    },
+
 } satisfies Record<string, ErrorFormat>;

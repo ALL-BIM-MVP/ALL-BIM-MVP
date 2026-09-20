@@ -2,13 +2,13 @@
 // (cuándo se pidió, ordenó, facturó, recibió y salió), y no solo dónde está ahora.
 // Todo se calcula al consultar; el almacén no maneja lotes, así que NO se atribuye
 // qué unidades salieron de qué ingreso (se muestran los ingresos y los totales).
-export type ProductHistoryKind = "requested" | "ordered" | "invoiced" | "received" | "issued";
+export type ProductHistoryKind = "requested" | "ordered" | "invoiced" | "received" | "issued" | "adjusted";
 
 export interface ProductHistoryEvent {
     kind: ProductHistoryKind;
     // Fecha del documento ("AAAA-MM-DD"): requerimiento, orden, factura, recepción o vale.
     date: string;
-    document: { type: "requisition" | "purchase_order" | "invoice" | "goods_receipt" | "goods_issue"; id: number; label: string };
+    document: { type: "requisition" | "purchase_order" | "invoice" | "goods_receipt" | "goods_issue" | "inventory_adjustment"; id: number; label: string };
     quantity: string;
     // Ingresos y salidas: casilla del movimiento y saldo TOTAL del producto justo después.
     bin: { bin_id: number; label: string } | null;
@@ -25,6 +25,11 @@ export interface ProductHistoryEvent {
     // Vale de salida: destino en obra y quién retiró.
     destination: string | null;
     recipient_name: string | null;
+    // Movimientos de stock: sentido real sobre el stock ("entrada" suma, "salida" resta).
+    direction: "entrada" | "salida" | null;
+    // Ajuste (Fase 10): motivo y documento corregido (ingreso o vale).
+    reason: string | null;
+    adjusted_document: { type: "goods_receipt" | "goods_issue"; id: number; label: string } | null;
 }
 
 export interface ProductHistory {

@@ -34,6 +34,7 @@ export const countAlmacenContent = async (
     const { rows } = await client.query<AlmacenContentCounts>(
         `SELECT
             (SELECT COUNT(*) FROM suppliers WHERE project_id = $1)::int AS suppliers,
+            (SELECT COUNT(*) FROM inventory_adjustments WHERE project_id = $1)::int AS inventory_adjustments,
             (SELECT COUNT(*) FROM invoices WHERE project_id = $1)::int AS invoices,
             (SELECT COUNT(*) FROM purchase_orders WHERE project_id = $1)::int AS purchase_orders,
             (SELECT COUNT(*) FROM quotations WHERE project_id = $1)::int AS quotations,
@@ -99,6 +100,9 @@ export const emptyAlmacenContentService = async (
         const movements = await client.query(
             `DELETE FROM inventory_movements WHERE product_id IN (${PROJECT_PRODUCTS})`, [projectId]
         );
+        // Ajustes de inventario (Fase 10): sus líneas se van solas (CASCADE); van ANTES de los
+        // ingresos y vales que corrigen (RESTRICT).
+        const adjustments = await client.query(`DELETE FROM inventory_adjustments WHERE project_id = $1`, [projectId]);
         // Los ítems y sus repartos por casilla se van solos (ON DELETE CASCADE).
         const receipts = await client.query(`DELETE FROM goods_receipts WHERE project_id = $1`, [projectId]);
         const issues = await client.query(`DELETE FROM goods_issues WHERE project_id = $1`, [projectId]);
@@ -170,6 +174,7 @@ export const emptyAlmacenContentService = async (
 
         return {
             suppliers: suppliers.rowCount ?? 0,
+            inventory_adjustments: adjustments.rowCount ?? 0,
             invoices: invoices.rowCount ?? 0,
             purchase_orders: orders.rowCount ?? 0,
             quotations: quotations.rowCount ?? 0,

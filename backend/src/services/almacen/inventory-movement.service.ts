@@ -22,7 +22,7 @@ interface ApplyStockMovementParams {
     // Siempre positiva — el signo real lo decide `direction`.
     quantity: number;
     direction: "entrada" | "salida";
-    referenceDocumentType: "goods_receipt" | "goods_issue";
+    referenceDocumentType: "goods_receipt" | "goods_issue" | "inventory_adjustment";
     referenceDocumentId: number;
     // Fecha del documento (received_date / issue_date) como "AAAA-MM-DD".
     movementDate: string;

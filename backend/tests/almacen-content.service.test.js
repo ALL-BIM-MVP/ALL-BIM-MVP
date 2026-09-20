@@ -193,7 +193,20 @@ const seedAlmacenData = async () => {
         [invoiceId, purchaseOrderItemId, productId]
     );
 
+    // Un ajuste (corrección) del ingreso: vaciar debe borrarlo ANTES del ingreso que corrige (RESTRICT).
+    const [{ inventory_adjustment_id: adjustmentId }] = await q(
+        `INSERT INTO inventory_adjustments (project_id, kind, reference_document_type, goods_receipt_id, reason, created_by)
+        VALUES ($1, 'correccion', 'goods_receipt', $2, '[test] corrección', $3) RETURNING inventory_adjustment_id`,
+        [projectId, receiptId, OWNER_USER_ID]
+    );
+    const [{ inventory_adjustment_item_id: adjustmentItemId }] = await q(
+        `INSERT INTO inventory_adjustment_items (inventory_adjustment_id, goods_receipt_item_id, product_id, bin_id, quantity_delta)
+        VALUES ($1, $2, $3, $4, 1) RETURNING inventory_adjustment_item_id`,
+        [adjustmentId, receiptItemId, productId, bins[0].bin_id]
+    );
+
     return {
+        adjustmentId, adjustmentItemId,
         invoiceId, invoiceItemId,
         purchaseOrderId, purchaseOrderItemId,
         quotationId, quotationItemId,
@@ -210,6 +223,8 @@ const remainingSeededRows = async () => {
     const s = seeded;
     const checks = [
         ["suppliers", "supplier_id", [s.supplierId]],
+        ["inventory_adjustments", "inventory_adjustment_id", [s.adjustmentId]],
+        ["inventory_adjustment_items", "inventory_adjustment_item_id", [s.adjustmentItemId]],
         ["invoices", "invoice_id", [s.invoiceId]],
         ["invoice_items", "invoice_item_id", [s.invoiceItemId]],
         ["purchase_orders", "purchase_order_id", [s.purchaseOrderId]],
@@ -293,7 +308,7 @@ after(async () => {
 test("summary de un proyecto sin datos de Almacén: vacío, con todo en 0", async () => {
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        suppliers: 0, purchase_requisitions: 0, quotations: 0, purchase_orders: 0, invoices: 0, warehouses: 0, racks: 0, bins: 0, products: 0,
+        suppliers: 0, purchase_requisitions: 0, quotations: 0, purchase_orders: 0, invoices: 0, inventory_adjustments: 0, warehouses: 0, racks: 0, bins: 0, products: 0,
         goods_receipts: 0, goods_issues: 0, inventory_movements: 0, files: 0, is_empty: true,
     });
 });
@@ -302,7 +317,7 @@ test("summary con datos: cuenta todo (incluye grupos y movimientos) y is_empty=f
     seeded = await seedAlmacenData();
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, invoices: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, invoices: 1, inventory_adjustments: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1, is_empty: false,
     });
 });
@@ -337,7 +352,7 @@ test("un Editor puede ver el summary pero NO vaciar Almacén (403), y no se borr
 test("el dueño vacía Almacén: devuelve lo eliminado, no deja huérfanos y conserva las 3 categorías", async () => {
     const deleted = await emptyAlmacenContentService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(deleted, {
-        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, invoices: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, invoices: 1, inventory_adjustments: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1,
     });
 

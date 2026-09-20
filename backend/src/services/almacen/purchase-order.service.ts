@@ -345,11 +345,11 @@ export const deletePurchaseOrderService = async (
         // Una orden con facturas activas o con ingresos no se da de baja: se dan de
         // baja primero las facturas. (El bloqueo de arriba serializa contra crear una
         // factura o un ingreso, que toman la orden con FOR SHARE.)
-        // Los ingresos no se dan de baja: una orden con ingresos no se da de baja nunca.
+        // Los ingresos no se dan de baja (se anulan): una orden con ingresos VIGENTES no se da de baja.
         const invoiced = await client.query(
             `SELECT 1 FROM invoices WHERE purchase_order_id = $1 AND deleted_at IS NULL
             UNION ALL
-            SELECT 1 FROM goods_receipts WHERE purchase_order_id = $1
+            SELECT 1 FROM goods_receipts WHERE purchase_order_id = $1 AND voided_at IS NULL
             LIMIT 1`,
             [purchaseOrderId]
         );
@@ -441,7 +441,8 @@ export const updatePurchaseOrderItemService = async (
                 `SELECT 1 FROM invoice_items ii INNER JOIN invoices v ON v.invoice_id = ii.invoice_id
                 WHERE ii.purchase_order_item_id = $1 AND v.deleted_at IS NULL
                 UNION ALL
-                SELECT 1 FROM goods_receipt_items gri WHERE gri.purchase_order_item_id = $1
+                SELECT 1 FROM goods_receipt_items gri INNER JOIN goods_receipts gr ON gr.goods_receipt_id = gri.goods_receipt_id AND gr.voided_at IS NULL
+                WHERE gri.purchase_order_item_id = $1
                 LIMIT 1`,
                 [itemId]
             );

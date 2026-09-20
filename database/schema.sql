@@ -1505,13 +1505,21 @@ CREATE TABLE goods_receipts (
     created_by INT NOT NULL REFERENCES users(user_id),
     -- Auditoría de las correcciones administrativas permitidas.
     updated_at TIMESTAMPTZ,
-    updated_by INT REFERENCES users(user_id)
+    updated_by INT REFERENCES users(user_id),
+    -- ANULADO (Fase 10): un ingreso registrado por error se anula con un ajuste que
+    -- revierte su stock (inventory_adjustments); aquí solo queda la marca
+    -- administrativa. Las cantidades originales NO se tocan. Un ingreso anulado ya
+    -- no cuenta para la unicidad de la guía ni para los candados de la orden.
+    voided_at TIMESTAMPTZ,
+    voided_by INT REFERENCES users(user_id)
 );
 CREATE INDEX idx_goods_receipts_project_id ON goods_receipts (project_id);
 -- La misma guía (proveedor + serie + número) no se registra dos veces: sumaría
--- el stock dos veces. Sin filtro de baja: los ingresos no se dan de baja.
+-- el stock dos veces. Los ingresos no se dan de baja, pero SÍ se anulan: una guía
+-- anulada se puede volver a registrar bien (por eso el índice excluye anulados).
 CREATE UNIQUE INDEX idx_un_goods_receipts_delivery_note
-    ON goods_receipts (project_id, supplier_id, delivery_note_series, delivery_note_number);
+    ON goods_receipts (project_id, supplier_id, delivery_note_series, delivery_note_number)
+    WHERE voided_at IS NULL;
 CREATE UNIQUE INDEX idx_un_goods_receipts_file_id ON goods_receipts (file_id) WHERE file_id IS NOT NULL;
 CREATE INDEX idx_goods_receipts_purchase_order_id ON goods_receipts (purchase_order_id);
 -- "¿Este proveedor ya tiene documentos?" (RUC bloqueado, baja bloqueada) y
@@ -1583,7 +1591,10 @@ CREATE TABLE goods_issues (
     recipient_dni VARCHAR(8) NOT NULL CHECK (recipient_dni ~ '^\d{8}$'),
     issue_date DATE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    created_by INT NOT NULL REFERENCES users(user_id)
+    created_by INT NOT NULL REFERENCES users(user_id),
+    -- ANULADO (Fase 10): el material vuelve al stock con un ajuste; aquí solo la marca.
+    voided_at TIMESTAMPTZ,
+    voided_by INT REFERENCES users(user_id)
 );
 CREATE INDEX idx_goods_issues_project_id ON goods_issues (project_id);
 
@@ -1608,6 +1619,60 @@ CREATE TABLE goods_issue_item_locations (
 );
 CREATE INDEX idx_goods_issue_item_locations_item_id ON goods_issue_item_locations (goods_issue_item_id);
 CREATE INDEX idx_goods_issue_item_locations_bin_id ON goods_issue_item_locations (bin_id);
+
+-- AJUSTE de inventario (Fase 10 de docs/almacen-ingreso-productos/05-roadmap.md): corrige
+-- las cantidades de un ingreso o de un vale YA registrados SIN reescribirlos: el original
+-- queda tal cual y el ajuste es un documento nuevo, con su motivo, que genera movimientos
+-- de stock normales (inventory_movements con reference_document_type = 'inventory_adjustment').
+-- No tiene baja ni edición: un ajuste equivocado se corrige con otro ajuste.
+CREATE TABLE inventory_adjustments (
+    inventory_adjustment_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Valores en español a propósito (dato que se muestra): 'correccion' = corrige
+    -- cantidades por línea y casilla; 'anulacion' = revierte todo el documento.
+    kind VARCHAR(10) NOT NULL CHECK (kind IN ('correccion', 'anulacion')),
+    -- Documento corregido: uno solo (ingreso o vale). RESTRICT: un documento con
+    -- ajustes no se borra de motor (vaciar Almacén los borra antes).
+    reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue')),
+    goods_receipt_id BIGINT REFERENCES goods_receipts(goods_receipt_id) ON DELETE RESTRICT,
+    goods_issue_id BIGINT REFERENCES goods_issues(goods_issue_id) ON DELETE RESTRICT,
+    CONSTRAINT chk_inventory_adjustments_one_reference CHECK (
+        (reference_document_type = 'goods_receipt' AND goods_receipt_id IS NOT NULL AND goods_issue_id IS NULL)
+        OR (reference_document_type = 'goods_issue' AND goods_issue_id IS NOT NULL AND goods_receipt_id IS NULL)
+    ),
+    -- Motivo obligatorio: sin él, un ajuste es un cambio de stock sin explicación.
+    reason VARCHAR(500) NOT NULL CHECK (LENGTH(TRIM(reason)) > 0),
+    -- Fecha de la corrección (por defecto hoy): es la fecha de sus movimientos de Kardex.
+    adjustment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id)
+);
+CREATE INDEX idx_inventory_adjustments_project_id ON inventory_adjustments (project_id);
+CREATE INDEX idx_inventory_adjustments_goods_receipt_id ON inventory_adjustments (goods_receipt_id);
+CREATE INDEX idx_inventory_adjustments_goods_issue_id ON inventory_adjustments (goods_issue_id);
+
+CREATE TABLE inventory_adjustment_items (
+    inventory_adjustment_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    inventory_adjustment_id BIGINT NOT NULL REFERENCES inventory_adjustments(inventory_adjustment_id) ON DELETE CASCADE,
+    -- Línea corregida (una sola: la del tipo de documento del ajuste).
+    goods_receipt_item_id BIGINT REFERENCES goods_receipt_items(goods_receipt_item_id) ON DELETE RESTRICT,
+    goods_issue_item_id BIGINT REFERENCES goods_issue_items(goods_issue_item_id) ON DELETE RESTRICT,
+    CONSTRAINT chk_inventory_adjustment_items_one_line CHECK (
+        (goods_receipt_item_id IS NOT NULL AND goods_issue_item_id IS NULL)
+        OR (goods_receipt_item_id IS NULL AND goods_issue_item_id IS NOT NULL)
+    ),
+    -- Producto de la línea corregida (el de la línea: no se elige aparte).
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    bin_id BIGINT NOT NULL REFERENCES bins(bin_id) ON DELETE RESTRICT,
+    -- Cambio de la cantidad DEL DOCUMENTO en esa casilla (mismo sentido que su cantidad):
+    -- + más recibido / más retirado, - menos. El efecto en el stock lo decide el tipo de
+    -- documento (en un vale, retirar de más BAJA el stock). Nunca 0.
+    quantity_delta NUMERIC(18,6) NOT NULL CHECK (quantity_delta <> 0)
+);
+CREATE INDEX idx_inventory_adjustment_items_adjustment_id ON inventory_adjustment_items (inventory_adjustment_id);
+CREATE INDEX idx_inventory_adjustment_items_receipt_item_id ON inventory_adjustment_items (goods_receipt_item_id);
+CREATE INDEX idx_inventory_adjustment_items_issue_item_id ON inventory_adjustment_items (goods_issue_item_id);
+CREATE INDEX idx_inventory_adjustment_items_bin_id ON inventory_adjustment_items (bin_id);
 
 -- Historial inmutable de movimientos — snapshot del saldo resultante
 -- en el momento (no se recalcula después leyendo hacia atrás).
@@ -1635,7 +1700,7 @@ CREATE TABLE inventory_movements (
     -- es un discriminador TÉCNICO de a qué tabla apunta
     -- reference_document_id — en inglés, matcheando el nombre real de
     -- esas tablas (nunca se muestra tal cual a un usuario).
-    reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue')),
+    reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue', 'inventory_adjustment')),
     reference_document_id BIGINT NOT NULL,
     -- Fecha REAL del movimiento: la del documento que lo origina
     -- (received_date del ingreso, issue_date del vale), sin hora. Es la que

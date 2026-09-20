@@ -1,4 +1,5 @@
 import type { PurchaseOrderItemProgress, ReceiptDocuments, StatusAlert } from "./document-status.models.js";
+import type { ItemAdjustmentSummary } from "./inventory-adjustment.models.js";
 
 // goods_receipts (Ingreso = guía de remisión + ubicación) — ver
 // docs/roadmap/almacen-bim-base-datos.md 4.1-4.3 y
@@ -21,6 +22,9 @@ export interface GoodsReceiptRow {
     entry_type: "normal" | "rapida";
     // null = sin orden (entrada rápida, o normal aún pendiente de vincular).
     purchase_order: { purchase_order_id: number; number: string } | null;
+    // Anulado (Fase 10): un ajuste revirtió todo su stock; un ingreso anulado ya no se edita y su guía se puede volver a registrar.
+    voided: boolean;
+    voided_at: Date | null;
     delivery_note_series: string;
     delivery_note_number: string;
     // Fechas "solo día" como texto AAAA-MM-DD (no un Date con zona horaria).
@@ -60,7 +64,9 @@ export interface GoodsReceiptItemRow {
     alerts: StatusAlert[];
 }
 
-export interface GoodsReceiptItemWithLocations extends GoodsReceiptItemRow {
+// Ajustes de la línea (Fase 10): la cantidad registrada (`total_quantity`) NO cambia; lo efectivo es
+// lo registrado más los ajustes.
+export interface GoodsReceiptItemWithLocations extends GoodsReceiptItemRow, ItemAdjustmentSummary {
     locations: GoodsReceiptItemLocationRow[];
 }
 

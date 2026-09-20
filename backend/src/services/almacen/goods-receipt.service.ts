@@ -13,6 +13,8 @@ import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertProductInProject } from "./product.service.js";
 import { buildSet } from "../../utils/partial-update.js";
 import { getPurchaseOrderItemStatus, getReceiptStatus } from "./document-status.service.js";
+import { getItemAdjustmentSummaries } from "./adjustment-summary.service.js";
+import { INVENTORY_ADJUSTMENT_ERRORS } from "../../models/errors/almacen/inventory-adjustment.errors.js";
 import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { PURCHASE_ORDER_ERRORS } from "../../models/errors/almacen/purchase-order.errors.js";
@@ -56,6 +58,7 @@ const GOODS_RECEIPT_SELECT = `
         to_char(gr.delivery_note_date, 'YYYY-MM-DD') AS delivery_note_date,
         to_char(gr.received_date, 'YYYY-MM-DD') AS received_date,
         gr.file_id IS NOT NULL AS has_file,
+        gr.voided_at IS NOT NULL AS voided, gr.voided_at,
         gr.created_at, gr.created_by, gr.updated_at, gr.updated_by
     FROM goods_receipts gr
     INNER JOIN suppliers s ON s.supplier_id = gr.supplier_id
@@ -129,10 +132,14 @@ const loadDetail = async (
         client, itemsResult.rows.filter((i) => i.purchase_order_item_id != null).map((i) => i.purchase_order_item_id!)
     );
 
+    // Ajustes (Fase 10): lo registrado no cambia; se agrega lo efectivo y dónde queda.
+    const adjustments = await getItemAdjustmentSummaries(client, "goods_receipt", itemsResult.rows.map((i) => i.goods_receipt_item_id));
+
     const items = itemsResult.rows.map((item) => {
         const s = item.purchase_order_item_id != null ? orderStatus.get(String(item.purchase_order_item_id)) : undefined;
         return {
             ...item,
+            ...adjustments.get(String(item.goods_receipt_item_id))!,
             purchase_order_progress: s?.progress ?? null,
             alerts: s ? s.alerts("receipt") : [],
             locations: locationsResult.rows.filter((loc) => loc.goods_receipt_item_id === item.goods_receipt_item_id),
@@ -309,10 +316,14 @@ export const updateGoodsReceiptService = async (
     try {
         const { rowCount } = await pool.query(
             `UPDATE goods_receipts SET ${set}, updated_at = NOW(), updated_by = $3
-            WHERE goods_receipt_id = $1 AND project_id = $2`,
+            WHERE goods_receipt_id = $1 AND project_id = $2 AND voided_at IS NULL`,
             [goodsReceiptId, projectId, user.user_id, ...values]
         );
-        if (rowCount === 0) throw new AppError(GOODS_RECEIPT_ERRORS.NOT_FOUND);
+        if (rowCount === 0) {
+            // No hubo fila: o no existe, o está anulado.
+            const exists = await pool.query(`SELECT 1 FROM goods_receipts WHERE goods_receipt_id = $1 AND project_id = $2`, [goodsReceiptId, projectId]);
+            throw new AppError(exists.rowCount ? GOODS_RECEIPT_ERRORS.ALREADY_VOIDED : GOODS_RECEIPT_ERRORS.NOT_FOUND);
+        }
     } catch (error) {
         if (error instanceof AppError) throw error;
         if ((error as { code?: string }).code === UNIQUE_VIOLATION) throw new AppError(GOODS_RECEIPT_ERRORS.DUPLICATE_DELIVERY_NOTE);
@@ -333,9 +344,10 @@ export const linkGoodsReceiptPurchaseOrderService = async (
     try {
         await client.query("BEGIN");
         await lockDocument(client, RECEIPT_DOC, projectId, goodsReceiptId);
-        const header = await client.query<{ supplier_id: number }>(
-            `SELECT supplier_id FROM goods_receipts WHERE goods_receipt_id = $1`, [goodsReceiptId]
+        const header = await client.query<{ supplier_id: number; voided_at: Date | null }>(
+            `SELECT supplier_id, voided_at FROM goods_receipts WHERE goods_receipt_id = $1`, [goodsReceiptId]
         );
+        if (header.rows[0]!.voided_at) throw new AppError(GOODS_RECEIPT_ERRORS.ALREADY_VOIDED);
         await resolveOrder(client, projectId, header.rows[0]!.supplier_id, body.purchase_order_id);
 
         // Tiene que indicarse la línea de orden de TODAS las líneas del ingreso, sin repetir ni omitir.
@@ -386,6 +398,9 @@ export const setGoodsReceiptFileService = async (
     let removed = null;
     try {
         await client.query("BEGIN");
+        await lockDocument(client, RECEIPT_DOC, projectId, goodsReceiptId);
+        const voided = await client.query(`SELECT 1 FROM goods_receipts WHERE goods_receipt_id = $1 AND voided_at IS NOT NULL`, [goodsReceiptId]);
+        if (voided.rowCount) throw new AppError(GOODS_RECEIPT_ERRORS.ALREADY_VOIDED);
         removed = await replaceDocumentFile(client, RECEIPT_DOC, projectId, goodsReceiptId, user.user_id, newFileId);
         const detail = await loadDetail(client, projectId, goodsReceiptId);
         await client.query("COMMIT");
