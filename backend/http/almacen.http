@@ -12,7 +12,7 @@
 #
 # Permisos (módulo almacen): ver = view; crear/editar/adjuntar = process;
 # bajas de estructura/catálogo = delete; bajas de documentos de auditoría
-# (proveedor, requerimiento, cotización, orden) y vaciar = configure / dueño o admin del proyecto.
+# (proveedor, requerimiento, cotización, orden, factura) y vaciar = configure / dueño o admin del proyecto.
 
 @baseUrl = http://localhost:4000/api
 # @projectId = 1
@@ -733,6 +733,171 @@ Content-Type: application/json
 { "file_id": {{scanOrderId}} }
 
 ### =====================================================================
+### 6D. FACTURAS (el documento de cobro del proveedor)
+### =====================================================================
+# Distinta de la guía de remisión: no se asume relación 1:1 entre ellas; se relacionan
+# por la línea de la orden. Igual que en las órdenes, el origen (orden de compra) es
+# OPCIONAL, pero si la factura tiene orden, CADA línea cita una línea de esa orden
+# (purchase_order_item_id) y se usa su mismo producto. Sin orden (una factura que llega
+# directa): sin vínculos y cada línea trae su product_id.
+# - Serie (1 a 4 letras/números, se guarda en MAYÚSCULAS; la electrónica es F###) y
+#   número (1 a 8 dígitos), separados como en el documento. Única por (proveedor, serie,
+#   número) entre las activas.
+# - La factura guarda SU PROPIA copia (cantidad y montos): puede facturar menos o más que
+#   lo ordenado (facturación parcial). line_total obligatorio; el resto de montos opcional.
+# - subtotal_amount, tax_amount y total_amount (cabecera) opcionales, como en el papel; la
+#   respuesta trae también lines_total (suma de las líneas) para compararlos.
+
+### 6D.1 Crear desde una orden (se facturan 40 de las 60 pedidas)
+# @name invoice
+POST {{baseUrl}}/projects/{{projectId}}/invoices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "purchase_order_id": {{purchaseOrderId}},
+  "series": "F001",
+  "number": "123",
+  "invoice_date": "2026-09-20",
+  "currency": "PEN",
+  "subtotal_amount": 1016.95,
+  "tax_amount": 183.05,
+  "total_amount": 1200,
+  "items": [
+    {
+      "purchase_order_item_id": {{purchaseOrderItemId}},
+      "description": "Cemento Sol bolsa 42.5 kg",
+      "quantity_invoiced": 40,
+      "unit_price": 30,
+      "line_total": 1200
+    }
+  ]
+}
+
+###
+@invoiceId = {{invoice.response.body.$.invoice_id}}
+@invoiceItemId = {{invoice.response.body.$.items[0].invoice_item_id}}
+
+### 6D.2 Segunda factura con la MISMA línea de orden (facturación parcial: las 20 restantes)
+# @name invoice2
+POST {{baseUrl}}/projects/{{projectId}}/invoices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "purchase_order_id": {{purchaseOrderId}},
+  "series": "F001",
+  "number": "124",
+  "invoice_date": "2026-09-27",
+  "currency": "PEN",
+  "items": [
+    { "purchase_order_item_id": {{purchaseOrderItemId}}, "description": "Cemento Sol bolsa 42.5 kg (saldo)", "quantity_invoiced": 20, "line_total": 600 }
+  ]
+}
+
+###
+@invoice2Id = {{invoice2.response.body.$.invoice_id}}
+
+### 6D.3 Factura sin orden de compra (llegó directa; las líneas traen su producto)
+# @name directInvoice
+POST {{baseUrl}}/projects/{{projectId}}/invoices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "series": "F001",
+  "number": "900",
+  "invoice_date": "2026-09-21",
+  "currency": "PEN",
+  "items": [
+    { "product_id": {{productId}}, "description": "Cemento (factura directa)", "quantity_invoiced": 10, "line_total": 320 }
+  ]
+}
+
+###
+@directInvoiceId = {{directInvoice.response.body.$.invoice_id}}
+
+### 6D.4 Listar (filtros opcionales: proveedor, orden, texto "serie-número" o proveedor) / obtener
+GET {{baseUrl}}/projects/{{projectId}}/invoices
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/invoices?purchase_order_id={{purchaseOrderId}}&supplier_id={{supplierId}}
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/invoices?search=F001-123
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/invoices/{{invoiceId}}
+Authorization: Bearer {{accessToken}}
+
+### 6D.5 Editar la cabecera (PATCH parcial; null limpia los montos). El proveedor y la orden no se cambian.
+PATCH {{baseUrl}}/projects/{{projectId}}/invoices/{{invoiceId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "invoice_date": "2026-09-22", "tax_amount": null }
+
+### 6D.6 Líneas de la factura directa: agregar / editar parcial / quitar (la última no se puede quitar)
+POST {{baseUrl}}/projects/{{projectId}}/invoices/{{directInvoiceId}}/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "product_id": {{productId}}, "description": "Flete", "quantity_invoiced": 1, "line_total": 80 }
+
+###
+# @name directInvoiceNow
+GET {{baseUrl}}/projects/{{projectId}}/invoices/{{directInvoiceId}}
+Authorization: Bearer {{accessToken}}
+
+###
+@directInvoiceItemA = {{directInvoiceNow.response.body.$.items[0].invoice_item_id}}
+@directInvoiceItemB = {{directInvoiceNow.response.body.$.items[1].invoice_item_id}}
+
+###
+PATCH {{baseUrl}}/projects/{{projectId}}/invoices/{{directInvoiceId}}/items/{{directInvoiceItemA}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "notes": "Incluye descarga", "unit_price": 32 }
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/invoices/{{directInvoiceId}}/items/{{directInvoiceItemB}}
+Authorization: Bearer {{accessToken}}
+
+### 6D.7 Documento físico de la factura: subir a `files` y adjuntar
+# @name scanInvoice
+POST {{baseUrl}}/projects/{{projectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----Almacen
+
+------Almacen
+Content-Disposition: form-data; name="module_code"
+
+almacen
+------Almacen
+Content-Disposition: form-data; name="file"; filename="factura-F001-123.pdf"
+Content-Type: application/pdf
+
+< ./ejemplos/documento.pdf
+------Almacen--
+
+###
+@scanInvoiceId = {{scanInvoice.response.body.$.file_id}}
+
+###
+PUT {{baseUrl}}/projects/{{projectId}}/invoices/{{invoiceId}}/file
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": {{scanInvoiceId}} }
+
+### =====================================================================
 ### 7. INGRESOS (goods receipts) — suman stock; no se editan ni se borran
 ### =====================================================================
 # La cantidad recibida (total_quantity) se reparte entre casillas (locations)
@@ -1024,6 +1189,44 @@ Content-Type: application/json
 DELETE {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}
 Authorization: Bearer {{accessToken}}
 
+### 11.10m Misma factura repetida (proveedor + serie + número) → 409 INVOICE_DUPLICATE
+POST {{baseUrl}}/projects/{{projectId}}/invoices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "series": "F001", "number": "123", "invoice_date": "2026-09-20", "currency": "PEN",
+  "items": [ { "product_id": {{productId}}, "description": "x", "quantity_invoiced": 1, "line_total": 1 } ]
+}
+
+### 11.10n Serie con formato inválido → 400 INVALID_REQUEST_DATA
+POST {{baseUrl}}/projects/{{projectId}}/invoices
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "series": "F-001", "number": "abc", "invoice_date": "2026-09-20", "currency": "PEN",
+  "items": [ { "product_id": {{productId}}, "description": "x", "quantity_invoiced": 1, "line_total": 1 } ]
+}
+
+### 11.10o Línea sin citar la orden en una factura que tiene orden → 400 INVOICE_LINK_REQUIRED
+POST {{baseUrl}}/projects/{{projectId}}/invoices/{{invoiceId}}/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "product_id": {{productId}}, "description": "Flete no ordenado", "quantity_invoiced": 1, "line_total": 80 }
+
+### 11.10p Cambiar la cantidad ordenada de una línea que ya está en una factura → 409 PURCHASE_ORDER_ITEM_LOCKED
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}/items/{{purchaseOrderItemId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "quantity_ordered": 999 }
+
+### 11.10q Dar de baja una orden que tiene facturas activas → 409 PURCHASE_ORDER_HAS_DOCUMENTS
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}
+Authorization: Bearer {{accessToken}}
+
 ### 11.11 Eliminar un proyecto con Almacén con contenido → 409 ALMACEN_CONTENT_NOT_EMPTY
 DELETE {{baseUrl}}/projects/{{projectId}}
 Authorization: Bearer {{accessToken}}
@@ -1031,6 +1234,18 @@ Authorization: Bearer {{accessToken}}
 ### =====================================================================
 ### 12. BAJAS Y VACIAR ALMACÉN  (DESTRUCTIVO)
 ### =====================================================================
+
+### 12.000 Baja de las facturas (exige configure; elimina también su archivo). Antes que las órdenes.
+DELETE {{baseUrl}}/projects/{{projectId}}/invoices/{{invoiceId}}
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/invoices/{{invoice2Id}}
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/invoices/{{directInvoiceId}}
+Authorization: Bearer {{accessToken}}
 
 ### 12.00 Baja de las órdenes de compra (exige configure; elimina también su archivo). Antes que la cotización y el requerimiento.
 DELETE {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{purchaseOrderId}}

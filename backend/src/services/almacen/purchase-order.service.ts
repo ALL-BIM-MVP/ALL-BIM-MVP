@@ -15,6 +15,7 @@ import { QUOTATION_ERRORS } from "../../models/errors/almacen/quotation.errors.j
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertSupplierInProject } from "./supplier.service.js";
@@ -85,8 +86,7 @@ export const listPurchaseOrdersService = async (
     ];
     let filter = "";
     if (query.search) {
-        // Los comodines de LIKE que escriba el usuario (% _ \) se escapan.
-        params.push(`%${query.search.replace(/[\\%_]/g, "\\$&")}%`);
+        params.push(containsPattern(query.search));
         filter = `AND (o.number ILIKE $5 OR s.name ILIKE $5)`;
     }
     const { rows } = await pool.query<PurchaseOrderRow>(
@@ -334,8 +334,15 @@ export const deletePurchaseOrderService = async (
     let removed = null;
     try {
         await client.query("BEGIN");
-        // Cuando existan facturas e ingresos que citen la orden, aquí se
-        // bloquea la baja con documentos activos (patrón de las cotizaciones).
+        await lockOrder(client, projectId, purchaseOrderId);
+        // Una orden con facturas activas no se da de baja: se dan de baja primero
+        // ellas. (El bloqueo de arriba serializa contra crear una factura, que
+        // toma la orden con FOR SHARE.) Cuando existan ingresos que citen la
+        // orden se suman aquí.
+        const invoiced = await client.query(
+            `SELECT 1 FROM invoices WHERE purchase_order_id = $1 AND deleted_at IS NULL LIMIT 1`, [purchaseOrderId]
+        );
+        if (invoiced.rowCount) throw new AppError(PURCHASE_ORDER_ERRORS.HAS_DOCUMENTS);
         removed = await softDeleteDocument(client, ORDER_DOC, projectId, purchaseOrderId, user.user_id);
         await client.query("COMMIT");
     } catch (error) {
@@ -403,6 +410,7 @@ export const addPurchaseOrderItemService = async (
 };
 
 const ITEM_COLUMNS = ["description", "quantity_ordered", "unit_price", "discount_amount", "tax_amount", "line_total", "notes"] as const;
+const LOCKED_ITEM_COLUMNS = ["quantity_ordered", "unit_price", "discount_amount", "tax_amount", "line_total"] as const;
 
 export const updatePurchaseOrderItemService = async (
     user: DecodedToken, { projectId, purchaseOrderId, itemId }: PurchaseOrderItemIdParam, body: UpdatePurchaseOrderItemBody
@@ -413,6 +421,18 @@ export const updatePurchaseOrderItemService = async (
     try {
         await client.query("BEGIN");
         await lockOrder(client, projectId, purchaseOrderId);
+
+        // Cantidad y montos son lo que las facturas ya tomaron: con una factura
+        // ACTIVA sobre esta línea no cambian (descripción y observaciones sí). Las
+        // facturas dadas de baja no cuentan.
+        if (LOCKED_ITEM_COLUMNS.some((column) => body[column] !== undefined)) {
+            const invoiced = await client.query(
+                `SELECT 1 FROM invoice_items ii INNER JOIN invoices v ON v.invoice_id = ii.invoice_id
+                WHERE ii.purchase_order_item_id = $1 AND v.deleted_at IS NULL LIMIT 1`,
+                [itemId]
+            );
+            if (invoiced.rowCount) throw new AppError(PURCHASE_ORDER_ERRORS.ITEM_LOCKED);
+        }
 
         const { set, values } = buildSet(ITEM_COLUMNS, body, 3);
         const { rowCount } = await client.query(
@@ -433,8 +453,8 @@ export const updatePurchaseOrderItemService = async (
     }
 };
 
-// Cuando existan facturas e ingresos que citen la línea, aquí se bloquea
-// quitarla con un NOT EXISTS (mismo patrón que el candado de las líneas de cotización).
+// Las facturas que citan la línea la protegen con un NOT EXISTS (cuando existan
+// ingresos que la citen se suman aquí).
 export const deletePurchaseOrderItemService = async (
     user: DecodedToken, { projectId, purchaseOrderId, itemId }: PurchaseOrderItemIdParam
 ): Promise<PurchaseOrderDetail> => {
@@ -454,7 +474,14 @@ export const deletePurchaseOrderItemService = async (
         );
         if (count.rows[0]!.total <= 1) throw new AppError(PURCHASE_ORDER_ERRORS.LAST_ITEM);
 
-        await client.query(`DELETE FROM purchase_order_items WHERE purchase_order_item_id = $1`, [itemId]);
+        // Ninguna factura (ni las dadas de baja, que se conservan) puede citarla.
+        const { rowCount: deleted } = await client.query(
+            `DELETE FROM purchase_order_items
+            WHERE purchase_order_item_id = $1
+                AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.purchase_order_item_id = $1)`,
+            [itemId]
+        );
+        if (deleted === 0) throw new AppError(PURCHASE_ORDER_ERRORS.ITEM_LOCKED);
         await touchOrder(client, purchaseOrderId, user.user_id);
         const detail = await loadDetail(client, projectId, purchaseOrderId);
         await client.query("COMMIT");

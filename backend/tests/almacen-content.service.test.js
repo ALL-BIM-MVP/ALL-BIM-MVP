@@ -181,7 +181,20 @@ const seedAlmacenData = async () => {
         [purchaseOrderId, quotationItemId, requisitionItemId, productId]
     );
 
+    // Una factura de ese proveedor a esa orden, con una línea.
+    const [{ invoice_id: invoiceId }] = await q(
+        `INSERT INTO invoices (project_id, supplier_id, purchase_order_id, series, number, invoice_date, currency, created_by)
+        VALUES ($1, $2, $3, 'F001', '1', CURRENT_DATE, 'PEN', $4) RETURNING invoice_id`,
+        [projectId, supplierId, purchaseOrderId, OWNER_USER_ID]
+    );
+    const [{ invoice_item_id: invoiceItemId }] = await q(
+        `INSERT INTO invoice_items (invoice_id, purchase_order_item_id, product_id, description, quantity_invoiced, line_total)
+        VALUES ($1, $2, $3, '[test] línea facturada', 5, 100) RETURNING invoice_item_id`,
+        [invoiceId, purchaseOrderItemId, productId]
+    );
+
     return {
+        invoiceId, invoiceItemId,
         purchaseOrderId, purchaseOrderItemId,
         quotationId, quotationItemId,
         requisitionId, requisitionItemId,
@@ -197,6 +210,8 @@ const remainingSeededRows = async () => {
     const s = seeded;
     const checks = [
         ["suppliers", "supplier_id", [s.supplierId]],
+        ["invoices", "invoice_id", [s.invoiceId]],
+        ["invoice_items", "invoice_item_id", [s.invoiceItemId]],
         ["purchase_orders", "purchase_order_id", [s.purchaseOrderId]],
         ["purchase_order_items", "purchase_order_item_id", [s.purchaseOrderItemId]],
         ["quotations", "quotation_id", [s.quotationId]],
@@ -278,7 +293,7 @@ after(async () => {
 test("summary de un proyecto sin datos de Almacén: vacío, con todo en 0", async () => {
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        suppliers: 0, purchase_requisitions: 0, quotations: 0, purchase_orders: 0, warehouses: 0, racks: 0, bins: 0, products: 0,
+        suppliers: 0, purchase_requisitions: 0, quotations: 0, purchase_orders: 0, invoices: 0, warehouses: 0, racks: 0, bins: 0, products: 0,
         goods_receipts: 0, goods_issues: 0, inventory_movements: 0, files: 0, is_empty: true,
     });
 });
@@ -287,7 +302,7 @@ test("summary con datos: cuenta todo (incluye grupos y movimientos) y is_empty=f
     seeded = await seedAlmacenData();
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, invoices: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1, is_empty: false,
     });
 });
@@ -322,7 +337,7 @@ test("un Editor puede ver el summary pero NO vaciar Almacén (403), y no se borr
 test("el dueño vacía Almacén: devuelve lo eliminado, no deja huérfanos y conserva las 3 categorías", async () => {
     const deleted = await emptyAlmacenContentService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(deleted, {
-        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, purchase_requisitions: 1, quotations: 1, purchase_orders: 1, invoices: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1,
     });
 

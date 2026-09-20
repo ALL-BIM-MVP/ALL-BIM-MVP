@@ -1,5 +1,9 @@
 import z from 'zod';
 import { dateOnlySchema } from './goods-receipt.schema.js';
+import {
+    AT_LEAST_ONE, amountSchema, atLeastOne, currencySchema, descriptionSchema, documentNumberSchema, idSchema, notesSchema,
+    quantitySchema, termsSchema,
+} from './document-common.schema.js';
 
 export const QuotationIdParamSchema = z.object({
     projectId: z.coerce.number(),
@@ -11,20 +15,6 @@ export const QuotationItemIdParamSchema = QuotationIdParamSchema.extend({
     itemId: z.coerce.number(),
 });
 export type QuotationItemIdParam = z.infer<typeof QuotationItemIdParamSchema>;
-
-// Los .max y los CHECK espejan schema.sql. NUMERIC(18,6) admite hasta 12
-// dígitos enteros: se acota para que un valor enorme dé 400 y no un error de
-// la base.
-const MAX_NUMERIC = 999_999_999_999;
-const idSchema = z.coerce.number().int().positive();
-const numberSchema = z.string().trim().min(1, "El número no puede estar vacío").max(30);
-// Moneda: lista cerrada (mismo CHECK que quotations.currency).
-const currencySchema = z.enum(["PEN", "USD"]);
-const termsSchema = z.string().trim().min(1).max(1000);
-const descriptionSchema = z.string().trim().min(1, "La descripción no puede estar vacía").max(300);
-const notesSchema = z.string().trim().min(1).max(500);
-const quantitySchema = z.coerce.number().positive().max(MAX_NUMERIC);
-const amountSchema = z.coerce.number().min(0).max(MAX_NUMERIC);
 
 const ItemFields = {
     purchase_requisition_item_id: idSchema,
@@ -47,8 +37,6 @@ export type CreateQuotationItemBody = z.infer<typeof CreateQuotationItemBodySche
 
 // PATCH: solo los campos enviados; al menos uno. La línea del requerimiento y
 // el producto son la identidad de la línea: no se cambian (se quita y se agrega).
-const atLeastOne = (body: object) => Object.keys(body).length > 0;
-const AT_LEAST_ONE = { message: "Debe enviarse al menos un campo para modificar." };
 
 export const UpdateQuotationItemBodySchema = z.object({
     description: ItemFields.description,
@@ -64,7 +52,7 @@ export type UpdateQuotationItemBody = z.infer<typeof UpdateQuotationItemBodySche
 export const CreateQuotationBodySchema = z.object({
     supplier_id: idSchema,
     purchase_requisition_id: idSchema,
-    number: numberSchema,
+    number: documentNumberSchema,
     quotation_date: dateOnlySchema,
     currency: currencySchema,
     commercial_terms: termsSchema.nullable().optional(),
@@ -84,7 +72,7 @@ export type CreateQuotationBody = z.infer<typeof CreateQuotationBodySchema>;
 // Cabecera parcial. El proveedor y el requerimiento identifican la cotización:
 // no se cambian (si hubo error, se da de baja y se vuelve a crear).
 export const UpdateQuotationBodySchema = z.object({
-    number: numberSchema,
+    number: documentNumberSchema,
     quotation_date: dateOnlySchema,
     currency: currencySchema,
     commercial_terms: termsSchema.nullable(),

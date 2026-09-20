@@ -16,22 +16,24 @@ import type { Supplier, SupplierRow } from "../../models/almacen/supplier.models
 
 const UNIQUE_VIOLATION = "23505";
 
-// Cuántos documentos usan a un proveedor — ingresos, cotizaciones y órdenes de compra; cada tabla
+// Cuántos documentos usan a un proveedor — ingresos, cotizaciones, órdenes de compra y facturas; cada tabla
 // de documento nueva (órdenes de compra, cotizaciones, facturas) se suma
 // en los DOS fragmentos de abajo. Fragmentos fijos armados en el servidor
 // (nunca entrada de usuario), mismo criterio que VISIBILITY_CLAUSE en
 // model-3d-asset.service.ts. `s` es el alias de suppliers en las
 // consultas de lectura; `suppliers` va sin alias en los UPDATE guardados.
-// Cotizaciones y órdenes: solo las ACTIVAS (una dada de baja no ata al proveedor).
+// Cotizaciones, órdenes y facturas: solo las ACTIVAS (una dada de baja no ata al proveedor).
 const DOCUMENTS_COUNT = `(
     (SELECT COUNT(*) FROM goods_receipts gr WHERE gr.supplier_id = s.supplier_id)
     + (SELECT COUNT(*) FROM quotations q WHERE q.supplier_id = s.supplier_id AND q.deleted_at IS NULL)
     + (SELECT COUNT(*) FROM purchase_orders po WHERE po.supplier_id = s.supplier_id AND po.deleted_at IS NULL)
+    + (SELECT COUNT(*) FROM invoices v WHERE v.supplier_id = s.supplier_id AND v.deleted_at IS NULL)
 )::int`;
 const HAS_NO_DOCUMENTS = `(
     NOT EXISTS (SELECT 1 FROM goods_receipts gr WHERE gr.supplier_id = suppliers.supplier_id)
     AND NOT EXISTS (SELECT 1 FROM quotations q WHERE q.supplier_id = suppliers.supplier_id AND q.deleted_at IS NULL)
     AND NOT EXISTS (SELECT 1 FROM purchase_orders po WHERE po.supplier_id = suppliers.supplier_id AND po.deleted_at IS NULL)
+    AND NOT EXISTS (SELECT 1 FROM invoices v WHERE v.supplier_id = suppliers.supplier_id AND v.deleted_at IS NULL)
 )`;
 
 export const getSupplierOrThrow = async (

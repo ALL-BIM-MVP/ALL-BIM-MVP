@@ -90,4 +90,21 @@ export const PURCHASE_ORDER_ERRORS = {
         }
     },
 
+    // Una línea con una factura activa no cambia de cantidad/montos ni se quita.
+    ITEM_LOCKED: {
+        statusCode: 409,
+        response: {
+            code: "PURCHASE_ORDER_ITEM_LOCKED",
+            message: "La línea ya está en una factura: no se puede cambiar su cantidad ni sus montos, ni quitarla."
+        }
+    },
+
+    HAS_DOCUMENTS: {
+        statusCode: 409,
+        response: {
+            code: "PURCHASE_ORDER_HAS_DOCUMENTS",
+            message: "No se puede dar de baja la orden de compra porque tiene facturas registradas."
+        }
+    },
+
 } satisfies Record<string, ErrorFormat>;

@@ -1391,6 +1391,71 @@ CREATE INDEX idx_purchase_order_items_quotation_item_id ON purchase_order_items 
 CREATE INDEX idx_purchase_order_items_requisition_item_id ON purchase_order_items (purchase_requisition_item_id);
 CREATE INDEX idx_purchase_order_items_product_id ON purchase_order_items (product_id);
 
+-- Factura: el documento de cobro del proveedor (Fase 6 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Distinta de la guía de remisión
+-- (goods_receipts): no se asume relación 1:1 entre ellas; se relacionan por la
+-- línea de la orden de compra. Registro de auditoría: no paga ni concilia. El
+-- origen (orden de compra) es opcional (factura que llega directa); si existe,
+-- cada línea cita la línea de esa orden (las mismas líneas hasta el almacén).
+CREATE TABLE invoices (
+    invoice_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- Orden de origen opcional. RESTRICT: no se borra de motor una orden con
+    -- facturas (vaciar Almacén borra las facturas antes).
+    purchase_order_id BIGINT REFERENCES purchase_orders(purchase_order_id) ON DELETE RESTRICT,
+    -- Serie y número SEPARADOS como vienen en el documento (F001-00000123).
+    -- Formato REAL (SUNAT, verificado): la factura electrónica lleva una serie
+    -- alfanumérica de 4 caracteres que empieza con F y un correlativo de 1 a 8
+    -- dígitos. Por si circulan comprobantes impresos o de otra serie, se acepta
+    -- de 1 a 4 alfanuméricos. Se guarda SIEMPRE en mayúsculas (la aplicación lo
+    -- normaliza y el CHECK lo exige): así la unicidad de abajo no se burla con
+    -- "f001" vs "F001".
+    series VARCHAR(4) NOT NULL CHECK (series ~ '^[A-Z0-9]{1,4}$'),
+    number VARCHAR(8) NOT NULL CHECK (number ~ '^\d{1,8}$'),
+    -- Fecha de emisión que dice la factura.
+    invoice_date DATE NOT NULL,
+    -- Moneda del documento (constancia, sin conversión); mismo criterio que quotations.currency.
+    currency VARCHAR(3) NOT NULL CHECK (currency IN ('PEN', 'USD')),
+    -- Montos tal como figuran en el documento (NULL = no figura); no se
+    -- recalculan ni se validan entre sí.
+    subtotal_amount NUMERIC(18,6) CHECK (subtotal_amount IS NULL OR subtotal_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    total_amount NUMERIC(18,6) CHECK (total_amount IS NULL OR total_amount >= 0),
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+-- La misma factura (proveedor + serie + número) no se registra dos veces.
+CREATE UNIQUE INDEX idx_un_invoices_number_active ON invoices (project_id, supplier_id, series, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_invoices_file_id ON invoices (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_invoices_supplier_id ON invoices (supplier_id);
+CREATE INDEX idx_invoices_purchase_order_id ON invoices (purchase_order_id);
+
+CREATE TABLE invoice_items (
+    invoice_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    invoice_id BIGINT NOT NULL REFERENCES invoices(invoice_id) ON DELETE CASCADE,
+    -- Línea de la orden que se factura (NULL solo si la factura no tiene orden).
+    -- Puede haber varias facturas por línea de orden (facturación parcial):
+    -- por eso no hay UNIQUE. RESTRICT: una línea citada no se borra de motor.
+    purchase_order_item_id BIGINT REFERENCES purchase_order_items(purchase_order_item_id) ON DELETE RESTRICT,
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- SNAPSHOT: texto, cantidad y montos tal como dice la factura.
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_invoiced NUMERIC(18,6) NOT NULL CHECK (quantity_invoiced > 0),
+    unit_price NUMERIC(18,6) CHECK (unit_price IS NULL OR unit_price >= 0),
+    discount_amount NUMERIC(18,6) CHECK (discount_amount IS NULL OR discount_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    line_total NUMERIC(18,6) NOT NULL CHECK (line_total >= 0),
+    notes VARCHAR(500) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0)
+);
+CREATE INDEX idx_invoice_items_invoice_id ON invoice_items (invoice_id);
+CREATE INDEX idx_invoice_items_purchase_order_item_id ON invoice_items (purchase_order_item_id);
+CREATE INDEX idx_invoice_items_product_id ON invoice_items (product_id);
+
 -- Registro de movimiento INMUTABLE: no se edita, no se da de baja (no
 -- tiene deleted_at) — un error se corrige con un movimiento nuevo,
 -- nunca reescribiendo este. Los vínculos a documentos previos (orden de

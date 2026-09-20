@@ -13,6 +13,7 @@ import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertProductInProject } from "./product.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { containsPattern } from "../../utils/like-search.js";
 import {
     lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
 } from "./document-file.service.js";
@@ -54,8 +55,7 @@ export const listPurchaseRequisitionsService = async (
     const params: unknown[] = [projectId];
     let filter = "";
     if (search) {
-        // Los comodines de LIKE que escriba el usuario (% _ \) se escapan.
-        params.push(`%${search.replace(/[\\%_]/g, "\\$&")}%`);
+        params.push(containsPattern(search));
         filter = `AND (pr.number ILIKE $2 OR pr.requester ILIKE $2)`;
     }
     const { rows } = await pool.query<PurchaseRequisitionRow>(

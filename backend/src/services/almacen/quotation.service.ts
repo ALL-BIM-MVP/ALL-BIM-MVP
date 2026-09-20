@@ -11,6 +11,7 @@ import { PURCHASE_REQUISITION_ERRORS } from "../../models/errors/almacen/purchas
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertSupplierInProject } from "./supplier.service.js";
@@ -68,8 +69,7 @@ export const listQuotationsService = async (
     const params: unknown[] = [projectId, query.purchase_requisition_id ?? null, query.supplier_id ?? null];
     let filter = "";
     if (query.search) {
-        // Los comodines de LIKE que escriba el usuario (% _ \) se escapan.
-        params.push(`%${query.search.replace(/[\\%_]/g, "\\$&")}%`);
+        params.push(containsPattern(query.search));
         filter = `AND (q.number ILIKE $4 OR s.name ILIKE $4)`;
     }
     const { rows } = await pool.query<QuotationRow>(
