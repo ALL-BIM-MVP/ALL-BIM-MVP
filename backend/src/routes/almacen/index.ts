@@ -27,6 +27,8 @@ import { purchaseRequisitionRouter } from './purchase-requisition.routes.js';
 import { quotationRouter } from './quotation.routes.js';
 import { purchaseOrderRouter } from './purchase-order.routes.js';
 import { invoiceRouter } from './invoice.routes.js';
+import { traceabilityRouter } from './traceability.routes.js';
+import { productHistoryRouter } from './product-history.routes.js';
 
 export { warehouseStyleRouter, model3DAssetUploadRouter };
 
@@ -37,6 +39,8 @@ projectAlmacenRouter.use(purchaseRequisitionRouter);
 projectAlmacenRouter.use(quotationRouter);
 projectAlmacenRouter.use(purchaseOrderRouter);
 projectAlmacenRouter.use(invoiceRouter);
+projectAlmacenRouter.use(traceabilityRouter);
+projectAlmacenRouter.use(productHistoryRouter);
 projectAlmacenRouter.use(locationSearchRouter);
 projectAlmacenRouter.use(warehouseRouter);
 projectAlmacenRouter.use(rackRouter);

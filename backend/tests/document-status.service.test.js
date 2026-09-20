@@ -395,9 +395,10 @@ test("los números derivados coinciden con SQL directo sobre los datos (ordenado
 });
 
 test("el estado no toca los datos: pedir el detalle muchas veces no cambia stock ni filas", async () => {
-    const before = [(await q(`SELECT COUNT(*)::int AS n FROM goods_receipts`))[0].n, await sumSql(`SELECT SUM(quantity) AS t FROM bin_contents WHERE product_id = $1`, [productId])];
+    // Acotado a ESTE proyecto: los archivos de test corren en paralelo y comparten la base.
+    const before = [(await q(`SELECT COUNT(*)::int AS n FROM goods_receipts WHERE project_id = $1`, [projectId]))[0].n, await sumSql(`SELECT SUM(quantity) AS t FROM bin_contents WHERE product_id = $1`, [productId])];
     for (let i = 0; i < 3; i++) { await reqDetail(); await poDetail(setup.poA); await rcDetail(setup.rc1); await rcsvc.listGoodsReceiptsService(owner(), ctx(), {}); }
-    const after = [(await q(`SELECT COUNT(*)::int AS n FROM goods_receipts`))[0].n, await sumSql(`SELECT SUM(quantity) AS t FROM bin_contents WHERE product_id = $1`, [productId])];
+    const after = [(await q(`SELECT COUNT(*)::int AS n FROM goods_receipts WHERE project_id = $1`, [projectId]))[0].n, await sumSql(`SELECT SUM(quantity) AS t FROM bin_contents WHERE product_id = $1`, [productId])];
     assert.deepEqual(after, before);
 });
 

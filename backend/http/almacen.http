@@ -1092,6 +1092,55 @@ GET {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptWithOrderId}}
 Authorization: Bearer {{accessToken}}
 
 ### =====================================================================
+### 7C. TRAZABILIDAD Y HOJA DE VIDA (Fase 9) — solo lectura, permiso de ver
+### =====================================================================
+# No hay tabla "ingreso": el recorrido PARTE de cualquier documento y sigue los vínculos entre líneas.
+#  GET /traceability/:documentType/:documentId?direction=backward|forward|all
+#    documentType: requisition | quotation | purchase-order | invoice | goods-receipt
+#    backward = hacia atrás (ingreso → orden → cotización → requerimiento, más las facturas de las mismas líneas de orden)
+#    forward  = hacia adelante (requerimiento/orden → cotizaciones, órdenes, facturas, ingresos y casillas)
+#    all      = el conjunto conectado por elemento (por defecto)
+#  Devuelve `documents` (agrupados por tipo) y `threads`: cada hilo es UN ELEMENTO con todas sus líneas
+#  (requerimiento, ofertas, órdenes, facturas e ingresos con las casillas donde quedó lo recibido).
+#  Solo documentos vigentes. `truncated` avisa si se alcanzó el tope de líneas.
+#  GET /products/:productId/history?bin_id=&from=&to=  — la HOJA DE VIDA del producto del catálogo:
+#    stock actual por casilla, totales entrado/salido/neto y la línea de tiempo (pedido, ordenado, facturado,
+#    recibido, salido). El almacén no maneja lotes: no se atribuye qué unidades salieron de qué ingreso.
+
+### 7C.1 Hacia atrás desde un ingreso: de dónde viene
+GET {{baseUrl}}/projects/{{projectId}}/traceability/goods-receipt/{{receiptWithOrderId}}?direction=backward
+Authorization: Bearer {{accessToken}}
+
+### 7C.2 Hacia adelante desde un requerimiento: todo lo que generó, por elemento
+GET {{baseUrl}}/projects/{{projectId}}/traceability/requisition/{{requisitionId}}?direction=forward
+Authorization: Bearer {{accessToken}}
+
+### 7C.3 Conjunto conectado de una orden de compra
+GET {{baseUrl}}/projects/{{projectId}}/traceability/purchase-order/{{directOrderId}}
+Authorization: Bearer {{accessToken}}
+
+### 7C.4 Desde una factura (hacia atrás) y desde una cotización (hacia adelante)
+GET {{baseUrl}}/projects/{{projectId}}/traceability/invoice/{{invoiceId}}?direction=backward
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/traceability/quotation/{{quotationId}}?direction=forward
+Authorization: Bearer {{accessToken}}
+
+### 7C.5 Hoja de vida del producto (toda su historia)
+# @name productHistory
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history
+Authorization: Bearer {{accessToken}}
+
+### 7C.6 Hoja de vida filtrada a UNA casilla, y por rango de fechas (AAAA-MM-DD, inclusivas)
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?bin_id={{binId}}
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?from=2026-09-16&to=2026-09-30
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
 ### 8. VALES DE SALIDA (goods issues) — restan stock
 ### =====================================================================
 
@@ -1426,6 +1475,22 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 { "quantity_ordered": 999 }
+
+### 11.10x Trazabilidad con dirección inválida → 400 INVALID_QUERY_PARAMETER
+GET {{baseUrl}}/projects/{{projectId}}/traceability/goods-receipt/{{receiptId}}?direction=sideways
+Authorization: Bearer {{accessToken}}
+
+### 11.10y Trazabilidad con un tipo de documento que no existe → 400 INVALID_ID_PARAM
+GET {{baseUrl}}/projects/{{projectId}}/traceability/ingreso/{{receiptId}}
+Authorization: Bearer {{accessToken}}
+
+### 11.10z Trazabilidad de un documento inexistente → 404 TRACEABILITY_DOCUMENT_NOT_FOUND
+GET {{baseUrl}}/projects/{{projectId}}/traceability/requisition/999999999
+Authorization: Bearer {{accessToken}}
+
+### 11.10zz Hoja de vida con una fecha con formato inválido → 400 INVALID_QUERY_PARAMETER
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?from=01/09/2026
+Authorization: Bearer {{accessToken}}
 
 ### 11.11 Eliminar un proyecto con Almacén con contenido → 409 ALMACEN_CONTENT_NOT_EMPTY
 DELETE {{baseUrl}}/projects/{{projectId}}
