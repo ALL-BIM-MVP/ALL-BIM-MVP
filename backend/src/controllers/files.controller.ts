@@ -43,7 +43,7 @@ export const saveFileController = asyncHandler (
             throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
         }
 
-        const fileInfo : FileFull = await saveFileService(req.user, params.data, body.data.file_type, req.file);
+        const fileInfo : FileFull = await saveFileService(req.user, params.data, body.data.module_code, body.data.file_type, req.file);
 
         res.status(201).json(fileInfo);
 });

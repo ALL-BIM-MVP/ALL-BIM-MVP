@@ -5,10 +5,12 @@ import { AUTH_ERRORS } from "../../models/errors/auth.errors.js";
 import { COMMON_ERRORS } from "../../models/errors/common.errors.js";
 import { ProjectIdParamSchema } from "../../schemas/projects.schema.js";
 import {
-    CreateProductBodySchema, ListProductsQuerySchema, ProductIdParamSchema, UpdateProductBodySchema,
+    AssignProductModel3DBodySchema, CreateProductBodySchema, ListProductsQuerySchema, ProductIdParamSchema,
+    UpdateProductBodySchema,
 } from "../../schemas/almacen/product.schema.js";
 import {
-    createProductService, deleteProductService, getProductByIdService, listProductsService, updateProductService,
+    assignProductModel3DService, createProductService, deleteProductService, getProductByIdService,
+    listProductsService, updateProductService,
 } from "../../services/almacen/product.service.js";
 
 export const listProductsController = asyncHandler(async (req: Request, res: Response): Promise<void> => {
@@ -64,4 +66,21 @@ export const deleteProductController = asyncHandler(async (req: Request, res: Re
 
     await deleteProductService(req.user, params.data);
     res.status(204).send();
+});
+
+// PUT .../model-3d — asigna un model_3d_asset_id YA existente (mío,
+// del sistema, o ya en uso en este proyecto), o null para sacar el
+// modelo. Subir un archivo NUEVO es otro endpoint, sin proyecto (ver
+// model-3d-asset.routes.ts, POST /api/model-3d-assets) — acá nunca
+// llega un archivo.
+export const assignProductModel3DController = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    if (!req.user) throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+
+    const params = ProductIdParamSchema.safeParse(req.params);
+    if (!params.success) throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+
+    const body = AssignProductModel3DBodySchema.safeParse(req.body);
+    if (!body.success) throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
+
+    res.status(200).json(await assignProductModel3DService(req.user, params.data, body.data));
 });

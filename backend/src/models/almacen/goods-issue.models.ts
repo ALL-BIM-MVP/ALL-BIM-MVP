@@ -1,3 +1,6 @@
+import type { ProductSummary } from "./product.models.js";
+import type { ItemAdjustmentSummary } from "./inventory-adjustment.models.js";
+
 // goods_issues (Vale de Salida) — ver
 // docs/roadmap/almacen-bim-base-datos.md 4.4-4.5. Simétrico a
 // goods_receipts (resta en vez de sumar), registro de movimiento
@@ -5,6 +8,7 @@
 export interface GoodsIssueRow {
     goods_issue_id: number;
     project_id: number;
+    number: string;
     destination_sector: string;
     destination_level: string;
     destination_block: string;
@@ -13,9 +17,13 @@ export interface GoodsIssueRow {
     // REGISTRÓ acá).
     recipient_name: string;
     recipient_dni: string;
-    issue_date: Date;
+    // Fecha "solo día" como texto AAAA-MM-DD (no un Date con zona horaria).
+    issue_date: string;
     created_at: Date;
     created_by: number;
+    // Anulado (Fase 10): un ajuste devolvió todo el material al stock.
+    voided: boolean;
+    voided_at: Date | null;
 }
 
 export interface GoodsIssueItemLocationRow {
@@ -29,10 +37,12 @@ export interface GoodsIssueItemRow {
     goods_issue_item_id: number;
     goods_issue_id: number;
     product_id: number;
+    product: ProductSummary;
     total_quantity: number;
 }
 
-export interface GoodsIssueItemWithLocations extends GoodsIssueItemRow {
+// Ajustes de la línea (Fase 10): la cantidad registrada no cambia; lo efectivo es lo registrado más los ajustes.
+export interface GoodsIssueItemWithLocations extends GoodsIssueItemRow, ItemAdjustmentSummary {
     locations: GoodsIssueItemLocationRow[];
 }
 

@@ -1,4 +1,6 @@
 import z from 'zod';
+import { dateOnlySchema } from './goods-receipt.schema.js';
+import { documentNumberSchema } from './document-common.schema.js';
 
 export const GoodsIssueIdParamSchema = z.object({
     projectId: z.coerce.number(),
@@ -37,6 +39,7 @@ const recipientDniSchema = z.string().trim()
     .pipe(z.string().regex(DNI_REGEX, "El DNI debe tener exactamente 8 dígitos numéricos"));
 
 export const CreateGoodsIssueBodySchema = z.object({
+    number: documentNumberSchema,
     // Campos reales del Vale de Salida (diseño 4.4) — destino en obra +
     // quién retira, no un "motivo" genérico. Los .max() espejan los
     // VARCHAR(n) reales de schema.sql (ver mismo comentario en
@@ -46,7 +49,7 @@ export const CreateGoodsIssueBodySchema = z.object({
     destination_block: z.string().trim().min(1, "El bloque de destino no puede estar vacío").max(100),
     recipient_name: z.string().trim().min(1, "El nombre de quien retira no puede estar vacío").max(200),
     recipient_dni: recipientDniSchema,
-    issue_date: z.coerce.date(),
+    issue_date: dateOnlySchema,
     items: z.array(GoodsIssueItemInputSchema).min(1, "Un vale de salida necesita al menos un ítem."),
 });
 export type CreateGoodsIssueBody = z.infer<typeof CreateGoodsIssueBodySchema>;

@@ -1,12 +1,14 @@
 // Punto de entrada único del módulo Almacén BIM (Fase 2/3, ver
 // docs/roadmap/almacen-bim.md) — junta los routers sueltos de cada
 // entidad (un archivo por entidad, ver el resto de esta carpeta) en
-// los 2 puntos de montaje reales de index.ts: `warehouseStyleRouter`
-// (catálogo global, /api/warehouse-styles) y `projectAlmacenRouter`
-// (todo lo que cuelga de /api/projects). El nombre `projectAlmacenRouter`
-// mantiene "Almacen" (no "Warehouse") a propósito: agrupa TODO el
-// módulo, no solo la entidad warehouse — mismo criterio que
-// ALMACEN_MODULE_CODE en warehouse.service.ts.
+// los 3 puntos de montaje reales de index.ts: `warehouseStyleRouter`
+// (catálogo global, /api/warehouse-styles), `model3DAssetUploadRouter`
+// (biblioteca personal del usuario, /api/model-3d-assets — mismo
+// criterio que warehouseStyleRouter, tampoco cuelga de /api/projects)
+// y `projectAlmacenRouter` (todo lo que sí cuelga de /api/projects). El
+// nombre `projectAlmacenRouter` mantiene "Almacen" (no "Warehouse") a
+// propósito: agrupa TODO el módulo, no solo la entidad warehouse —
+// mismo criterio que ALMACEN_MODULE_CODE en warehouse.service.ts.
 import { Router } from 'express';
 import { warehouseStyleRouter } from './warehouse-style.routes.js';
 import { warehouseRouter } from './warehouse.routes.js';
@@ -15,19 +17,41 @@ import { binRouter } from './bin.routes.js';
 import { locationSearchRouter } from './location-search.routes.js';
 import { categoryRouter } from './category.routes.js';
 import { productRouter } from './product.routes.js';
+import { model3DAssetRouter, model3DAssetUploadRouter } from './model-3d-asset.routes.js';
 import { goodsReceiptRouter } from './goods-receipt.routes.js';
 import { goodsIssueRouter } from './goods-issue.routes.js';
 import { inventoryMovementRouter } from './inventory-movement.routes.js';
+import { almacenContentRouter } from './almacen-content.routes.js';
+import { supplierRouter } from './supplier.routes.js';
+import { purchaseRequisitionRouter } from './purchase-requisition.routes.js';
+import { quotationRouter } from './quotation.routes.js';
+import { purchaseOrderRouter } from './purchase-order.routes.js';
+import { invoiceRouter } from './invoice.routes.js';
+import { traceabilityRouter } from './traceability.routes.js';
+import { productHistoryRouter } from './product-history.routes.js';
+import { inventoryAdjustmentRouter } from './inventory-adjustment.routes.js';
+import { locationHistoryRouter } from './location-history.routes.js';
 
-export { warehouseStyleRouter };
+export { warehouseStyleRouter, model3DAssetUploadRouter };
 
 export const projectAlmacenRouter = Router();
+projectAlmacenRouter.use(almacenContentRouter);
+projectAlmacenRouter.use(supplierRouter);
+projectAlmacenRouter.use(purchaseRequisitionRouter);
+projectAlmacenRouter.use(quotationRouter);
+projectAlmacenRouter.use(purchaseOrderRouter);
+projectAlmacenRouter.use(invoiceRouter);
+projectAlmacenRouter.use(traceabilityRouter);
+projectAlmacenRouter.use(productHistoryRouter);
+projectAlmacenRouter.use(inventoryAdjustmentRouter);
+projectAlmacenRouter.use(locationHistoryRouter);
 projectAlmacenRouter.use(locationSearchRouter);
 projectAlmacenRouter.use(warehouseRouter);
 projectAlmacenRouter.use(rackRouter);
 projectAlmacenRouter.use(binRouter);
 projectAlmacenRouter.use(categoryRouter);
 projectAlmacenRouter.use(productRouter);
+projectAlmacenRouter.use(model3DAssetRouter);
 projectAlmacenRouter.use(goodsReceiptRouter);
 projectAlmacenRouter.use(goodsIssueRouter);
 projectAlmacenRouter.use(inventoryMovementRouter);

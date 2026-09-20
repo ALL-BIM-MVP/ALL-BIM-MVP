@@ -11,9 +11,7 @@
 // el backfill pendiente de proyectos que ya existían antes de este
 // cambio (todavía no escrito, ver docs/roadmap/almacen-bim.md).
 import pool from "../../db/database.js";
-import type { Pool, PoolClient } from "pg";
-import { AppError } from "../../models/errors/app-error.js";
-import { CATEGORY_ERRORS } from "../../models/errors/almacen/category.errors.js";
+import type { PoolClient } from "pg";
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
@@ -60,18 +58,4 @@ export const listCategoriesService = async (
         [projectId]
     );
     return rows;
-};
-
-// Usado por product.service.ts al crear/editar un producto — valida
-// que la categoría exista y sea de este proyecto antes de operar.
-export const getCategoryRowOrThrow = async (
-    client: Pool | PoolClient, projectId: number, categoryId: number
-): Promise<CategoryRow> => {
-    const { rows } = await client.query<CategoryRow>(
-        `SELECT * FROM categories WHERE category_id = $1 AND project_id = $2 AND deleted_at IS NULL`,
-        [categoryId, projectId]
-    );
-    const category = rows[0];
-    if (!category) throw new AppError(CATEGORY_ERRORS.CATEGORY_NOT_FOUND);
-    return category;
 };
