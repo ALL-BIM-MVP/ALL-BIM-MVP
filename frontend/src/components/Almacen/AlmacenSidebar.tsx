@@ -2,15 +2,18 @@ import React, { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   SquaresFour, Package, ArrowLineDown, ArrowLineUp, ShoppingCart,
-  FileText, ClipboardText, ChartBar, Cube, UsersThree, Gear,
+  FileText, ClipboardText, ChartBar, Cube, UsersThree, Gear, Buildings, MagnifyingGlass,
 } from '@phosphor-icons/react';
 import type { AlmacenSection } from '../tabs/AlmacenTab';
 
 const ITEMS: { id: AlmacenSection; label: string; icon: React.ElementType }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: SquaresFour },
+  { id: 'almacenes', label: 'Almacenes', icon: Buildings },
   { id: 'inventario', label: 'Inventario', icon: Package },
   { id: 'ingresos', label: 'Ingresos', icon: ArrowLineDown },
   { id: 'salidas', label: 'Salidas', icon: ArrowLineUp },
+  { id: 'kardex', label: 'Kardex', icon: FileText },
+  { id: 'buscar-ubicacion', label: 'Buscar ubicación', icon: MagnifyingGlass },
   { id: 'ordenes-compra', label: 'Órdenes de compra', icon: ShoppingCart },
   { id: 'guias-remision', label: 'Guías de remisión', icon: FileText },
   { id: 'solicitudes', label: 'Solicitudes', icon: ClipboardText },

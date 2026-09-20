@@ -1,10 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { ScanLine, Upload, Plus, Trash2, MapPin, X } from 'lucide-react';
-import MiniIfcViewer from '../../components/MiniIfcViewer';
+import React, { useEffect, useState } from 'react';
+import { Plus, Trash2, MapPin, X } from 'lucide-react';
 import CiudadModal from '../../components/CiudadModal';
 import { productService } from '../../../../services/almacen/product.service';
-import { goodsReceiptService } from '../../../../services/almacen/goodsReceipt.service';
-import { GoodsReceipt, Product } from '../../../../types/almacen.types';
+import { goodsIssueService } from '../../../../services/almacen/goodsIssue.service';
+import { GoodsIssue, Product } from '../../../../types/almacen.types';
 
 interface ItemLocation { binId: number; label: string; quantity: string; }
 interface ItemRow { productId: number | ''; cantidad: string; locations: ItemLocation[]; }
@@ -25,24 +24,23 @@ const Field: React.FC<{
   </label>
 );
 
-interface NuevoIngresoProps {
+interface NuevoValeSalidaProps {
   projectId: number;
-  onCreated: (receipt: GoodsReceipt) => void;
+  onCreated: (issue: GoodsIssue) => void;
   onCancel: () => void;
 }
 
-const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCancel }) => {
+const NuevoValeSalida: React.FC<NuevoValeSalidaProps> = ({ projectId, onCreated, onCancel }) => {
   const [products, setProducts] = useState<Product[]>([]);
-  const [supplierRuc, setSupplierRuc] = useState('');
-  const [supplierName, setSupplierName] = useState('');
-  const [deliveryNote, setDeliveryNote] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [sector, setSector] = useState('');
+  const [nivel, setNivel] = useState('');
+  const [bloque, setBloque] = useState('');
+  const [issueDate, setIssueDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientDni, setRecipientDni] = useState('');
   const [items, setItems] = useState<ItemRow[]>([emptyItem()]);
   const [ciudadItemIndex, setCiudadItemIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [ifcFile, setIfcFile] = useState<File | null>(null);
 
   // Siempre trae el catálogo fresco al entrar — nunca cachea entre visitas.
   useEffect(() => {
@@ -70,13 +68,10 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
   const getProduct = (id: number | '') => products.find((p) => p.product_id === id);
 
   const submit = async () => {
-    const ruc = supplierRuc.replace(/[\s-]/g, '');
-    if (!/^\d{11}$/.test(ruc)) {
-      window.alert('El RUC debe tener exactamente 11 dígitos (formato SUNAT).');
-      return;
-    }
-    if (!supplierName.trim()) { window.alert('Falta el nombre del proveedor.'); return; }
-    if (!deliveryNote.trim()) { window.alert('Falta el número de guía de remisión.'); return; }
+    const dni = recipientDni.replace(/[\s-]/g, '');
+    if (!/^\d{8}$/.test(dni)) { window.alert('El DNI debe tener exactamente 8 dígitos.'); return; }
+    if (!recipientName.trim()) { window.alert('Falta el nombre de quien retira.'); return; }
+    if (!sector.trim() || !nivel.trim() || !bloque.trim()) { window.alert('Completá sector, nivel y bloque del destino.'); return; }
 
     const payloadItems = [];
     for (const item of items) {
@@ -98,16 +93,19 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
 
     setSaving(true);
     try {
-      const receipt = await goodsReceiptService.createGoodsReceipt(projectId, {
-        supplier_ruc: ruc,
-        supplier_name: supplierName.trim(),
-        delivery_note_number: deliveryNote.trim(),
-        purchase_date: purchaseDate,
+      const issue = await goodsIssueService.createGoodsIssue(projectId, {
+        destination_sector: sector.trim(),
+        destination_level: nivel.trim(),
+        destination_block: bloque.trim(),
+        recipient_name: recipientName.trim(),
+        recipient_dni: dni,
+        issue_date: issueDate,
         items: payloadItems,
       });
-      onCreated(receipt);
+      onCreated(issue);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo registrar el ingreso.');
+      // INSUFFICIENT_STOCK entre otros errores del backend — mensaje ya legible, se muestra tal cual.
+      window.alert(err instanceof Error ? err.message : 'No se pudo registrar el vale de salida.');
     } finally {
       setSaving(false);
     }
@@ -115,20 +113,32 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
 
   return (
     <div className="h-full overflow-y-auto p-6 @container">
-      <button onClick={onCancel} className="text-sm text-[#0056b3] font-medium mb-3">← Volver a Ingresos</button>
-      <h1 className="text-2xl font-bold text-gray-800 mb-4">Nuevo ingreso</h1>
+      <button onClick={onCancel} className="text-sm text-[#0056b3] font-medium mb-3">← Volver a Vales de salida</button>
+      <h1 className="text-2xl font-bold text-gray-800 mb-4">Nuevo vale de salida</h1>
 
-      <div className="flex flex-col @xl:flex-row gap-4 items-stretch">
-        <div className="w-full @xl:flex-1 @xl:max-w-3xl bg-white border border-gray-200 rounded-xl shadow-sm p-5">
-          <p className="text-sm font-semibold text-gray-700 mb-3">Datos de la compra</p>
-          <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3 mb-4">
-            <Field label="RUC proveedor" value={supplierRuc} onChange={setSupplierRuc} />
-            <Field label="Nombre proveedor" value={supplierName} onChange={setSupplierName} />
-            <Field label="N° guía de remisión" value={deliveryNote} onChange={setDeliveryNote} />
-            <Field label="Fecha de compra" type="date" value={purchaseDate} onChange={setPurchaseDate} />
+      <div className="max-w-5xl">
+        <div className="grid grid-cols-1 @lg:grid-cols-2 gap-4 mb-4">
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+            <p className="text-sm font-semibold text-gray-700 mb-3">Destino en obra</p>
+            <div className="grid grid-cols-2 @sm:grid-cols-4 @lg:grid-cols-2 gap-3">
+              <Field label="Sector" value={sector} onChange={setSector} />
+              <Field label="Nivel" value={nivel} onChange={setNivel} />
+              <Field label="Bloque" value={bloque} onChange={setBloque} />
+              <Field label="Fecha de salida" type="date" value={issueDate} onChange={setIssueDate} />
+            </div>
           </div>
 
-          <p className="text-sm font-semibold text-gray-700 mt-5 mb-3">Ítems que llegan</p>
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+            <p className="text-sm font-semibold text-gray-700 mb-3">Quién retira (texto libre, no es un usuario del sistema)</p>
+            <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3">
+              <Field label="Nombre" value={recipientName} onChange={setRecipientName} />
+              <Field label="DNI" value={recipientDni} onChange={setRecipientDni} />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+          <p className="text-sm font-semibold text-gray-700 mb-3">Ítems que salen</p>
           <div className="space-y-4">
             {items.map((item, i) => {
               const product = getProduct(item.productId);
@@ -195,42 +205,16 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
           <button onClick={addItem} className="flex items-center gap-1.5 text-sm text-[#0056b3] font-medium mt-3">
             <Plus size={15} /> Agregar ítem
           </button>
-
-          <div className="flex justify-end">
-            <button
-              onClick={submit}
-              disabled={saving}
-              className="mt-6 px-8 bg-[#0056b3] text-white rounded-lg py-2.5 font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Registrando...' : 'Confirmar ingreso'}
-            </button>
-          </div>
         </div>
 
-        <div className="w-full @xl:w-96 flex-shrink-0 flex flex-col bg-white border border-gray-200 rounded-xl shadow-sm p-5">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="flex items-center gap-1.5 bg-gray-50 rounded-lg px-2.5 py-1 flex-1">
-              <ScanLine size={13} className="text-gray-400" />
-              <input placeholder="Escanear código" className="bg-transparent text-xs outline-none flex-1 placeholder-gray-400" />
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".ifc"
-              className="hidden"
-              onChange={(e) => setIfcFile(e.target.files?.[0] ?? null)}
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1 bg-[#0056b3] text-white rounded-lg px-2.5 py-1 text-xs font-medium hover:bg-[#004494] transition-colors flex-shrink-0"
-            >
-              <Upload size={12} /> Cargar IFC
-            </button>
-          </div>
-
-          <div className="flex-1 min-h-64 mb-4">
-            <MiniIfcViewer file={ifcFile} />
-          </div>
+        <div className="flex justify-end">
+          <button
+            onClick={submit}
+            disabled={saving}
+            className="mt-6 px-8 bg-[#0056b3] text-white rounded-lg py-2.5 font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50"
+          >
+            {saving ? 'Registrando...' : 'Confirmar salida'}
+          </button>
         </div>
       </div>
 
@@ -240,7 +224,6 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
           onClose={() => setCiudadItemIndex(null)}
           pickMode={{
             itemLabel: getProduct(items[ciudadItemIndex]?.productId)?.name || 'este ítem',
-            itemModelPath: getProduct(items[ciudadItemIndex]?.productId)?.model_3d_path,
             onConfirm: (bin) => addLocation(ciudadItemIndex, { binId: bin.binId, label: bin.label }),
           }}
         />
@@ -249,4 +232,4 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
   );
 };
 
-export default NuevoIngreso;
+export default NuevoValeSalida;

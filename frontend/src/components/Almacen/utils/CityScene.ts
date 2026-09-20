@@ -3,25 +3,38 @@
 // procedurales. Controlador propio y desacoplado del visor IFC (ese está
 // armado para otra cosa: BVH, raycast de medición, cámara pesada).
 import * as THREE from 'three';
+import { WarehouseStyle } from '../../../types/almacen.types';
 
-export type HouseType = 'chico' | 'mediano' | 'grande';
+// El estilo real (GET /api/warehouse-styles) solo trae colores + max_level:
+// el tamaño lo elige quien coloca el almacén, entre estas 3 huellas fijas —
+// "bahias" es solo un número orientativo para el panel, no viene del backend
+// (el grid interior real sigue siendo DEFAULT_GRID hasta que eso se cablee).
+export type WarehouseSizeKey = 'chico' | 'mediano' | 'grande';
 
-export const HOUSE_TYPE_CONFIG: Record<HouseType, { width: number; depth: number; nombre: string; bahias: number }> = {
-  chico: { width: 6.6, depth: 5.0, nombre: 'Almacén Chico', bahias: 4 },
-  mediano: { width: 9.5, depth: 5.0, nombre: 'Almacén Mediano', bahias: 6 },
-  grande: { width: 9.5, depth: 7.1, nombre: 'Almacén Grande', bahias: 9 },
+export const WAREHOUSE_SIZES: Record<WarehouseSizeKey, { label: string; width: number; depth: number; bahias: number }> = {
+  chico: { label: 'Chico', width: 6.5, depth: 4.0, bahias: 4 },
+  mediano: { label: 'Mediano', width: 9.5, depth: 5.0, bahias: 6 },
+  grande: { label: 'Grande', width: 13.5, depth: 6.5, bahias: 9 },
 };
+
+export const DEFAULT_WAREHOUSE_SIZE: WarehouseSizeKey = 'mediano';
+
+export interface Footprint {
+  width: number;
+  depth: number;
+}
 
 export interface CitySceneCallbacks {
   onSelectHouse?: (id: string | null) => void;
-  onPlaced?: (id: string, type: HouseType) => void;
+  onPlaced?: (id: string, styleId: number) => void;
   onMoved?: (id: string) => void;
   onFrame?: () => void;
 }
 
 const WALL_HEIGHT = 2.8;
-const ROOF_HEIGHT = 1.7;
-const ROOF_OVERHANG = 0.45;
+const ROOF_THICKNESS = 0.22;
+const PARAPET_HEIGHT = 0.35;
+const ROOF_OVERHANG = 0.35;
 
 interface FlyAnim {
   fromTarget: THREE.Vector3;
@@ -65,6 +78,31 @@ export class SimpleOrbitCamera {
   zoom(deltaY: number) {
     this.anim = null;
     this.spherical.radius = Math.min(this.maxRadius, Math.max(this.minRadius, this.spherical.radius * (1 + deltaY * 0.001)));
+    this.sync();
+  }
+
+  /** Igual que zoom(), pero corriendo el punto de mira hacia donde apunta el cursor (ndc) — mismo
+   * mecanismo que el visor de metrados (ThreeSceneController.zoom): un plano invisible e infinito que
+   * pasa por el target, perpendicular a hacia dónde mira la cámara — así SIEMPRE hay un punto real
+   * bajo el cursor, sin importar si ahí hay geometría o no. El corrimiento es por fracción
+   * (1 - radioNuevo/radioViejo, la misma fracción en que cambió el radio), no una corrección exacta —
+   * eso es lo que lo hace reversible: acercar y alejar la misma cantidad vuelve al mismo lugar. */
+  zoomToward(deltaY: number, ndc: THREE.Vector2) {
+    this.anim = null;
+    const oldRadius = this.spherical.radius;
+    const newRadius = Math.min(this.maxRadius, Math.max(this.minRadius, oldRadius * (1 + deltaY * 0.001)));
+
+    const viewDirection = new THREE.Vector3().subVectors(this.target, this.camera.position).normalize();
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, this.camera);
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDirection, this.target);
+    const hit = new THREE.Vector3();
+    if (raycaster.ray.intersectPlane(plane, hit)) {
+      const shift = 1 - newRadius / oldRadius;
+      this.target.lerp(hit, shift);
+    }
+
+    this.spherical.radius = newRadius;
     this.sync();
   }
 
@@ -116,53 +154,48 @@ export class SimpleOrbitCamera {
   }
 }
 
-/**
- * Techo a cuatro aguas real (con línea de cumbrera), no un cono estirado:
- * escalar un cono de forma no uniforme lo deforma en un rombo torcido porque
- * el escalado se aplica en espacio local ANTES de la rotación de 45°. Acá se
- * arman los triángulos a mano, sin compartir vértices entre caras, para que
- * computeVertexNormals() dé una normal plana por cara (facetas nítidas, sin
- * degradado) en vez de una normal interpolada.
- */
-function buildHipRoofGeometry(width: number, depth: number, height: number, overhang: number): THREE.BufferGeometry {
-  const halfW = width / 2 + overhang;
-  const halfD = depth / 2 + overhang;
-  // Cumbrera a 45°: si el ancho no alcanza a "ganarle" al fondo, se acorta a
-  // un punto y el techo degenera en una pirámide simple (sigue siendo válido).
-  const ridgeHalf = Math.max(0, halfW - halfD);
+let shutterTextureCache: THREE.CanvasTexture | null = null;
 
-  const A = [-halfW, 0, -halfD]; // atrás-izquierda
-  const B = [halfW, 0, -halfD]; // atrás-derecha
-  const C = [halfW, 0, halfD]; // frente-derecha
-  const D = [-halfW, 0, halfD]; // frente-izquierda
-  const R1 = [-ridgeHalf, height, 0]; // cumbrera izquierda
-  const R2 = [ridgeHalf, height, 0]; // cumbrera derecha
+/** Persiana metálica corrugada horizontal (portón de carga), dibujada en canvas — franjas con
+ * degradado para simular el relieve de cada lámina, más un marco lateral oscuro. */
+function getShutterTexture(): THREE.CanvasTexture {
+  if (shutterTextureCache) return shutterTextureCache;
+  const w = 256;
+  const h = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#8b9096';
+  ctx.fillRect(0, 0, w, h);
 
-  // Cada cara en orden que deja la normal (regla de la mano derecha) apuntando
-  // hacia afuera: 2 faldones largos (frente/atrás, cada uno en 2 triángulos)
-  // + 2 faldones triangulares en las puntas (izquierda/derecha).
-  const triangles = [
-    D, C, R2,
-    D, R2, R1,
-    B, A, R1,
-    B, R1, R2,
-    A, D, R1,
-    C, B, R2,
-  ];
+  const slats = 14;
+  const slatH = h / slats;
+  for (let i = 0; i < slats; i++) {
+    const y = i * slatH;
+    const grad = ctx.createLinearGradient(0, y, 0, y + slatH);
+    grad.addColorStop(0, '#a3a8ad');
+    grad.addColorStop(0.5, '#787d82');
+    grad.addColorStop(1, '#5f6367');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y, w, slatH - 1);
+  }
 
-  const positions = new Float32Array(triangles.flat());
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.computeVertexNormals();
-  return geometry;
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  shutterTextureCache = texture;
+  return texture;
 }
 
-function buildHouse(type: HouseType): { group: THREE.Group; labelAnchor: THREE.Object3D } {
-  const { width, depth } = HOUSE_TYPE_CONFIG[type];
+/** Nave industrial de techo plano: losa con parapeto (en vez de cumbrera a cuatro aguas), portón
+ * corredizo de carga y una banda continua de ventanas altas cerca del techo — nada de puerta y
+ * ventanitas cuadradas tipo vivienda. */
+function buildHouse(style: WarehouseStyle, footprint: Footprint): { group: THREE.Group; labelAnchor: THREE.Object3D } {
+  const { width, depth } = footprint;
   const group = new THREE.Group();
   group.name = 'house';
 
-  // Zócalo / base sobreelevada, le da apoyo real a la casa en vez de flotar sobre el piso.
+  // Zócalo / base sobreelevada, le da apoyo real al galpón en vez de flotar sobre el piso.
   const plinth = new THREE.Mesh(
     new THREE.BoxGeometry(width + 0.3, 0.16, depth + 0.3),
     new THREE.MeshStandardMaterial({ color: '#c7c0ae', roughness: 1 })
@@ -175,7 +208,7 @@ function buildHouse(type: HouseType): { group: THREE.Group; labelAnchor: THREE.O
   // Paredes.
   const walls = new THREE.Mesh(
     new THREE.BoxGeometry(width, WALL_HEIGHT, depth),
-    new THREE.MeshStandardMaterial({ color: '#ecdfc4', roughness: 0.95 })
+    new THREE.MeshStandardMaterial({ color: style.wall_color, roughness: 0.95 })
   );
   walls.position.y = 0.16 + WALL_HEIGHT / 2;
   walls.castShadow = true;
@@ -184,40 +217,78 @@ function buildHouse(type: HouseType): { group: THREE.Group; labelAnchor: THREE.O
 
   const wallTop = 0.16 + WALL_HEIGHT;
 
-  // Techo a cuatro aguas con cumbrera real (ver buildHipRoofGeometry).
-  const roof = new THREE.Mesh(
-    buildHipRoofGeometry(width, depth, ROOF_HEIGHT, ROOF_OVERHANG),
-    new THREE.MeshStandardMaterial({ color: '#b3402c', roughness: 0.6, side: THREE.DoubleSide })
+  // Losa de techo plana, con alero — sin ninguna cumbrera ni inclinación.
+  const roofSlab = new THREE.Mesh(
+    new THREE.BoxGeometry(width + ROOF_OVERHANG * 2, ROOF_THICKNESS, depth + ROOF_OVERHANG * 2),
+    new THREE.MeshStandardMaterial({ color: style.roof_color, roughness: 0.75 })
   );
-  roof.position.y = wallTop;
-  roof.castShadow = true;
-  group.add(roof);
+  roofSlab.position.y = wallTop + ROOF_THICKNESS / 2;
+  roofSlab.castShadow = true;
+  roofSlab.receiveShadow = true;
+  group.add(roofSlab);
 
-  // Puerta.
-  const door = new THREE.Mesh(
-    new THREE.BoxGeometry(0.95, 1.9, 0.08),
-    new THREE.MeshStandardMaterial({ color: '#5c4128', roughness: 0.8 })
-  );
-  door.position.set(0, 0.16 + 0.95, depth / 2 + 0.04);
-  door.castShadow = true;
-  group.add(door);
-
-  // Ventanas: marco + vidrio, dos al frente.
-  const windowFrameMat = new THREE.MeshStandardMaterial({ color: '#5c4128', roughness: 0.8 });
-  const windowGlassMat = new THREE.MeshStandardMaterial({ color: '#a9d3e0', roughness: 0.2, metalness: 0.1 });
-  [-1, 1].forEach((side) => {
-    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.85, 0.08), windowFrameMat);
-    frame.position.set(side * (width / 2 - 1.1), 0.16 + 1.7, depth / 2 + 0.04);
-    frame.castShadow = true;
-    group.add(frame);
-    const glass = new THREE.Mesh(new THREE.PlaneGeometry(0.65, 0.65), windowGlassMat);
-    glass.position.set(side * (width / 2 - 1.1), 0.16 + 1.7, depth / 2 + 0.085);
-    group.add(glass);
+  // Parapeto: cajón bajo alrededor del borde de la losa, típico remate de depósito industrial.
+  const parapetMat = new THREE.MeshStandardMaterial({ color: style.roof_color, roughness: 0.8 });
+  const parapetY = wallTop + ROOF_THICKNESS + PARAPET_HEIGHT / 2;
+  const parapetThickness = 0.1;
+  const outerW = width + ROOF_OVERHANG * 2;
+  const outerD = depth + ROOF_OVERHANG * 2;
+  [
+    { w: outerW, d: parapetThickness, x: 0, z: outerD / 2 - parapetThickness / 2 },
+    { w: outerW, d: parapetThickness, x: 0, z: -(outerD / 2 - parapetThickness / 2) },
+    { w: parapetThickness, d: outerD - parapetThickness * 2, x: outerW / 2 - parapetThickness / 2, z: 0 },
+    { w: parapetThickness, d: outerD - parapetThickness * 2, x: -(outerW / 2 - parapetThickness / 2), z: 0 },
+  ].forEach(({ w, d, x, z }) => {
+    const segment = new THREE.Mesh(new THREE.BoxGeometry(w, PARAPET_HEIGHT, d), parapetMat);
+    segment.position.set(x, parapetY, z);
+    segment.castShadow = true;
+    group.add(segment);
   });
 
+  // Portón corredizo de carga: ancho, centrado, con textura de persiana metálica.
+  const gateWidth = Math.min(width * 0.4, 3.2);
+  const gateHeight = WALL_HEIGHT * 0.82;
+  const gate = new THREE.Mesh(
+    new THREE.BoxGeometry(gateWidth, gateHeight, 0.1),
+    new THREE.MeshStandardMaterial({ map: getShutterTexture(), roughness: 0.6, metalness: 0.2 })
+  );
+  gate.position.set(0, 0.16 + gateHeight / 2, depth / 2 + 0.05);
+  gate.castShadow = true;
+  group.add(gate);
+  const gateFrameMat = new THREE.MeshStandardMaterial({ color: style.wall_frame_color, roughness: 0.7 });
+  const gateFrame = new THREE.Mesh(new THREE.BoxGeometry(gateWidth + 0.16, gateHeight + 0.16, 0.06), gateFrameMat);
+  gateFrame.position.set(0, 0.16 + gateHeight / 2, depth / 2 + 0.015);
+  group.add(gateFrame);
+
+  // Banda continua de ventanas altas cerca del techo (iluminación tipo nave, no vivienda).
+  const bandW = width - 2.2;
+  const bandH = 0.55;
+  const bandY = wallTop - 0.55;
+  const glass = new THREE.Mesh(
+    new THREE.PlaneGeometry(bandW, bandH),
+    new THREE.MeshStandardMaterial({ color: '#a9d3e0', roughness: 0.2, metalness: 0.1 })
+  );
+  glass.position.set(0, bandY, depth / 2 + 0.045);
+  group.add(glass);
+  const bandFrame = new THREE.Mesh(new THREE.BoxGeometry(bandW + 0.1, bandH + 0.1, 0.05), gateFrameMat);
+  bandFrame.position.set(0, bandY, depth / 2 + 0.03);
+  group.add(bandFrame);
+  const mullions = Math.max(2, Math.round(bandW / 0.9));
+  for (let i = 1; i < mullions; i++) {
+    const x = -bandW / 2 + (bandW / mullions) * i;
+    const mullion = new THREE.Mesh(new THREE.BoxGeometry(0.05, bandH, 0.06), gateFrameMat);
+    mullion.position.set(x, bandY, depth / 2 + 0.05);
+    group.add(mullion);
+  }
+
   const labelAnchor = new THREE.Object3D();
-  labelAnchor.position.set(0, wallTop + ROOF_HEIGHT + 0.35, 0);
+  labelAnchor.position.set(0, parapetY + PARAPET_HEIGHT / 2 + 0.3, 0);
   group.add(labelAnchor);
+
+  // Escala puramente visual: el almacén real sigue midiendo lo que dice su footprint (así se
+  // muestra en el modal y así lo usa warehouseMapping para calcular colisiones); esto solo lo hace
+  // ver más grande/imponente en la escena "Ciudad", nada más.
+  group.scale.setScalar(1.4);
 
   return { group, labelAnchor };
 }
@@ -241,40 +312,214 @@ function makeGhost(group: THREE.Group) {
   });
 }
 
+let grassTextureCache: THREE.CanvasTexture | null = null;
+
+/** Terreno neutro tipo descampado/tierra compactada (gris-beige, sin tinte verde) con parches de
+ * tono + ruido fino, en vez del pasto verde de antes. */
+function getGrassTexture(): THREE.CanvasTexture {
+  if (grassTextureCache) return grassTextureCache;
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#aca89b';
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 40; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = size * (0.05 + Math.random() * 0.12);
+    const lighter = Math.random() < 0.5;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+    grad.addColorStop(0, lighter ? 'rgba(188,184,172,0.3)' : 'rgba(148,144,130,0.25)');
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (let i = 0; i < 3000; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const shade = 100 + Math.random() * 60;
+    ctx.fillStyle = `rgba(${shade * 0.85},${shade * 0.83},${shade * 0.75},${0.12 + Math.random() * 0.15})`;
+    ctx.fillRect(x, y, 1.5, 1.5);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  grassTextureCache = texture;
+  return texture;
+}
+
+let asphaltTextureCache: THREE.CanvasTexture | null = null;
+
+/** Asfalto con grano + línea central discontinua, en vez del rectángulo liso de antes. La línea queda
+ * pintada vertical (para la calle N-S); la calle E-O usa la misma textura rotada 90°. */
+function getAsphaltTexture(): THREE.CanvasTexture {
+  if (asphaltTextureCache) return asphaltTextureCache;
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#3d4045';
+  ctx.fillRect(0, 0, size, size);
+
+  for (let i = 0; i < 4000; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const shade = 40 + Math.random() * 40;
+    ctx.fillStyle = `rgba(${shade},${shade},${shade + 3},${0.2 + Math.random() * 0.3})`;
+    ctx.fillRect(x, y, 1 + Math.random(), 1 + Math.random());
+  }
+
+  ctx.fillStyle = 'rgba(214,190,90,0.85)';
+  const dashLen = size * 0.14;
+  const gapLen = size * 0.1;
+  for (let y = 0; y < size; y += dashLen + gapLen) {
+    ctx.fillRect(size / 2 - 4, y, 8, dashLen);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  asphaltTextureCache = texture;
+  return texture;
+}
+
+let skyTextureCache: THREE.CanvasTexture | null = null;
+
+/** Degradé simple (celeste arriba, se aclara hacia el horizonte) en vez del color plano de fondo. */
+function getSkyTexture(): THREE.CanvasTexture {
+  if (skyTextureCache) return skyTextureCache;
+  const canvas = document.createElement('canvas');
+  canvas.width = 8;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  grad.addColorStop(0, '#a9c9e0');
+  grad.addColorStop(0.55, '#cfe1e6');
+  grad.addColorStop(1, '#eef3ee');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  skyTextureCache = texture;
+  return texture;
+}
+
+/** Veredas de concreto + cordón a ambos lados de las 2 calles centrales, en 2 tramos cada una para
+ * no invadir la calle transversal en el cruce (ahí las 4 esquinas quedan sin vereda, como una
+ * intersección real). Devuelve roadHalf para que buildStreetFurniture ubique postes y árboles
+ * justo en el borde exterior de la vereda. */
+function buildSidewalks(scene: THREE.Scene, size: number, roadWidth: number, sidewalkWidth: number): { roadHalf: number } {
+  const roadHalf = roadWidth / 2;
+  const outerHalf = size / 2;
+  const segLen = outerHalf - roadHalf;
+  const segCenter = roadHalf + segLen / 2;
+
+  const sidewalkMat = new THREE.MeshStandardMaterial({ color: '#c7c9c6', roughness: 0.95 });
+  const curbMat = new THREE.MeshStandardMaterial({ color: '#9a9c99', roughness: 0.9 });
+
+  const group = new THREE.Group();
+  group.name = 'sidewalks';
+
+  // Veredas paralelas a la calle N-S (una franja a cada lado en X, cortada arriba/abajo del cruce).
+  [-1, 1].forEach((sideX) => {
+    [-1, 1].forEach((sideZ) => {
+      const x = sideX * (roadHalf + sidewalkWidth / 2);
+      const z = sideZ * segCenter;
+      const walk = new THREE.Mesh(new THREE.PlaneGeometry(sidewalkWidth, segLen), sidewalkMat);
+      walk.rotation.x = -Math.PI / 2;
+      walk.position.set(x, 0.003, z);
+      walk.receiveShadow = true;
+      group.add(walk);
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, segLen), curbMat);
+      curb.position.set(sideX * roadHalf, 0.04, z);
+      group.add(curb);
+    });
+  });
+
+  // Veredas paralelas a la calle E-O (una franja a cada lado en Z, cortada a los costados del cruce).
+  [-1, 1].forEach((sideZ) => {
+    [-1, 1].forEach((sideX) => {
+      const z = sideZ * (roadHalf + sidewalkWidth / 2);
+      const x = sideX * segCenter;
+      const walk = new THREE.Mesh(new THREE.PlaneGeometry(segLen, sidewalkWidth), sidewalkMat);
+      walk.rotation.x = -Math.PI / 2;
+      walk.position.set(x, 0.003, z);
+      walk.receiveShadow = true;
+      group.add(walk);
+      const curb = new THREE.Mesh(new THREE.BoxGeometry(segLen, 0.08, 0.08), curbMat);
+      curb.position.set(x, 0.04, sideZ * roadHalf);
+      group.add(curb);
+    });
+  });
+
+  scene.add(group);
+  return { roadHalf };
+}
+
 function buildGround(scene: THREE.Scene) {
-  const size = 60;
+  const size = 100;
+  const roadWidth = 4;
+
+  const grass = getGrassTexture().clone();
+  grass.needsUpdate = true;
+  grass.repeat.set(size / 3, size / 3);
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(size, size),
-    new THREE.MeshStandardMaterial({ color: '#f4f6f4', roughness: 1 })
+    new THREE.MeshStandardMaterial({ map: grass, roughness: 1 })
   );
   ground.name = 'ground';
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   scene.add(ground);
 
-  const grid = new THREE.GridHelper(size, size / 1.2, '#d7e0d7', '#e6ece6');
+  const grid = new THREE.GridHelper(size, size / 1.2, '#8c8878', '#8c8878');
   (grid.material as THREE.Material).transparent = true;
-  (grid.material as THREE.Material).opacity = 0.6;
+  (grid.material as THREE.Material).opacity = 0.12;
   grid.position.y = 0.001;
   scene.add(grid);
 
-  const roadMat = new THREE.MeshStandardMaterial({ color: '#cddccb', roughness: 1 });
-  const roadH = new THREE.Mesh(new THREE.PlaneGeometry(size, 4), roadMat);
+  const asphaltV = getAsphaltTexture().clone();
+  asphaltV.needsUpdate = true;
+  asphaltV.repeat.set(roadWidth / 3, size / 3);
+  const roadV = new THREE.Mesh(
+    new THREE.PlaneGeometry(roadWidth, size),
+    new THREE.MeshStandardMaterial({ map: asphaltV, roughness: 0.9 })
+  );
+  roadV.rotation.x = -Math.PI / 2;
+  roadV.position.y = 0.002;
+  roadV.receiveShadow = true;
+  scene.add(roadV);
+
+  const asphaltH = getAsphaltTexture().clone();
+  asphaltH.needsUpdate = true;
+  asphaltH.center.set(0.5, 0.5);
+  asphaltH.rotation = Math.PI / 2;
+  asphaltH.repeat.set(size / 3, roadWidth / 3);
+  const roadH = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, roadWidth),
+    new THREE.MeshStandardMaterial({ map: asphaltH, roughness: 0.9 })
+  );
   roadH.rotation.x = -Math.PI / 2;
   roadH.position.y = 0.002;
   roadH.receiveShadow = true;
   scene.add(roadH);
 
-  const roadV = new THREE.Mesh(new THREE.PlaneGeometry(4, size), roadMat);
-  roadV.rotation.x = -Math.PI / 2;
-  roadV.position.y = 0.002;
-  roadV.receiveShadow = true;
-  scene.add(roadV);
+  buildSidewalks(scene, size, roadWidth, 1.6);
 }
 
 interface HouseEntry {
   id: string;
-  type: HouseType;
+  styleId: number;
   group: THREE.Group;
   labelAnchor: THREE.Object3D;
 }
@@ -293,7 +538,9 @@ export class CityScene {
   private callbacks: CitySceneCallbacks;
 
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  private placingType: HouseType | null = null;
+  private styles: WarehouseStyle[];
+  private placingStyleId: number | null = null;
+  private placingFootprint: Footprint | null = null;
   private ghost: THREE.Group | null = null;
   private lastPointer = { x: 0, y: 0 };
   private movingId: string | null = null;
@@ -320,13 +567,13 @@ export class CityScene {
 
   private onPointerMove = (e: PointerEvent) => {
     this.lastPointer = { x: e.clientX, y: e.clientY };
-    if (this.placingType) this.updateGhostPosition(e);
+    if (this.placingStyleId !== null) this.updateGhostPosition(e);
     if (this.movingId) this.updateMovingPosition(e);
     if (!this.dragging) return;
     const dx = e.clientX - this.lastX;
     const dy = e.clientY - this.lastY;
     if (Math.abs(dx) + Math.abs(dy) > 6) this.movedDuringDrag = true;
-    if (!this.placingType && !this.movingId) this.orbitCam.orbit(dx, dy);
+    if (this.placingStyleId === null && !this.movingId) this.orbitCam.orbit(dx, dy);
     this.lastX = e.clientX;
     this.lastY = e.clientY;
   };
@@ -343,15 +590,19 @@ export class CityScene {
     this.orbitCam.zoom(e.deltaY);
   };
 
-  constructor(canvas: HTMLCanvasElement, container: HTMLElement, callbacks: CitySceneCallbacks = {}) {
+  constructor(canvas: HTMLCanvasElement, container: HTMLElement, styles: WarehouseStyle[], callbacks: CitySceneCallbacks = {}) {
     this.canvas = canvas;
     this.container = container;
+    this.styles = styles;
     this.callbacks = callbacks;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#e3e8ee');
+    this.scene.background = getSkyTexture();
+    this.scene.fog = new THREE.Fog('#cfe1e6', 70, 160);
 
-    this.orbitCam = new SimpleOrbitCamera(container.clientWidth / Math.max(1, container.clientHeight));
+    this.orbitCam = new SimpleOrbitCamera(container.clientWidth / Math.max(1, container.clientHeight), 5, 90);
+    // Arranca alejada para ver el panorama completo al entrar, no pegada a los primeros almacenes.
+    this.orbitCam.setRadius(45);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
@@ -366,19 +617,17 @@ export class CityScene {
     sun.position.set(10, 16, 8);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -20;
-    sun.shadow.camera.right = 20;
-    sun.shadow.camera.top = 20;
-    sun.shadow.camera.bottom = -20;
-    sun.shadow.camera.far = 60;
+    sun.shadow.camera.left = -35;
+    sun.shadow.camera.right = 35;
+    sun.shadow.camera.top = 35;
+    sun.shadow.camera.bottom = -35;
+    sun.shadow.camera.far = 100;
     sun.shadow.bias = -0.0015;
     this.scene.add(sun);
 
     buildGround(this.scene);
     this.scene.add(this.housesGroup);
-
-    // Almacén inicial, ya levantado en el centro del terreno.
-    this.addHouse('chico');
+    // Sin semilla: los almacenes reales los carga quien use la escena, vía loadWarehouse().
 
     canvas.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
@@ -391,21 +640,26 @@ export class CityScene {
     this.loop();
   }
 
-  private addHouse(type: HouseType, position?: THREE.Vector3): string {
+  private getStyle(styleId: number): WarehouseStyle {
+    return this.styles.find((s) => s.warehouse_style_id === styleId) ?? this.styles[0];
+  }
+
+  private addHouse(styleId: number, footprint: Footprint, position?: THREE.Vector3): string {
     const id = `h${this.nextId++}`;
-    const { group, labelAnchor } = buildHouse(type);
+    const { group, labelAnchor } = buildHouse(this.getStyle(styleId), footprint);
     if (position) group.position.copy(position);
     group.userData.houseId = id;
     this.housesGroup.add(group);
-    this.houses.set(id, { id, type, group, labelAnchor });
+    this.houses.set(id, { id, styleId, group, labelAnchor });
     return id;
   }
 
-  /** Arranca el modo colocación: una vista previa semitransparente del tipo elegido sigue al cursor. */
-  startPlacing(type: HouseType) {
+  /** Arranca el modo colocación: una vista previa semitransparente del estilo/tamaño elegido sigue al cursor. */
+  startPlacing(styleId: number, footprint: Footprint) {
     this.cancelPlacing();
-    this.placingType = type;
-    const { group } = buildHouse(type);
+    this.placingStyleId = styleId;
+    this.placingFootprint = footprint;
+    const { group } = buildHouse(this.getStyle(styleId), footprint);
     makeGhost(group);
     this.ghost = group;
     this.scene.add(group);
@@ -421,11 +675,48 @@ export class CityScene {
       });
       this.ghost = null;
     }
-    this.placingType = null;
+    this.placingStyleId = null;
+    this.placingFootprint = null;
   }
 
-  getHouses(): Array<{ id: string; type: HouseType }> {
-    return Array.from(this.houses.values()).map(({ id, type }) => ({ id, type }));
+  getHouses(): Array<{ id: string; styleId: number }> {
+    return Array.from(this.houses.values()).map(({ id, styleId }) => ({ id, styleId }));
+  }
+
+  /** Acerca la cámara a un almacén puntual — para "ver todos" desde una lista, sin tener que buscarlo a ojo en el terreno. */
+  focusHouse(id: string) {
+    const entry = this.houses.get(id);
+    if (!entry) return;
+    const pos = entry.group.position.clone();
+    this.orbitCam.flyTo(pos, 10);
+  }
+
+  /** Levanta un almacén ya existente (viene del backend) en su posición, rotación y tamaño guardados. */
+  loadWarehouse(id: string, styleId: number, x: number, z: number, rotationY: number, footprint: Footprint) {
+    const { group, labelAnchor } = buildHouse(this.getStyle(styleId), footprint);
+    group.position.set(x, 0, z);
+    group.rotation.y = rotationY;
+    group.userData.houseId = id;
+    this.housesGroup.add(group);
+    this.houses.set(id, { id, styleId, group, labelAnchor });
+  }
+
+  /** Cambia la key con la que se referencia un almacén — para pasar del id temporal al id real que devuelve el backend al crearlo. */
+  remapHouseId(oldId: string, newId: string) {
+    const entry = this.houses.get(oldId);
+    if (!entry) return;
+    entry.id = newId;
+    entry.group.userData.houseId = newId;
+    this.houses.delete(oldId);
+    this.houses.set(newId, entry);
+    if (this.movingId === oldId) this.movingId = newId;
+  }
+
+  /** Posición y rotación actuales de un almacén, para persistirlas contra el backend. */
+  getHouseTransform(id: string): { x: number; z: number; rotationY: number } | null {
+    const entry = this.houses.get(id);
+    if (!entry) return null;
+    return { x: entry.group.position.x, z: entry.group.position.z, rotationY: entry.group.rotation.y };
   }
 
   removeHouse(id: string) {
@@ -498,12 +789,13 @@ export class CityScene {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, this.orbitCam.camera);
 
-    if (this.placingType && this.ghost) {
-      const type = this.placingType;
+    if (this.placingStyleId !== null && this.placingFootprint && this.ghost) {
+      const styleId = this.placingStyleId;
+      const footprint = this.placingFootprint;
       const position = this.ghost.position.clone();
       this.cancelPlacing();
-      const id = this.addHouse(type, position);
-      this.callbacks.onPlaced?.(id, type);
+      const id = this.addHouse(styleId, footprint, position);
+      this.callbacks.onPlaced?.(id, styleId);
       return;
     }
 
