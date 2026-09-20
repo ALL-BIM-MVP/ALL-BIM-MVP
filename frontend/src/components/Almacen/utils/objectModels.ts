@@ -65,6 +65,13 @@ export async function loadObjectModel(category: ObjectCategory): Promise<THREE.O
  * ningún lado. No tiene caché: cada ítem trae su propio archivo. */
 export async function loadObjectModelFromFile(file: File): Promise<THREE.Object3D> {
   const buffer = await file.arrayBuffer();
+  return loadObjectModelFromArrayBuffer(buffer);
+}
+
+/** Igual que loadObjectModelFromFile, pero a partir de bytes ya descargados
+ * (ej. el .glb de un producto, traído con autenticación vía el endpoint
+ * genérico de archivos) en vez de un File del disco. */
+export async function loadObjectModelFromArrayBuffer(buffer: ArrayBuffer): Promise<THREE.Object3D> {
   return new Promise((resolve, reject) => {
     loader.parse(buffer, '', (gltf) => resolve(normalize(gltf.scene)), reject);
   });

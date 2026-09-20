@@ -431,7 +431,7 @@ const DashboardProjectsInner: React.FC = () => {
 
       {activeTab === 'almacen' && (
         <div className="fixed left-0 right-0 bottom-0 top-14 z-0">
-          <AlmacenTab />
+          <AlmacenTab projectId={project?.project_id || 0} />
         </div>
       )}
 

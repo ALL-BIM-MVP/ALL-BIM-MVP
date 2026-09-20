@@ -1,325 +1,75 @@
 // src/components/Almacen/utils/WarehouseInteriorScene.ts
-// Interior de un almacén: una sala real (piso + 4 paredes) más amplia que la
-// huella del edificio exterior, con estantes contra sus paredes. Cámara
-// orbital (igual que "Ciudad"): drag izquierdo orbita, drag derecho mueve la
-// vista, rueda hace zoom. Click en un estante acerca la cámara a él.
+// Interior de un almacén: piso real de gridWidth×gridDepth cubos (1.3m cada
+// uno, igual que el backend), sin paredes. Los racks son reales — un rack en
+// pantalla es un rack real del backend, con la misma geometría siempre (no
+// hay "tipos" visuales): esquinas alineadas a la grilla, profundidad 1 o 2
+// cubos, ancho (bahías) libre, nivel tope según el estilo del almacén.
+// Cámara orbital igual que "Ciudad": drag izquierdo orbita, drag derecho
+// mueve la vista, rueda hace zoom.
 import * as THREE from 'three';
-import { HOUSE_TYPE_CONFIG, HouseType, SimpleOrbitCamera } from './CityScene';
-import { loadObjectModel, loadObjectModelFromFile, ObjectCategory } from './objectModels';
+import { SimpleOrbitCamera } from './CityScene';
+import { CUBE_SIZE } from './warehouseMapping';
+import { loadObjectModel, loadObjectModelFromArrayBuffer } from './objectModels';
+import { getFileContentArrayBuffer } from '../../../services/ifcfiles.service';
+import { Bin } from '../../../types/almacen.types';
+
+export interface GridPoint {
+  gx: number;
+  gz: number;
+}
 
 export interface WarehouseInteriorCallbacks {
   onSelectBay?: (id: string | null) => void;
-  onBayPlaced?: (id: string, tipoId: string) => void;
+  onFootprintReady?: (corner1: GridPoint, corner2: GridPoint) => void;
   onFrame?: () => void;
 }
 
-export interface EstanteTipo {
-  id: string;
-  nombre: string;
-  rows: number;
-  cols: number;
-  color: string;
-  montaje: 'pared' | 'piso';
-  // Tamaño de casilla en metros: define el tamaño real del mueble (filas/columnas × esto).
-  anchoCasilla?: number;
-  altoCasilla?: number;
-}
+const LEVEL_HEIGHT = 1.1;
+const RACK_BEAM_COLOR = '#f2660a';
+const FLOOR_MARGIN = 1.5; // metros de piso decorativo alrededor de la grilla ubicable
 
-/** Catálogo de tipos de estante — predefinidos; el usuario puede sumar más ("Nuevo tipo de estante"). */
-export const ESTANTE_TIPOS: EstanteTipo[] = [
-  { id: 'cajas', nombre: 'Estante de cajas', rows: 3, cols: 4, color: '#e3bd8d', montaje: 'pared', anchoCasilla: 1, altoCasilla: 1 },
-  { id: 'tubos', nombre: 'Rack de tubos', rows: 2, cols: 3, color: '#a9b4bd', montaje: 'pared', anchoCasilla: 0.9, altoCasilla: 0.9 },
-  { id: 'pallets', nombre: 'Zona de pallets', rows: 2, cols: 2, color: '#e3bd8d', montaje: 'piso', anchoCasilla: 1.4, altoCasilla: 1.4 },
-  { id: 'rack', nombre: 'Rack industrial', rows: 1, cols: 4, color: '#f2660a', montaje: 'pared', anchoCasilla: 1.2, altoCasilla: 1.1 },
-];
-export const DEFAULT_ESTANTE_TIPO_ID = ESTANTE_TIPOS[0].id;
-const DEFAULT_CELL_SIZE = 1;
-
-function getTipo(tipos: EstanteTipo[], id: string): EstanteTipo {
-  return tipos.find((t) => t.id === id) ?? ESTANTE_TIPOS[0];
-}
-
-const ROOM_SCALE = 4.5; // la sala es notoriamente más grande que la huella exterior
-const MIN_ROOM_WIDTH = 26;
-const MIN_ROOM_DEPTH = 20;
-const WALL_HEIGHT = 4.2; // ya no hay paredes reales, pero sigue marcando la altura máxima razonable de un estante
-const PLACEMENT_GRID = 1; // metros — coincide con el tamaño real de cada baldosa del piso
-
-const WALL_MARGIN = 0.6;
-const MIN_BAY_DEPTH = 0.35;
-const MAX_BAY_DEPTH = 1.1;
-const PANEL_THICKNESS = 0.05;
-
-/** El estante mide lo que pide su tipo (filas/columnas × tamaño de casilla), no un tamaño fijo —
- * cuantas más/más grandes casillas, más grande el mueble. Solo se achica si no entra en su pared. */
-export function computeBayDims(tipo: EstanteTipo, cellSize: number): { width: number; height: number } {
-  const cellW = tipo.anchoCasilla ?? DEFAULT_CELL_SIZE;
-  const cellH = tipo.altoCasilla ?? DEFAULT_CELL_SIZE;
+function normalizeRect(c1: GridPoint, c2: GridPoint) {
   return {
-    width: Math.min(cellSize * 0.94, tipo.cols * cellW),
-    height: Math.min(WALL_HEIGHT - 0.3, tipo.rows * cellH),
+    minX: Math.min(c1.gx, c2.gx),
+    maxX: Math.max(c1.gx, c2.gx),
+    minZ: Math.min(c1.gz, c2.gz),
+    maxZ: Math.max(c1.gz, c2.gz),
   };
 }
+type Rect = ReturnType<typeof normalizeRect>;
 
-/** Reparte n bahías entre las 3 paredes disponibles (la del frente queda libre, es la puerta). */
-function distributeAcrossSides(n: number): [number, number, number] {
-  const base = Math.floor(n / 3);
-  const extra = n % 3;
-  const counts: [number, number, number] = [base, base, base];
-  for (let i = 0; i < extra; i++) counts[i]++;
-  return counts;
-}
-
-interface BaySlot {
-  index: number;
-  position: THREE.Vector3;
-  rotationY: number;
-  cellSize: number;
-}
-
-function layoutBays(width: number, depth: number, count: number): BaySlot[] {
-  const halfW = width / 2 - WALL_MARGIN;
-  const halfD = depth / 2 - WALL_MARGIN;
-  const [back, left, right] = distributeAcrossSides(count);
-  const slots: BaySlot[] = [];
-  let index = 0;
-
-  const placeAlongX = (z: number, n: number, rotationY: number) => {
-    const cell = (2 * halfW) / Math.max(1, n);
-    for (let i = 0; i < n; i++) {
-      slots.push({ index: index++, position: new THREE.Vector3(-halfW + cell * (i + 0.5), 0, z), rotationY, cellSize: cell });
-    }
-  };
-  const placeAlongZ = (x: number, n: number, rotationY: number) => {
-    const cell = (2 * halfD) / Math.max(1, n);
-    for (let i = 0; i < n; i++) {
-      slots.push({ index: index++, position: new THREE.Vector3(x, 0, -halfD + cell * (i + 0.5)), rotationY, cellSize: cell });
-    }
-  };
-
-  // rotationY hace que el frente abierto del estante (local +Z) quede mirando
-  // hacia el centro de la sala, no hacia la pared que tiene atrás.
-  placeAlongX(-halfD, back, 0);
-  placeAlongZ(-halfW, left, Math.PI / 2);
-  placeAlongZ(halfW, right, -Math.PI / 2);
-  return slots;
-}
-
-const PALLET_HEIGHT = 0.16;
-const PALLET_GAP = 0.08;
-
-/** Rack industrial (parantes + vigas + tablero): una sola unidad (un bay), abierta,
- * sin fondo ni divisores — una estructura para apoyar cosas encima, no una cubículo cerrada. */
-function buildIndustrialRack(slot: BaySlot, width: number, height: number, tipo: EstanteTipo): { group: THREE.Group; labelAnchor: THREE.Object3D; depth: number } {
-  const group = new THREE.Group();
-  const depth = Math.min(MAX_BAY_DEPTH, Math.max(MIN_BAY_DEPTH, Math.min(tipo.anchoCasilla ?? DEFAULT_CELL_SIZE, tipo.altoCasilla ?? DEFAULT_CELL_SIZE) * 1.3));
-  const postSize = 0.08;
-  const beamThickness = 0.1;
-  const deckThickness = 0.035;
-  const halfW = width / 2;
-  const halfD = depth / 2;
-
-  const postMat = new THREE.MeshStandardMaterial({ color: '#1560e0', roughness: 0.3, metalness: 0.45 });
-  const beamMat = new THREE.MeshStandardMaterial({ color: tipo.color, roughness: 0.3, metalness: 0.3 });
-  const deckMat = new THREE.MeshStandardMaterial({ color: '#ece7d8', roughness: 0.85 });
-
-  const frontZ = halfD - postSize / 2;
-  const backZ = -(halfD - postSize / 2);
-  const feetMat = new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 0.8 });
-  const braceThickness = 0.035;
-  const braceSegments = 4;
-
-  [-1, 1].forEach((sx) => {
-    const x = sx * (halfW - postSize / 2);
-
-    [frontZ, backZ].forEach((z) => {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(postSize, height, postSize), postMat);
-      post.position.set(x, height / 2, z);
-      post.castShadow = true;
-      post.receiveShadow = true;
-      group.add(post);
-
-      const foot = new THREE.Mesh(new THREE.CylinderGeometry(postSize * 0.75, postSize * 0.75, 0.03, 10), feetMat);
-      foot.position.set(x, 0.015, z);
-      group.add(foot);
-    });
-
-    // Arriostre diagonal en zigzag entre los dos parantes de esta punta —
-    // sin esto se ve como dos caños sueltos, no como una estructura de rack real.
-    const segH = height / braceSegments;
-    for (let i = 0; i < braceSegments; i++) {
-      const z0 = i % 2 === 0 ? frontZ : backZ;
-      const z1 = i % 2 === 0 ? backZ : frontZ;
-      const y0 = segH * i;
-      const y1 = segH * (i + 1);
-      const dz = z1 - z0;
-      const dy = y1 - y0;
-      const length = Math.hypot(dz, dy);
-      const brace = new THREE.Mesh(new THREE.BoxGeometry(braceThickness, length, braceThickness), postMat);
-      brace.rotation.x = Math.atan2(dz, dy);
-      brace.position.set(x, (y0 + y1) / 2, (z0 + z1) / 2);
-      brace.castShadow = true;
-      group.add(brace);
-    }
-  });
-
-  const levelH = height / tipo.rows;
-  for (let r = 1; r <= tipo.rows; r++) {
-    const y = levelH * r - beamThickness / 2;
-    [-1, 1].forEach((sz) => {
-      const beam = new THREE.Mesh(new THREE.BoxGeometry(width - postSize, beamThickness, postSize * 1.3), beamMat);
-      beam.position.set(0, y, sz * (halfD - postSize / 2));
-      beam.castShadow = true;
-      beam.receiveShadow = true;
-      group.add(beam);
-    });
-
-    // Tablero macizo apoyado sobre las dos vigas — no barras: la referencia
-    // es un estante de tablero (particle board), no de rejilla.
-    const deck = new THREE.Mesh(
-      new THREE.BoxGeometry(width - postSize * 1.6, deckThickness, depth - postSize * 1.2),
-      deckMat
-    );
-    deck.position.set(0, y + beamThickness / 2 + deckThickness / 2, 0);
-    deck.castShadow = true;
-    deck.receiveShadow = true;
-    group.add(deck);
-  }
-
-  group.rotation.y = slot.rotationY;
-  group.position.copy(slot.position);
-
-  const labelAnchor = new THREE.Object3D();
-  labelAnchor.position.set(0, height + 0.3, 0);
-  group.add(labelAnchor);
-
-  return { group, labelAnchor, depth };
-}
-
-/** Zona de pallets (montaje "piso"): tarimas planas separadas sobre el piso, no un mueble de pared. */
-function buildPalletZone(slot: BaySlot, width: number, depthFootprint: number, tipo: EstanteTipo): { group: THREE.Group; labelAnchor: THREE.Object3D; depth: number } {
-  const group = new THREE.Group();
-  const mat = new THREE.MeshStandardMaterial({ color: tipo.color, roughness: 0.8 });
-  const outlineMat = new THREE.LineBasicMaterial({ color: new THREE.Color(tipo.color).multiplyScalar(0.45) });
-  const cellW = width / tipo.cols;
-  const cellD = depthFootprint / tipo.rows;
-
-  for (let r = 0; r < tipo.rows; r++) {
-    for (let c = 0; c < tipo.cols; c++) {
-      const geom = new THREE.BoxGeometry(Math.max(0.1, cellW - PALLET_GAP), PALLET_HEIGHT, Math.max(0.1, cellD - PALLET_GAP));
-      const pallet = new THREE.Mesh(geom, mat);
-      pallet.position.set(-width / 2 + cellW * (c + 0.5), PALLET_HEIGHT / 2, -depthFootprint / 2 + cellD * (r + 0.5));
-      pallet.castShadow = true;
-      pallet.receiveShadow = true;
-      group.add(pallet);
-
-      const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geom), outlineMat);
-      outline.position.copy(pallet.position);
-      group.add(outline);
-    }
-  }
-
-  group.rotation.y = slot.rotationY;
-  group.position.copy(slot.position);
-
-  const labelAnchor = new THREE.Object3D();
-  labelAnchor.position.set(0, PALLET_HEIGHT + 0.3, 0);
-  group.add(labelAnchor);
-
-  return { group, labelAnchor, depth: PALLET_HEIGHT };
-}
-
-/** Estante real, con casillas abiertas (marco + fondo + repisas + divisores), no un cajón macizo. */
-function buildBay(slot: BaySlot, width: number, height: number, tipo: EstanteTipo): { group: THREE.Group; labelAnchor: THREE.Object3D; depth: number } {
-  if (tipo.montaje === 'piso') return buildPalletZone(slot, width, height, tipo);
-  if (tipo.id === 'rack') return buildIndustrialRack(slot, width, height, tipo);
-
-  const group = new THREE.Group();
-  // La casilla es tan profunda como ancha/alta (dentro de un rango razonable),
-  // para que se lea como un hueco real con volumen y no como un panel chato.
-  const cellW = tipo.anchoCasilla ?? DEFAULT_CELL_SIZE;
-  const cellH = tipo.altoCasilla ?? DEFAULT_CELL_SIZE;
-  const depth = Math.min(MAX_BAY_DEPTH, Math.max(MIN_BAY_DEPTH, Math.min(cellW, cellH) * 0.85));
-  const t = PANEL_THICKNESS;
-
-  const frameMat = new THREE.MeshStandardMaterial({ color: tipo.color, roughness: 0.75 });
-  // Fondo: mismo color, pero más oscuro — no un tono aparte — para que se lea
-  // como el interior del hueco, no como una pieza distinta.
-  const backMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(tipo.color).multiplyScalar(0.55), roughness: 0.85 });
-
-  const addPanel = (w: number, h: number, d: number, x: number, y: number, z: number, mat: THREE.Material) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    mesh.position.set(x, y, z);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    group.add(mesh);
-  };
-
-  addPanel(width, t, depth, 0, height - t / 2, 0, frameMat);
-  addPanel(width, t, depth, 0, t / 2, 0, frameMat);
-  addPanel(t, height, depth, -width / 2 + t / 2, height / 2, 0, frameMat);
-  addPanel(t, height, depth, width / 2 - t / 2, height / 2, 0, frameMat);
-  addPanel(width, height, t, 0, height / 2, -depth / 2 + t / 2, backMat);
-
-  for (let r = 1; r < tipo.rows; r++) addPanel(width, t, depth, 0, (height * r) / tipo.rows, 0, frameMat);
-  for (let c = 1; c < tipo.cols; c++) addPanel(t, height, depth, -width / 2 + (width * c) / tipo.cols, height / 2, 0, frameMat);
-
-  const outline = new THREE.LineSegments(
-    new THREE.EdgesGeometry(new THREE.BoxGeometry(width, height, depth)),
-    new THREE.LineBasicMaterial({ color: new THREE.Color(tipo.color).multiplyScalar(0.45) })
-  );
-  outline.position.y = height / 2;
-  group.add(outline);
-
-  group.rotation.y = slot.rotationY;
-  group.position.copy(slot.position);
-
-  const labelAnchor = new THREE.Object3D();
-  labelAnchor.position.set(0, height + 0.3, 0);
-  group.add(labelAnchor);
-
-  return { group, labelAnchor, depth };
+/** Dos rectángulos necesitan al menos 1 cubo entero vacío entre sí — ni pegados, ni superpuestos. */
+function rectsHaveClearance(a: Rect, b: Rect): boolean {
+  return a.maxX + 1 <= b.minX || b.maxX + 1 <= a.minX || a.maxZ + 1 <= b.minZ || b.maxZ + 1 <= a.minZ;
 }
 
 let concreteTextureCache: THREE.CanvasTexture | null = null;
 
-/** Dibuja una veta de mármol como curva serpenteante (nunca una línea recta). */
-function drawMarbleVein(
-  ctx: CanvasRenderingContext2D,
-  x0: number, y0: number, x1: number, y1: number,
-  width: number, alpha: number
-) {
+function drawMarbleVein(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number, width: number, alpha: number) {
   const jitter = Math.hypot(x1 - x0, y1 - y0) * 0.12;
   const cx1 = x0 + (x1 - x0) * 0.33 + (Math.random() - 0.5) * jitter;
   const cy1 = y0 + (y1 - y0) * 0.33 + (Math.random() - 0.5) * jitter;
   const cx2 = x0 + (x1 - x0) * 0.66 + (Math.random() - 0.5) * jitter;
   const cy2 = y0 + (y1 - y0) * 0.66 + (Math.random() - 0.5) * jitter;
-
   ctx.strokeStyle = `rgba(148,150,153,${alpha})`;
   ctx.lineWidth = width;
   ctx.beginPath();
   ctx.moveTo(x0, y0);
   ctx.bezierCurveTo(cx1, cy1, cx2, cy2, x1, y1);
   ctx.stroke();
-  return { midX: x0 + (x1 - x0) * 0.5, midY: y0 + (y1 - y0) * 0.5 };
 }
 
-/** Piso de mármol blanco tipo Carrara: vetas dibujadas sobre el lienzo entero
- * (no encerradas en cada baldosa) y el grout recién después, encima — así las
- * vetas cruzan de una baldosa a la de al lado, como en una piedra real cortada. */
+/** Piso de mármol blanco tipo Carrara — vetas dibujadas sobre el lienzo entero y el grout recién después, encima. */
 function getConcreteTexture(): THREE.CanvasTexture {
   if (concreteTextureCache) return concreteTextureCache;
-
   const size = 1024;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, size, size);
 
-  // Nubes suaves de fondo — el mármol real no es un blanco parejo.
   for (let i = 0; i < 10; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
@@ -333,11 +83,8 @@ function getConcreteTexture(): THREE.CanvasTexture {
     ctx.fill();
   }
 
-  // Vetas: troncos largos en una dirección general, con ramas más finas
-  // saliendo a los costados — el patrón denso y ramificado de la referencia.
-  const flowAngle = -0.55; // dirección diagonal dominante
-  const veinCount = 26;
-  for (let i = 0; i < veinCount; i++) {
+  const flowAngle = -0.55;
+  for (let i = 0; i < 26; i++) {
     const cx = Math.random() * size;
     const cy = Math.random() * size;
     const angle = flowAngle + (Math.random() - 0.5) * 0.9;
@@ -347,7 +94,6 @@ function getConcreteTexture(): THREE.CanvasTexture {
     const x1 = cx + Math.cos(angle) * len * 0.5;
     const y1 = cy + Math.sin(angle) * len * 0.5;
     drawMarbleVein(ctx, x0, y0, x1, y1, 1 + Math.random() * 2.2, 0.16 + Math.random() * 0.22);
-
     const branches = Math.random() < 0.7 ? 1 + Math.floor(Math.random() * 2) : 0;
     for (let b = 0; b < branches; b++) {
       const t = 0.2 + Math.random() * 0.6;
@@ -355,15 +101,10 @@ function getConcreteTexture(): THREE.CanvasTexture {
       const by = y0 + (y1 - y0) * t;
       const branchAngle = angle + (Math.random() - 0.5) * 1.4;
       const branchLen = len * (0.2 + Math.random() * 0.3);
-      drawMarbleVein(
-        ctx, bx, by,
-        bx + Math.cos(branchAngle) * branchLen, by + Math.sin(branchAngle) * branchLen,
-        0.5 + Math.random(), 0.1 + Math.random() * 0.14
-      );
+      drawMarbleVein(ctx, bx, by, bx + Math.cos(branchAngle) * branchLen, by + Math.sin(branchAngle) * branchLen, 0.5 + Math.random(), 0.1 + Math.random() * 0.14);
     }
   }
 
-  // Grout: recién ahora, por encima de las vetas, para que estas no queden cortadas.
   const tilesPerSide = 6;
   const tileSize = size / tilesPerSide;
   ctx.strokeStyle = 'rgba(210,209,203,0.45)';
@@ -388,52 +129,41 @@ function getConcreteTexture(): THREE.CanvasTexture {
   return texture;
 }
 
-/** Piso de concreto pulido real, sin paredes — la sala queda abierta por los cuatro lados. */
-function buildRoom(scene: THREE.Scene, width: number, depth: number) {
+/** Piso real: gridWidth×gridDepth cubos de 1.3m, con un margen decorativo alrededor y las líneas de la grilla marcadas. */
+function buildRoom(scene: THREE.Scene, gridWidth: number, gridDepth: number) {
+  const placeableW = gridWidth * CUBE_SIZE;
+  const placeableD = gridDepth * CUBE_SIZE;
+
   const texture = getConcreteTexture().clone();
   texture.needsUpdate = true;
-  const tileSpan = 6; // metros que cubre cada repetición de la textura
-  texture.repeat.set(Math.max(1, width / tileSpan), Math.max(1, depth / tileSpan));
+  const tileSpan = 6;
+  const floorW = placeableW + FLOOR_MARGIN * 2;
+  const floorD = placeableD + FLOOR_MARGIN * 2;
+  texture.repeat.set(Math.max(1, floorW / tileSpan), Math.max(1, floorD / tileSpan));
 
   const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(width, depth),
+    new THREE.PlaneGeometry(floorW, floorD),
     new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95, metalness: 0 })
   );
   floor.rotation.x = -Math.PI / 2;
   floor.receiveShadow = true;
   scene.add(floor);
-}
 
-/** Vuelve semitransparente el estante fantasma que sigue al cursor al colocar uno nuevo. */
-function makeGhost(group: THREE.Group) {
-  group.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (!(mesh as any).isMesh) return;
-    mesh.castShadow = false;
-    mesh.receiveShadow = false;
-    const cloneMat = (m: THREE.Material) => {
-      const clone = m.clone() as THREE.MeshStandardMaterial;
-      clone.transparent = true;
-      clone.opacity = 0.55;
-      return clone;
-    };
-    mesh.material = Array.isArray(mesh.material) ? mesh.material.map(cloneMat) : cloneMat(mesh.material);
-  });
-}
-
-/** Tiñe de verde el fantasma cuando va a engancharse/apilarse contra otro estante. */
-function tintGhost(group: THREE.Group, active: boolean) {
-  group.traverse((obj) => {
-    const mesh = obj as THREE.Mesh;
-    if (!(mesh as any).isMesh) return;
-    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-    mats.forEach((m) => {
-      const std = m as THREE.MeshStandardMaterial;
-      if (!std.emissive) return;
-      std.emissive.set(active ? '#22c55e' : '#000000');
-      std.emissiveIntensity = active ? 0.6 : 0;
-    });
-  });
+  // Líneas de la grilla ubicable — cada línea es un cubo real de 1.3m.
+  const points: THREE.Vector3[] = [];
+  const halfW = placeableW / 2;
+  const halfD = placeableD / 2;
+  for (let i = 0; i <= gridWidth; i++) {
+    const x = -halfW + i * CUBE_SIZE;
+    points.push(new THREE.Vector3(x, 0.005, -halfD), new THREE.Vector3(x, 0.005, halfD));
+  }
+  for (let i = 0; i <= gridDepth; i++) {
+    const z = -halfD + i * CUBE_SIZE;
+    points.push(new THREE.Vector3(-halfW, 0.005, z), new THREE.Vector3(halfW, 0.005, z));
+  }
+  const gridGeom = new THREE.BufferGeometry().setFromPoints(points);
+  const gridLines = new THREE.LineSegments(gridGeom, new THREE.LineBasicMaterial({ color: '#b9c3cc', transparent: true, opacity: 0.5 }));
+  scene.add(gridLines);
 }
 
 function disposeObject3D(obj: THREE.Object3D) {
@@ -446,19 +176,167 @@ function disposeObject3D(obj: THREE.Object3D) {
   });
 }
 
-interface BayEntry {
-  id: string;
-  slot: BaySlot;
-  width: number;
-  height: number;
-  depth: number;
-  level: number; // 1 = apoyado en el piso, 2 = apilado una vez, etc.
-  tipoId: string;
-  group: THREE.Group;
-  labelAnchor: THREE.Object3D;
+function setGroupOpacity(group: THREE.Group, opacity: number) {
+  group.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (!(mesh as any).isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    mats.forEach((m: any) => {
+      m.transparent = opacity < 1;
+      m.opacity = opacity;
+    });
+  });
 }
 
-const MAX_RACK_STACK_LEVEL = 3; // el rack industrial no aguanta más de 3 niveles apilados
+/** Marca cuál de las dos caras (a lo largo del eje "profundidad") es la accesible — una franja verde al piso de esa cara. */
+function addDirectionMarker(group: THREE.Group, direction: 0 | 1, worldWidth: number, worldDepth: number) {
+  const z = direction === 0 ? worldDepth / 2 : -worldDepth / 2;
+  const marker = new THREE.Mesh(
+    new THREE.BoxGeometry(worldWidth * 0.9, 0.03, 0.05),
+    new THREE.MeshStandardMaterial({ color: '#22c55e', emissive: '#22c55e', emissiveIntensity: 0.5 })
+  );
+  marker.position.set(0, 0.04, z);
+  group.add(marker);
+}
+
+/** Cartel con el nombre, dibujado en un canvas y montado sobre la viga naranja del nivel más alto — se puede reemplazar en caliente al renombrar. */
+function buildNameplate(name: string, plateWidth: number, plateHeight: number): THREE.Mesh {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = Math.max(1, Math.round(1024 * (plateHeight / plateWidth)));
+  const ctx = canvas.getContext('2d')!;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#2a1400';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let fontSize = canvas.height * 0.6;
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  while (ctx.measureText(name).width > canvas.width * 0.92 && fontSize > 10) {
+    fontSize -= 4;
+    ctx.font = `bold ${fontSize}px sans-serif`;
+  }
+  ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(plateWidth, plateHeight),
+    new THREE.MeshBasicMaterial({ map: texture, transparent: true })
+  );
+  mesh.name = 'nameplate';
+  return mesh;
+}
+
+/** Rack real: parantes (uno por límite de bahía, con arriostre diagonal en las 4 esquinas), vigas y tablero por nivel. */
+function buildRackMesh(widthCubes: number, depthCubes: number, levels: number): { group: THREE.Group; labelAnchor: THREE.Object3D; worldWidth: number; worldDepth: number; height: number } {
+  const group = new THREE.Group();
+  // Sin achicar: el mueble llena la celda entera, calza justo con las líneas de la grilla del piso.
+  const worldWidth = widthCubes * CUBE_SIZE;
+  const worldDepth = depthCubes * CUBE_SIZE;
+  const height = levels * LEVEL_HEIGHT;
+  const postSize = 0.06;
+  const beamThickness = 0.07;
+  const deckThickness = 0.028;
+  const halfW = worldWidth / 2;
+  const halfD = worldDepth / 2;
+
+  const postMat = new THREE.MeshStandardMaterial({ color: '#1560e0', roughness: 0.3, metalness: 0.45 });
+  const innerPostMat = new THREE.MeshStandardMaterial({ color: '#1560e0', roughness: 0.4, metalness: 0.35 });
+  const beamMat = new THREE.MeshStandardMaterial({ color: RACK_BEAM_COLOR, roughness: 0.3, metalness: 0.3 });
+  const deckMat = new THREE.MeshStandardMaterial({ color: '#ece7d8', roughness: 0.85 });
+  const feetMat = new THREE.MeshStandardMaterial({ color: '#1a1a1a', roughness: 0.8 });
+
+  const frontZ = halfD - postSize / 2;
+  const backZ = -(halfD - postSize / 2);
+  const braceThickness = 0.028;
+  const braceSegments = 4;
+
+  // Un poste cada 2 bahías (no en cada límite) — las dos puntas siempre
+  // llevan poste, aunque el ancho sea impar y la última pareja quede corta.
+  const postIndices: number[] = [];
+  for (let i = 0; i <= widthCubes; i += 2) postIndices.push(i);
+  if (postIndices[postIndices.length - 1] !== widthCubes) postIndices.push(widthCubes);
+
+  for (const i of postIndices) {
+    const x = -halfW + (i / widthCubes) * worldWidth;
+    const isCorner = i === 0 || i === widthCubes;
+    [frontZ, backZ].forEach((z) => {
+      const post = new THREE.Mesh(new THREE.BoxGeometry(postSize, height, postSize), isCorner ? postMat : innerPostMat);
+      post.position.set(x, height / 2, z);
+      post.castShadow = true;
+      post.receiveShadow = true;
+      group.add(post);
+
+      const foot = new THREE.Mesh(new THREE.CylinderGeometry(postSize * 0.75, postSize * 0.75, 0.03, 10), feetMat);
+      foot.position.set(x, 0.015, z);
+      group.add(foot);
+    });
+
+    if (isCorner) {
+      const segH = height / braceSegments;
+      for (let s = 0; s < braceSegments; s++) {
+        const z0 = s % 2 === 0 ? frontZ : backZ;
+        const z1 = s % 2 === 0 ? backZ : frontZ;
+        const y0 = segH * s;
+        const y1 = segH * (s + 1);
+        const dz = z1 - z0;
+        const dy = y1 - y0;
+        const length = Math.hypot(dz, dy);
+        const brace = new THREE.Mesh(new THREE.BoxGeometry(braceThickness, length, braceThickness), postMat);
+        brace.rotation.x = Math.atan2(dz, dy);
+        brace.position.set(x, (y0 + y1) / 2, (z0 + z1) / 2);
+        brace.castShadow = true;
+        group.add(brace);
+      }
+    }
+  }
+
+  for (let r = 1; r <= levels; r++) {
+    const y = LEVEL_HEIGHT * r - beamThickness / 2;
+    [-1, 1].forEach((sz) => {
+      const beam = new THREE.Mesh(new THREE.BoxGeometry(worldWidth, beamThickness, postSize * 1.3), beamMat);
+      beam.position.set(0, y, sz * (halfD - postSize / 2));
+      beam.castShadow = true;
+      beam.receiveShadow = true;
+      group.add(beam);
+    });
+
+    const deck = new THREE.Mesh(new THREE.BoxGeometry(worldWidth - postSize * 0.6, deckThickness, worldDepth - postSize * 1.2), deckMat);
+    deck.position.set(0, y + beamThickness / 2 + deckThickness / 2, 0);
+    deck.castShadow = true;
+    deck.receiveShadow = true;
+    group.add(deck);
+
+    // Líneas guía de bahía sobre el tablero — marcan dónde arranca cada casilla real, no dividen de verdad.
+    for (let i = 1; i < widthCubes; i++) {
+      const x = -halfW + (i / widthCubes) * worldWidth;
+      const geom = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x, y + beamThickness / 2 + deckThickness + 0.002, -halfD + postSize),
+        new THREE.Vector3(x, y + beamThickness / 2 + deckThickness + 0.002, halfD - postSize),
+      ]);
+      group.add(new THREE.Line(geom, new THREE.LineBasicMaterial({ color: '#c9a96a' })));
+    }
+  }
+
+  const labelAnchor = new THREE.Object3D();
+  labelAnchor.position.set(0, height + 0.3, 0);
+  group.add(labelAnchor);
+
+  return { group, labelAnchor, worldWidth, worldDepth, height };
+}
+
+interface BayEntry {
+  id: string;
+  corner1: GridPoint;
+  corner2: GridPoint;
+  levels: number;
+  direction: 0 | 1;
+  group: THREE.Group;
+  labelAnchor: THREE.Object3D;
+  worldWidth: number;
+  worldDepth: number;
+  height: number;
+}
 
 export class WarehouseInteriorScene {
   private renderer: THREE.WebGLRenderer;
@@ -470,8 +348,15 @@ export class WarehouseInteriorScene {
   private baysGroup = new THREE.Group();
   private bays = new Map<string, BayEntry>();
   private bayCounter = 1;
+  // Objetos de stock puestos en la vista general (todos los racks juntos, sin entrar a ninguno) —
+  // bay id -> bin_id -> el modelo que se dibujó ahí. Separado por bay para poder limpiar/reponer
+  // el stock de un solo rack sin tocar los demás.
+  private stockObjectsByBay = new Map<string, Map<number, THREE.Object3D>>();
+  private disposed = false;
   private resizeObserver: ResizeObserver;
   private callbacks: WarehouseInteriorCallbacks;
+  private gridWidth: number;
+  private gridDepth: number;
 
   private pointerDownOnCanvas = false;
   private dragButton = 0;
@@ -482,11 +367,18 @@ export class WarehouseInteriorScene {
   private lastPointer = { x: 0, y: 0 };
 
   private groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-  private ghost: THREE.Group | null = null;
-  private ghostTipoId: string | null = null;
-  private ghostTipos: EstanteTipo[] = ESTANTE_TIPOS;
-  private ghostWidth = 0;
-  private pendingSnap: { position: THREE.Vector3; rotationY: number; stackedOnId?: string } | null = null;
+
+  private placingActive = false;
+  private placeAnchor: GridPoint | null = null;
+  private footprintIndicator: THREE.Group | null = null;
+  private draftFootprint: { corner1: GridPoint; corner2: GridPoint } | null = null;
+  private draftGroup: THREE.Group | null = null;
+  private draftLabelAnchor: THREE.Object3D | null = null;
+  private draftLevels = 1;
+  private draftDirection: 0 | 1 = 0;
+  private draftWorldWidth = 0;
+  private draftWorldDepth = 0;
+  private draftHeight = 0;
 
   private onContextMenu = (e: MouseEvent) => e.preventDefault();
 
@@ -501,15 +393,13 @@ export class WarehouseInteriorScene {
 
   private onPointerMove = (e: PointerEvent) => {
     this.lastPointer = { x: e.clientX, y: e.clientY };
-    if (this.ghost) this.updateGhostPosition(e);
+    if (this.placingActive && !this.draftFootprint) this.updateDrawingIndicator(e);
     if (!this.dragging) return;
     const dx = e.clientX - this.lastX;
     const dy = e.clientY - this.lastY;
     if (Math.abs(dx) + Math.abs(dy) > 6) this.movedDuringDrag = true;
-    if (!this.ghost) {
-      if (this.dragButton === 2) this.orbitCam.pan(dx, dy);
-      else this.orbitCam.orbit(dx, dy);
-    }
+    if (this.dragButton === 2) this.orbitCam.pan(dx, dy);
+    else this.orbitCam.orbit(dx, dy);
     this.lastX = e.clientX;
     this.lastY = e.clientY;
   };
@@ -526,26 +416,21 @@ export class WarehouseInteriorScene {
     this.orbitCam.zoom(e.deltaY);
   };
 
-  constructor(canvas: HTMLCanvasElement, container: HTMLElement, type: HouseType, callbacks: WarehouseInteriorCallbacks = {}) {
+  constructor(canvas: HTMLCanvasElement, container: HTMLElement, gridWidth: number, gridDepth: number, callbacks: WarehouseInteriorCallbacks = {}) {
     this.canvas = canvas;
     this.container = container;
     this.callbacks = callbacks;
+    this.gridWidth = gridWidth;
+    this.gridDepth = gridDepth;
 
-    const { width: exteriorWidth, depth: exteriorDepth, bahias } = HOUSE_TYPE_CONFIG[type];
-    const roomWidth = Math.max(exteriorWidth * ROOM_SCALE, MIN_ROOM_WIDTH);
-    const roomDepth = Math.max(exteriorDepth * ROOM_SCALE, MIN_ROOM_DEPTH);
-    const roomSpan = Math.max(roomWidth, roomDepth);
+    const roomSpan = Math.max(gridWidth, gridDepth) * CUBE_SIZE;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#e7ebf0');
 
-    this.orbitCam = new SimpleOrbitCamera(
-      container.clientWidth / Math.max(1, container.clientHeight),
-      2.5,
-      roomSpan * 1.4
-    );
+    this.orbitCam = new SimpleOrbitCamera(container.clientWidth / Math.max(1, container.clientHeight), 2, roomSpan * 1.6);
     this.orbitCam.target.set(0, 1.2, 0);
-    this.orbitCam.setRadius(roomSpan * 0.85);
+    this.orbitCam.setRadius(roomSpan * 0.9);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
@@ -560,25 +445,12 @@ export class WarehouseInteriorScene {
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     this.scene.add(sun);
-    // Luz de relleno del lado opuesto, para que el fondo de las casillas no
-    // quede tan oscuro/parejo — sin ella se pierde el detalle ahí adentro.
     const fill = new THREE.DirectionalLight('#dce6f5', 0.5);
     fill.position.set(-6, 5, -8);
     this.scene.add(fill);
 
-    buildRoom(this.scene, roomWidth, roomDepth);
-
+    buildRoom(this.scene, gridWidth, gridDepth);
     this.scene.add(this.baysGroup);
-    layoutBays(roomWidth, roomDepth, bahias).forEach((slot) => {
-      const id = `b${slot.index + 1}`;
-      const tipo = getTipo(ESTANTE_TIPOS, DEFAULT_ESTANTE_TIPO_ID);
-      const { width, height } = computeBayDims(tipo, slot.cellSize);
-      const { group, labelAnchor, depth } = buildBay(slot, width, height, tipo);
-      group.userData.bayId = id;
-      this.baysGroup.add(group);
-      this.bays.set(id, { id, slot, width, height, depth, level: 1, tipoId: DEFAULT_ESTANTE_TIPO_ID, group, labelAnchor });
-    });
-    this.bayCounter = bahias + 1;
 
     canvas.addEventListener('pointerdown', this.onPointerDown);
     window.addEventListener('pointermove', this.onPointerMove);
@@ -592,208 +464,320 @@ export class WarehouseInteriorScene {
     this.loop();
   }
 
-  getBayIds(): string[] {
-    return Array.from(this.bays.keys());
+  private gridToWorldX(gx: number) {
+    return (gx - this.gridWidth / 2) * CUBE_SIZE;
+  }
+  private gridToWorldZ(gz: number) {
+    return (gz - this.gridDepth / 2) * CUBE_SIZE;
+  }
+  private worldToGridX(x: number) {
+    return x / CUBE_SIZE + this.gridWidth / 2;
+  }
+  private worldToGridZ(z: number) {
+    return z / CUBE_SIZE + this.gridDepth / 2;
   }
 
-  getBayTipoId(id: string): string | undefined {
-    return this.bays.get(id)?.tipoId;
+  private pointToGrid(point: THREE.Vector3): GridPoint {
+    const gx = Math.round(this.worldToGridX(point.x));
+    const gz = Math.round(this.worldToGridZ(point.z));
+    return { gx: Math.min(this.gridWidth, Math.max(0, gx)), gz: Math.min(this.gridDepth, Math.max(0, gz)) };
   }
 
-  /** Reconstruye el estante con otro tipo (cambia filas/columnas, tamaño y color). */
-  setBayTipo(id: string, tipoId: string, tipos: EstanteTipo[] = ESTANTE_TIPOS) {
-    const entry = this.bays.get(id);
-    if (!entry) return;
-    this.baysGroup.remove(entry.group);
-    disposeObject3D(entry.group);
-    const tipo = getTipo(tipos, tipoId);
-    const { width, height } = computeBayDims(tipo, entry.slot.cellSize);
-    const { group, labelAnchor, depth } = buildBay(entry.slot, width, height, tipo);
-    group.userData.bayId = id;
-    this.baysGroup.add(group);
-    entry.group = group;
-    entry.labelAnchor = labelAnchor;
-    entry.width = width;
-    entry.height = height;
-    entry.depth = depth;
-    entry.tipoId = tipoId;
-  }
-
-  /** Saca un estante ya puesto — lo que tenga apilado arriba se queda flotando,
-   * no se borra en cadena (el usuario ve el problema y decide qué hacer). */
-  removeBay(id: string) {
-    const entry = this.bays.get(id);
-    if (!entry) return;
-    this.baysGroup.remove(entry.group);
-    disposeObject3D(entry.group);
-    this.bays.delete(id);
-  }
-
-  /** Arranca el modo colocación: un estante fantasma sigue al cursor sobre el
-   * piso, y se engancha (mismo tipo, al costado) o apila (encima de cualquiera)
-   * si queda cerca de otro ya puesto. */
-  startPlacingNewBay(tipoId: string, tipos: EstanteTipo[] = ESTANTE_TIPOS) {
-    this.cancelPlacingNewBay();
-    const tipo = getTipo(tipos, tipoId);
-    const slot: BaySlot = { index: 0, position: new THREE.Vector3(0, 0, 0), rotationY: 0, cellSize: Infinity };
-    const { width, height } = computeBayDims(tipo, slot.cellSize);
-    const { group } = buildBay(slot, width, height, tipo);
-    makeGhost(group);
-    this.ghost = group;
-    this.ghostTipoId = tipoId;
-    this.ghostTipos = tipos;
-    this.ghostWidth = width;
-    this.scene.add(group);
-    this.updateGhostPosition();
-  }
-
-  cancelPlacingNewBay() {
-    if (this.ghost) {
-      this.scene.remove(this.ghost);
-      disposeObject3D(this.ghost);
-      this.ghost = null;
-    }
-    this.ghostTipoId = null;
-    this.pendingSnap = null;
-  }
-
-  /** Punto donde "apunta" el mouse para colocar — primero contra los estantes
-   * reales (así apuntar arriba de un 2do nivel funciona desde cualquier ángulo
-   * de cámara, no solo mirando casi derecho hacia abajo) y si no contra el piso. */
-  private raycastPlacementPoint(clientX: number, clientY: number): THREE.Vector3 | null {
+  private raycastGround(clientX: number, clientY: number): THREE.Vector3 | null {
     const rect = this.canvas.getBoundingClientRect();
-    const ndc = new THREE.Vector2(
-      ((clientX - rect.left) / rect.width) * 2 - 1,
-      -((clientY - rect.top) / rect.height) * 2 + 1
-    );
+    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, this.orbitCam.camera);
-
-    const hits = raycaster.intersectObject(this.baysGroup, true);
-    if (hits.length > 0) return hits[0].point;
-
     const point = new THREE.Vector3();
     return raycaster.ray.intersectPlane(this.groundPlane, point) ? point : null;
   }
 
-  /** Busca un "socket": apilar encima de cualquier estante si el punto cae
-   * sobre su huella, o engancharse al costado de uno del mismo tipo si queda cerca. */
-  private computeSnap(point: THREE.Vector3): { position: THREE.Vector3; rotationY: number; stackedOnId?: string } | null {
-    const STACK_MARGIN = 0.35;
-    const SIDE_SNAP_DIST = 0.9;
-    const up = new THREE.Vector3(0, 1, 0);
-    let sideCandidate: { dist: number; position: THREE.Vector3; rotationY: number } | null = null;
-    // El de más arriba de la torre en esta huella, sea o no topeado — hay que
-    // saber CUÁL es el techo real antes de decidir si se puede apilar ahí o no.
-    let topEntry: BayEntry | null = null;
-    let topY = -Infinity;
-
+  /** Corners alineados a la grilla + dentro del grid + separado ≥1 cubo de cualquier otro rack.
+   * El backend NO reordena por cuál lado es más corto: X es SIEMPRE el ancho (bahías, libre) y Z
+   * es SIEMPRE la profundidad (debe dar 1 o 2, nunca más) — acá se valida con ese mismo eje fijo. */
+  private isFootprintValid(c1: GridPoint, c2: GridPoint): boolean {
+    const r = normalizeRect(c1, c2);
+    const width = r.maxX - r.minX;
+    const depth = r.maxZ - r.minZ;
+    // Ancho (bahías) par y de al menos 2 — cada poste intermedio va cada 2 bahías, un ancho impar dejaría uno pisando el medio de la última.
+    if (width < 2 || width % 2 !== 0 || depth < 1 || depth > 2) return false;
+    if (r.minX < 0 || r.minZ < 0 || r.maxX > this.gridWidth || r.maxZ > this.gridDepth) return false;
     for (const entry of this.bays.values()) {
-      const local = point.clone().sub(entry.slot.position).applyAxisAngle(up, -entry.slot.rotationY);
-      const withinFootprint = Math.abs(local.x) < entry.width / 2 + STACK_MARGIN && Math.abs(local.z) < entry.depth / 2 + STACK_MARGIN;
-      if (withinFootprint) {
-        // Altura ABSOLUTA del techo (posición + altura propia) — entry.height
-        // solo es la altura propia del mueble, igual en todos los niveles, así
-        // que compararla sola siempre empataba y se quedaba con el de abajo.
-        const entryTopY = entry.slot.position.y + entry.height;
-        if (entryTopY > topY) {
-          topY = entryTopY;
-          topEntry = entry;
-        }
-        continue;
-      }
-      if (entry.tipoId !== this.ghostTipoId) continue;
-      const alongDir = new THREE.Vector3(1, 0, 0).applyAxisAngle(up, entry.slot.rotationY);
-      for (const side of [1, -1]) {
-        const candidate = entry.slot.position
-          .clone()
-          .addScaledVector(alongDir, side * (entry.width / 2 + this.ghostWidth / 2))
-          .setY(0);
-        const dist = point.distanceTo(candidate);
-        if (dist < SIDE_SNAP_DIST && (!sideCandidate || dist < sideCandidate.dist)) {
-          sideCandidate = { dist, position: candidate, rotationY: entry.slot.rotationY };
-        }
-      }
+      if (!rectsHaveClearance(r, normalizeRect(entry.corner1, entry.corner2))) return false;
     }
-
-    // Si el techo real de la torre ya está topeado (rack en su nivel máximo),
-    // NO se ofrece apilar acá — ni ahí arriba ni "bajar" al nivel anterior,
-    // que es donde ya está parado el que la topea.
-    if (topEntry) {
-      const rackCapped = topEntry.tipoId === 'rack' && topEntry.level >= MAX_RACK_STACK_LEVEL;
-      if (!rackCapped) {
-        return { position: topEntry.slot.position.clone().setY(topY), rotationY: topEntry.slot.rotationY, stackedOnId: topEntry.id };
-      }
-      return null;
-    }
-    // Apilar tiene prioridad sobre engancharse al costado.
-    return sideCandidate ? { position: sideCandidate.position, rotationY: sideCandidate.rotationY } : null;
+    return true;
   }
 
-  private updateGhostPosition(e?: PointerEvent) {
-    if (!this.ghost) return;
-    const point = this.raycastPlacementPoint(e?.clientX ?? this.lastPointer.x, e?.clientY ?? this.lastPointer.y);
-    if (!point) return;
-    const snap = this.computeSnap(point);
-    if (snap) {
-      this.ghost.position.copy(snap.position);
-      this.ghost.rotation.y = snap.rotationY;
-    } else {
-      // Sin nada cerca para engancharse: igual queda en un lugar fijo, alineado
-      // a la grilla del piso (cada baldosa mide 1 metro), no en cualquier punto.
-      this.ghost.position.set(
-        Math.round(point.x / PLACEMENT_GRID) * PLACEMENT_GRID,
-        0,
-        Math.round(point.z / PLACEMENT_GRID) * PLACEMENT_GRID
-      );
-      this.ghost.rotation.y = 0;
-    }
-    tintGhost(this.ghost, !!snap);
-    this.pendingSnap = snap;
+  getBayIds(): string[] {
+    return Array.from(this.bays.keys());
   }
 
-  private finalizePlacingNewBay() {
-    if (!this.ghost || !this.ghostTipoId) return;
-    const tipoId = this.ghostTipoId;
-    const tipo = getTipo(this.ghostTipos, tipoId);
-    const stackedOnId = this.pendingSnap?.stackedOnId;
-    const baseEntry = stackedOnId ? this.bays.get(stackedOnId) : undefined;
-    const level = baseEntry ? baseEntry.level + 1 : 1;
-    const slot: BaySlot = {
-      index: 0,
-      position: this.ghost.position.clone(),
-      rotationY: this.ghost.rotation.y,
-      cellSize: Infinity,
-    };
-    const { width, height } = computeBayDims(tipo, slot.cellSize);
-    const { group, labelAnchor, depth } = buildBay(slot, width, height, tipo);
-    const id = `b${this.bayCounter++}`;
+  getBay(id: string): { corner1: GridPoint; corner2: GridPoint; levels: number; direction: 0 | 1 } | null {
+    const entry = this.bays.get(id);
+    if (!entry) return null;
+    return { corner1: entry.corner1, corner2: entry.corner2, levels: entry.levels, direction: entry.direction };
+  }
+
+  /** Levanta un rack ya existente (viene del backend) en su posición real. */
+  loadBay(id: string, corner1: GridPoint, corner2: GridPoint, levels: number, direction: 0 | 1, name: string) {
+    const r = normalizeRect(corner1, corner2);
+    // Eje fijo, igual que el backend: X siempre ancho (bahías), Z siempre profundidad — nunca se reordena ni se rota.
+    const widthCubes = r.maxX - r.minX;
+    const depthCubes = r.maxZ - r.minZ;
+    const { group, labelAnchor, worldWidth, worldDepth, height } = buildRackMesh(widthCubes, depthCubes, levels);
+    group.position.set(this.gridToWorldX((r.minX + r.maxX) / 2), 0, this.gridToWorldZ((r.minZ + r.maxZ) / 2));
+    addDirectionMarker(group, direction, worldWidth, worldDepth);
     group.userData.bayId = id;
     this.baysGroup.add(group);
-    this.bays.set(id, { id, slot, width, height, depth, level, tipoId, group, labelAnchor });
-    this.cancelPlacingNewBay();
-    this.callbacks.onBayPlaced?.(id, tipoId);
+    this.bays.set(id, { id, corner1, corner2, levels, direction, group, labelAnchor, worldWidth, worldDepth, height });
+    this.setBayName(id, name);
   }
 
-  /** Acerca la cámara al estante elegido. */
+  /** Graba (o reemplaza) el nombre en la viga naranja del nivel más alto — se llama de nuevo cada vez que se renombra. */
+  setBayName(id: string, name: string) {
+    const entry = this.bays.get(id);
+    if (!entry) return;
+    const old = entry.group.getObjectByName('nameplate');
+    if (old) {
+      entry.group.remove(old);
+      disposeObject3D(old);
+    }
+    const plateWidth = Math.min(entry.worldWidth * 0.85, 2.4);
+    const plateHeight = plateWidth / 4;
+    const plate = buildNameplate(name, plateWidth, plateHeight);
+    plate.position.set(0, entry.height - plateHeight / 2 - 0.08, entry.worldDepth / 2 + 0.005);
+    entry.group.add(plate);
+  }
+
+  remapBayId(oldId: string, newId: string) {
+    const entry = this.bays.get(oldId);
+    if (!entry) return;
+    entry.id = newId;
+    entry.group.userData.bayId = newId;
+    this.bays.delete(oldId);
+    this.bays.set(newId, entry);
+    const stock = this.stockObjectsByBay.get(oldId);
+    if (stock) {
+      this.stockObjectsByBay.delete(oldId);
+      this.stockObjectsByBay.set(newId, stock);
+    }
+  }
+
+  removeBay(id: string) {
+    const entry = this.bays.get(id);
+    if (!entry) return;
+    this.baysGroup.remove(entry.group);
+    disposeObject3D(entry.group); // ya libera los modelos de stock: son hijos de entry.group
+    this.bays.delete(id);
+    this.stockObjectsByBay.delete(id);
+  }
+
+  /** Pone en su casilla real cada objeto ya guardado en este rack — el modelo propio del producto si lo
+   * tiene, o el genérico si no. Se llama al cargar el almacén, para verlo de un vistazo sin tener que
+   * entrar a cada estante (mismo criterio visual que BayPreviewScene.renderStock, pero para todos a la vez). */
+  async renderBayStock(bayId: string, bins: Bin[]) {
+    const entry = this.bays.get(bayId);
+    if (!entry) return;
+
+    const previous = this.stockObjectsByBay.get(bayId);
+    if (previous) {
+      for (const obj of previous.values()) {
+        entry.group.remove(obj);
+        disposeObject3D(obj);
+      }
+    }
+    const current = new Map<number, THREE.Object3D>();
+    this.stockObjectsByBay.set(bayId, current);
+
+    const rect = normalizeRect(entry.corner1, entry.corner2);
+    const depthCubes = rect.maxZ - rect.minZ;
+    const bayCount = Math.max(1, Math.round(entry.worldWidth / CUBE_SIZE));
+    const cellW = entry.worldWidth / bayCount;
+    const fitSize = Math.min(cellW, LEVEL_HEIGHT) * GENERIC_OBJECT_FIT.scale;
+    const rowDepth = entry.worldDepth / depthCubes;
+
+    for (const bin of bins) {
+      const content = bin.contents?.[0];
+      if (!content) continue;
+
+      let model: THREE.Object3D | null = null;
+      if (content.model_3d_path) model = await loadProductModel(content.model_3d_path).catch(() => null);
+      if (!model) model = await loadObjectModel('bulto').catch(() => null);
+      if (!model) continue;
+      // El estante se pudo haber quitado (o recargado, ver el `current` de arriba) mientras esto cargaba.
+      if (this.disposed || this.stockObjectsByBay.get(bayId) !== current || !this.bays.has(bayId)) {
+        disposeObject3D(model);
+        continue;
+      }
+
+      model.scale.setScalar(fitSize);
+      model.rotation.y = GENERIC_OBJECT_FIT.rotationY;
+      const x = -entry.worldWidth / 2 + cellW * (bin.bay + 0.5);
+      const y = LEVEL_HEIGHT * bin.level;
+      const z = depthCubes === 1 ? 0 : (bin.face === 0 ? rowDepth / 2 : -rowDepth / 2);
+      model.position.set(x, y, z);
+      entry.group.add(model);
+      current.set(bin.bin_id, model);
+    }
+  }
+
+  /** Arranca el modo "dibujar rack nuevo": primer click fija una esquina, el segundo la opuesta. */
+  startPlacingBay() {
+    this.cancelPlacingBay();
+    this.placingActive = true;
+  }
+
+  cancelPlacingBay() {
+    this.placingActive = false;
+    this.placeAnchor = null;
+    if (this.footprintIndicator) {
+      this.scene.remove(this.footprintIndicator);
+      disposeObject3D(this.footprintIndicator);
+      this.footprintIndicator = null;
+    }
+    if (this.draftGroup) {
+      this.scene.remove(this.draftGroup);
+      disposeObject3D(this.draftGroup);
+      this.draftGroup = null;
+      this.draftLabelAnchor = null;
+    }
+    this.draftFootprint = null;
+  }
+
+  private updateDrawingIndicator(e?: PointerEvent) {
+    const point = this.raycastGround(e?.clientX ?? this.lastPointer.x, e?.clientY ?? this.lastPointer.y);
+    if (!point) return;
+    const hovered = this.pointToGrid(point);
+    const c1 = this.placeAnchor ?? hovered;
+    const valid = this.placeAnchor ? this.isFootprintValid(c1, hovered) : true;
+    this.renderFootprintIndicator(c1, hovered, valid);
+  }
+
+  private renderFootprintIndicator(c1: GridPoint, c2: GridPoint, valid: boolean) {
+    if (this.footprintIndicator) {
+      this.scene.remove(this.footprintIndicator);
+      disposeObject3D(this.footprintIndicator);
+    }
+    const r = normalizeRect(c1, c2);
+    const w = Math.max(0.08, (r.maxX - r.minX || 1) * CUBE_SIZE);
+    const d = Math.max(0.08, (r.maxZ - r.minZ || 1) * CUBE_SIZE);
+    const cx = this.gridToWorldX((r.minX + (r.maxX || r.minX + 1)) / 2);
+    const cz = this.gridToWorldZ((r.minZ + (r.maxZ || r.minZ + 1)) / 2);
+    const color = valid ? '#22c55e' : '#ef4444';
+    const group = new THREE.Group();
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, side: THREE.DoubleSide }));
+    plane.rotation.x = -Math.PI / 2;
+    plane.position.set(cx, 0.03, cz);
+    group.add(plane);
+    const outline = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(w, d)), new THREE.LineBasicMaterial({ color }));
+    outline.rotation.x = -Math.PI / 2;
+    outline.position.set(cx, 0.035, cz);
+    group.add(outline);
+    this.footprintIndicator = group;
+    this.scene.add(group);
+  }
+
+  private rebuildDraft() {
+    if (!this.draftFootprint) return;
+    if (this.draftGroup) {
+      this.scene.remove(this.draftGroup);
+      disposeObject3D(this.draftGroup);
+    }
+    const { corner1, corner2 } = this.draftFootprint;
+    const r = normalizeRect(corner1, corner2);
+    // Eje fijo, igual que el backend: X siempre ancho (bahías), Z siempre profundidad — nunca se reordena ni se rota.
+    const widthCubes = r.maxX - r.minX;
+    const depthCubes = r.maxZ - r.minZ;
+    const { group, labelAnchor, worldWidth, worldDepth, height } = buildRackMesh(widthCubes, depthCubes, this.draftLevels);
+    group.position.set(this.gridToWorldX((r.minX + r.maxX) / 2), 0, this.gridToWorldZ((r.minZ + r.maxZ) / 2));
+    addDirectionMarker(group, this.draftDirection, worldWidth, worldDepth);
+    setGroupOpacity(group, 0.6);
+    this.scene.add(group);
+    this.draftGroup = group;
+    this.draftLabelAnchor = labelAnchor;
+    this.draftWorldWidth = worldWidth;
+    this.draftWorldDepth = worldDepth;
+    this.draftHeight = height;
+  }
+
+  /** Niveles/dirección elegidos en el panel — reconstruye la vista previa en vivo (no toca el footprint). */
+  updateDraftLevels(levels: number) {
+    this.draftLevels = Math.max(1, levels);
+    this.rebuildDraft();
+  }
+
+  updateDraftDirection(direction: 0 | 1) {
+    this.draftDirection = direction;
+    this.rebuildDraft();
+  }
+
+  /** Confirma el draft actual — lo vuelve un rack real (local) y devuelve sus datos para guardarlo contra el backend. */
+  confirmDraft(name: string): { id: string; corner1: GridPoint; corner2: GridPoint; levels: number; direction: 0 | 1 } | null {
+    if (!this.draftFootprint || !this.draftGroup || !this.draftLabelAnchor) return null;
+    const id = `r${this.bayCounter++}`;
+    setGroupOpacity(this.draftGroup, 1);
+    this.draftGroup.userData.bayId = id;
+    this.scene.remove(this.draftGroup);
+    this.baysGroup.add(this.draftGroup);
+    const entry: BayEntry = {
+      id,
+      corner1: this.draftFootprint.corner1,
+      corner2: this.draftFootprint.corner2,
+      levels: this.draftLevels,
+      direction: this.draftDirection,
+      group: this.draftGroup,
+      labelAnchor: this.draftLabelAnchor,
+      worldWidth: this.draftWorldWidth,
+      worldDepth: this.draftWorldDepth,
+      height: this.draftHeight,
+    };
+    this.bays.set(id, entry);
+    this.setBayName(id, name);
+    const result = { id, corner1: entry.corner1, corner2: entry.corner2, levels: entry.levels, direction: entry.direction };
+    this.draftGroup = null;
+    this.draftLabelAnchor = null;
+    this.draftFootprint = null;
+    this.placingActive = false;
+    return result;
+  }
+
   focusBay(id: string) {
     const entry = this.bays.get(id);
     if (!entry) return;
     const pos = entry.group.position.clone();
-    pos.y = entry.height * 0.5;
-    this.orbitCam.flyTo(pos, Math.max(3.5, entry.height * 1.8));
+    pos.y = (entry.levels * LEVEL_HEIGHT) * 0.5;
+    this.orbitCam.flyTo(pos, Math.max(3.5, entry.levels * LEVEL_HEIGHT * 1.8));
   }
 
   private handleClick(e: PointerEvent) {
-    if (this.ghost) {
-      this.finalizePlacingNewBay();
+    if (this.placingActive) {
+      if (this.draftFootprint) return; // esperando confirmación de niveles/dirección en el panel
+      const point = this.raycastGround(e.clientX, e.clientY);
+      if (!point) return;
+      const hovered = this.pointToGrid(point);
+      if (!this.placeAnchor) {
+        this.placeAnchor = hovered;
+        return;
+      }
+      const c1 = this.placeAnchor;
+      if (this.isFootprintValid(c1, hovered)) {
+        this.draftFootprint = { corner1: c1, corner2: hovered };
+        this.placeAnchor = null;
+        if (this.footprintIndicator) {
+          this.scene.remove(this.footprintIndicator);
+          disposeObject3D(this.footprintIndicator);
+          this.footprintIndicator = null;
+        }
+        this.rebuildDraft();
+        this.callbacks.onFootprintReady?.(c1, hovered);
+      } else {
+        this.placeAnchor = hovered; // más permisivo que quedar trabado en una selección inválida
+      }
       return;
     }
+
     const rect = this.canvas.getBoundingClientRect();
-    const ndc = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(ndc, this.orbitCam.camera);
     const hits = raycaster.intersectObject(this.baysGroup, true);
@@ -824,8 +808,6 @@ export class WarehouseInteriorScene {
       const distance = this.orbitCam.camera.position.distanceTo(worldPos);
       const pos = worldPos.clone().project(this.orbitCam.camera);
       if (pos.z > 1) return;
-      // Se achica de verdad con la distancia (como un cartel real en la sala),
-      // no un tamaño de pantalla fijo — REF_DISTANCE es donde queda en escala 1.
       const REF_DISTANCE = 8;
       const scale = Math.min(1.3, Math.max(0.35, REF_DISTANCE / distance));
       result.push({
@@ -846,6 +828,7 @@ export class WarehouseInteriorScene {
   };
 
   dispose() {
+    this.disposed = true;
     cancelAnimationFrame(this.raf);
     this.resizeObserver.disconnect();
     this.canvas.removeEventListener('pointerdown', this.onPointerDown);
@@ -858,36 +841,25 @@ export class WarehouseInteriorScene {
   }
 }
 
-const PREVIEW_SLOT: BaySlot = { index: 0, position: new THREE.Vector3(0, 0, 0), rotationY: 0, cellSize: Infinity };
+/** Ajuste de encaje del modelo genérico puesto en una casilla — se usa cuando el producto no tiene su propio modelo 3D. */
+const GENERIC_OBJECT_FIT = { rotationY: 0, scale: 0.9 };
 
-/** Fila+columna → código de casilla tipo "A4" (fila A arriba, columnas de izq. a der. desde 1). */
-function cellCode(row: number, col: number): string {
-  return `${String.fromCharCode(65 + row)}${col + 1}`;
+const productModelCache = new Map<string, Promise<THREE.Object3D>>();
+
+/** Modelo real de un producto (subido al catálogo) — solo sabe abrir rutas con nuestra propia convención
+ * (/api/files/:id/content); cualquier otra cosa la rechaza, para que el que llama caiga al genérico. */
+function loadProductModel(path: string): Promise<THREE.Object3D> {
+  let promise = productModelCache.get(path);
+  if (!promise) {
+    const match = path.match(/\/api\/files\/(\d+)\/content/);
+    if (!match) return Promise.reject(new Error('Ruta de modelo no reconocida'));
+    promise = getFileContentArrayBuffer(match[1]).then((buffer) => loadObjectModelFromArrayBuffer(buffer));
+    productModelCache.set(path, promise);
+  }
+  return promise.then((base) => base.clone(true));
 }
 
-interface CellInfo { row: number; col: number; code: string; }
-
-/** Qué modelo mostrar adentro de la casilla, según el tipo de estante. */
-function categoryForTipo(tipo: EstanteTipo): ObjectCategory {
-  const key = `${tipo.id} ${tipo.nombre}`.toLowerCase();
-  if (key.includes('caja')) return 'caja';
-  if (key.includes('tubo')) return 'tubo';
-  return 'bulto';
-}
-
-/** Cada modelo .glb viene con su propia orientación/proporción "de fábrica" —
- * acá se corrige por categoría: rotationY para que quede bien parado/acostado,
- * y scale como fracción del ancho×alto de la casilla (no de la profundidad,
- * que suele ser la dimensión más chica y dejaba todo demasiado chico). */
-interface CategoryPlacement { rotationY: number; scale: number; }
-const CATEGORY_PLACEMENT: Record<ObjectCategory, CategoryPlacement> = {
-  caja: { rotationY: 0, scale: 0.85 },
-  bulto: { rotationY: 0, scale: 0.8 },
-  tubo: { rotationY: Math.PI / 2, scale: 0.9 },
-};
-
-/** Escena chica y aislada: muestra un único estante en grande, para el constructor/editor de
- * tipos y para elegir una casilla puntual dentro de él. */
+/** Escena chica y aislada: un único rack en grande, para elegir una casilla (bin) real puntual dentro de él. */
 export class BayPreviewScene {
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
@@ -903,17 +875,29 @@ export class BayPreviewScene {
   private lastX = 0;
   private lastY = 0;
 
-  private currentTipo: EstanteTipo | null = null;
   private currentWidth = 0;
-  private currentHeight = 0;
   private currentDepth = 0;
-  private onSelectCell: ((cell: CellInfo) => void) | null = null;
-  private selectedCell: CellInfo | null = null;
+  private currentDepthCubes = 1;
+  private currentLevels = 0;
+  private bins: Bin[] = [];
+  private currentFace: 0 | 1 = 0;
+  private onSelectCell: ((bin: Bin) => void) | null = null;
+  // Modo solo-vista (sin pickMode): clickear una casilla la selecciona para mostrar su contenido, sin
+  // poner ningún modelo nuevo encima — a diferencia de onSelectCell, que es "elegir dónde guardar un ítem".
+  private onSelectExisting: ((bin: Bin) => void) | null = null;
+  private selectedBin: Bin | null = null;
+  private hoveredBin: Bin | null = null;
+  private hoverMarker: THREE.Object3D | null = null;
+  // Contorno dorado sobre el elemento (el objeto real ya puesto en la casilla) que se acaba de
+  // seleccionar en modo solo-vista — a diferencia de hoverMarker, queda fijo hasta la próxima selección.
+  private selectedElementMarker: THREE.BoxHelper | null = null;
   private objectMesh: THREE.Object3D | null = null;
   private objectRequestSeq = 0;
   private objectBaseFit = 1;
   private objectBaseRotation = 0;
-  private customObjectFile: File | null = null;
+  private productModelPath: string | null = null;
+  private stockObjects = new Map<number, THREE.Object3D>();
+  private stockRequestSeq = 0;
 
   private onPointerDown = (e: PointerEvent) => {
     this.pointerDownOnCanvas = true;
@@ -924,6 +908,7 @@ export class BayPreviewScene {
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    if (!this.dragging) this.updateBinHover(e);
     if (!this.dragging) return;
     const dx = e.clientX - this.lastX;
     const dy = e.clientY - this.lastY;
@@ -942,7 +927,9 @@ export class BayPreviewScene {
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
-    this.orbitCam.zoom(e.deltaY);
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    this.orbitCam.zoomToward(e.deltaY, ndc);
   };
 
   constructor(canvas: HTMLCanvasElement, container: HTMLElement, private onFrame?: () => void) {
@@ -961,12 +948,12 @@ export class BayPreviewScene {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(container.clientWidth, container.clientHeight, false);
 
-    this.scene.add(new THREE.AmbientLight('#ffffff', 0.7));
-    const sun = new THREE.DirectionalLight('#fff6e6', 1);
+    this.scene.add(new THREE.AmbientLight('#ffffff', 0.9));
+    const sun = new THREE.DirectionalLight('#fff6e6', 1.3);
     sun.position.set(4, 8, 6);
     sun.castShadow = true;
     this.scene.add(sun);
-    const fill = new THREE.DirectionalLight('#dce6f5', 0.4);
+    const fill = new THREE.DirectionalLight('#dce6f5', 0.5);
     fill.position.set(-4, 3, -5);
     this.scene.add(fill);
 
@@ -981,41 +968,98 @@ export class BayPreviewScene {
     this.loop();
   }
 
-  /** Rearma el estante con el tipo actual del formulario — se llama en cada cambio. */
-  update(tipo: EstanteTipo) {
+  /** Rearma el rack mostrado — se llama al entrar a un estante puntual, con sus dimensiones reales. */
+  update(width: number, depth: number, levels: number) {
     if (this.bayGroup) {
       this.scene.remove(this.bayGroup);
       disposeObject3D(this.bayGroup);
     }
     this.clearSelection();
-    const { width, height } = computeBayDims(tipo, PREVIEW_SLOT.cellSize);
-    const { group, depth } = buildBay(PREVIEW_SLOT, width, height, tipo);
+    this.stockObjects = new Map(); // ya se disponen solos al disponer el bayGroup viejo, arriba
+    const { group, height } = buildRackMesh(width, depth, levels);
     this.bayGroup = group;
     this.scene.add(group);
-    this.currentTipo = tipo;
-    this.currentWidth = width;
-    this.currentHeight = height;
-    this.currentDepth = depth;
+    this.currentWidth = width * CUBE_SIZE;
+    this.currentDepth = depth * CUBE_SIZE;
+    this.currentDepthCubes = depth;
+    this.currentLevels = levels;
 
-    // Para pallets "height" es la profundidad del piso, no una altura real —
-    // mirar ahí arriba dejaría la cámara apuntando al aire sobre las tarimas.
-    const targetY = tipo.montaje === 'piso' ? PALLET_HEIGHT : height / 2;
-    this.orbitCam.target.set(0, targetY, 0);
-    this.orbitCam.setRadius(Math.max(width, height) * 1.7);
+    this.orbitCam.target.set(0, height / 2, 0);
+    this.orbitCam.setRadius(Math.max(this.currentWidth, height) * 1.7);
   }
 
-  /** Habilita (o desactiva, pasando null) elegir una casilla puntual con un click. */
-  setSelectCellHandler(handler: ((cell: CellInfo) => void) | null) {
+  /** Casillas (bins) reales de este rack — bay 0-indexado, level 1-indexado, face 0/1. */
+  setBins(bins: Bin[], face: 0 | 1 = 0) {
+    this.bins = bins;
+    this.currentFace = face;
+    this.clearSelection();
+  }
+
+  setFace(face: 0 | 1) {
+    this.currentFace = face;
+    this.clearSelection();
+  }
+
+  hasFace(face: 0 | 1): boolean {
+    return this.bins.some((b) => b.face === face);
+  }
+
+  /** Pone en su casilla real cada objeto que ya está guardado — el modelo propio del producto si lo tiene, o el
+   * genérico si no. Se llama cada vez que se entra a mirar un estante, tenga o no algo guardado. */
+  async renderStock(bins: Bin[]) {
+    const requestId = ++this.stockRequestSeq;
+    const targetGroup = this.bayGroup;
+    for (const obj of this.stockObjects.values()) {
+      targetGroup?.remove(obj);
+      disposeObject3D(obj);
+    }
+    this.stockObjects.clear();
+    if (!targetGroup) return;
+
+    const bayCount = Math.max(1, Math.round(this.currentWidth / CUBE_SIZE));
+    const cellW = this.currentWidth / bayCount;
+    const fitSize = Math.min(cellW, LEVEL_HEIGHT) * GENERIC_OBJECT_FIT.scale;
+
+    for (const bin of bins) {
+      const content = bin.contents?.[0];
+      if (!content) continue;
+
+      let model: THREE.Object3D | null = null;
+      if (content.model_3d_path) model = await loadProductModel(content.model_3d_path).catch(() => null);
+      if (!model) model = await loadObjectModel('bulto').catch(() => null);
+      // La selección puede haber cambiado (o el estante recargado) mientras esto cargaba.
+      if (!model) continue;
+      if (requestId !== this.stockRequestSeq || this.bayGroup !== targetGroup) {
+        disposeObject3D(model);
+        continue;
+      }
+
+      model.scale.setScalar(fitSize);
+      const pos = this.binWorldPos(bin);
+      model.position.set(pos.x, pos.y, pos.z);
+      model.userData.binId = bin.bin_id; // para poder resolver el click exacto sobre el objeto real, ver resolveBinAtPointer
+      targetGroup.add(model);
+      this.stockObjects.set(bin.bin_id, model);
+    }
+  }
+
+  setSelectCellHandler(handler: ((bin: Bin) => void) | null) {
     this.onSelectCell = handler;
     if (!handler) this.clearSelection();
   }
 
-  /** Si el ítem trae su propio .glb, se usa ese en vez del genérico por categoría. */
-  setCustomObjectSource(file: File | null) {
-    this.customObjectFile = file;
+  /** Modo solo-vista: clickear una casilla ya guardada la selecciona (para mostrar qué hay ahí) sin
+   * tocar su contenido — a diferencia de setSelectCellHandler, no pone ningún modelo nuevo encima. */
+  setViewSelectHandler(handler: ((bin: Bin) => void) | null) {
+    this.onSelectExisting = handler;
+    if (!handler) this.clearSelection();
   }
 
-  /** Ajusta a mano el objeto ya puesto — escala relativa a su tamaño de encaje y rotación extra en grados. */
+  /** Modelo 3D real del producto que se está por guardar acá — el mismo que tiene asignado en el Catálogo. */
+  setProductModel(path: string | null) {
+    this.productModelPath = path;
+  }
+
   setObjectAdjustment(scaleMultiplier: number, extraRotationDeg: number) {
     if (!this.objectMesh) return;
     this.objectMesh.scale.setScalar(this.objectBaseFit * scaleMultiplier);
@@ -1023,38 +1067,137 @@ export class BayPreviewScene {
   }
 
   private clearSelection() {
-    this.selectedCell = null;
-    this.objectRequestSeq++; // descarta cualquier carga de modelo en curso
+    this.selectedBin = null;
+    this.objectRequestSeq++;
     if (this.objectMesh) {
       this.bayGroup?.remove(this.objectMesh);
       disposeObject3D(this.objectMesh);
       this.objectMesh = null;
     }
+    this.setSelectedElementMarker(null);
+    this.setHoveredBin(null);
   }
 
-  /** Carga y ubica un modelo real adentro de la casilla elegida — el propio del
-   * ítem si lo trae, o si no el genérico según el tipo de estante. */
-  private async placeObjectInCell(cell: CellInfo) {
-    if (!this.currentTipo || !this.bayGroup) return;
-    const customFile = this.customObjectFile;
-    const placement = customFile ? { rotationY: 0, scale: 0.8 } : CATEGORY_PLACEMENT[categoryForTipo(this.currentTipo)];
-    const cellW = this.currentWidth / this.currentTipo.cols;
-    const cellH = this.currentHeight / this.currentTipo.rows;
-    const fitSize = Math.min(cellW, cellH) * placement.scale;
+  /** Contorno alrededor del elemento real seleccionado (modo solo-vista) — null si la casilla está
+   * vacía (no hay nada que resaltar) o si se deselecciona. */
+  private setSelectedElementMarker(bin: Bin | null) {
+    if (this.selectedElementMarker) {
+      this.scene.remove(this.selectedElementMarker);
+      this.selectedElementMarker.dispose();
+      this.selectedElementMarker = null;
+    }
+    const object = bin ? this.stockObjects.get(bin.bin_id) : null;
+    if (!object) return;
+    const helper = new THREE.BoxHelper(object, 0xf5a623);
+    this.scene.add(helper);
+    this.selectedElementMarker = helper;
+  }
+
+  private binWorldPos(bin: Bin): THREE.Vector3 {
+    const bayCount = Math.max(1, Math.round(this.currentWidth / CUBE_SIZE));
+    const cw = this.currentWidth / bayCount;
+    const x = -this.currentWidth / 2 + cw * (bin.bay + 0.5);
+    const y = LEVEL_HEIGHT * bin.level;
+    // Centro real de la fila de esa cara, no su borde: con profundidad 1 hay
+    // una sola fila (centrada en 0); con profundidad 2 cada cara es media
+    // fila propia, centrada a ±1/4 de la profundidad total.
+    const rowDepth = this.currentDepth / this.currentDepthCubes;
+    const z = this.currentDepthCubes === 1 ? 0 : (bin.face === 0 ? rowDepth / 2 : -rowDepth / 2);
+    return new THREE.Vector3(x, y, z);
+  }
+
+  /** Bin real bajo el puntero. Primero prueba contra los objetos YA puestos (selección exacta sobre
+   * el elemento real, sin importar desde qué cara/ángulo se mire — antes se aproximaba con bay/level
+   * sobre un plano y dependía de currentFace, así que clickear el elemento mirando desde atrás podía
+   * no encontrar nada). Si el rayo no golpea ningún objeto (casilla vacía, no hay nada que clickear),
+   * cae al cálculo aproximado sobre la estructura del rack. */
+  private resolveBinAtPointer(e: PointerEvent): Bin | null {
+    if (!this.bayGroup) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+    const raycaster = new THREE.Raycaster();
+    raycaster.setFromCamera(ndc, this.orbitCam.camera);
+
+    const stockHits = raycaster.intersectObjects(Array.from(this.stockObjects.values()), true);
+    if (stockHits.length > 0) {
+      let obj: THREE.Object3D | null = stockHits[0].object;
+      while (obj && obj.userData.binId === undefined) obj = obj.parent;
+      const binId = obj?.userData.binId as number | undefined;
+      const bin = binId !== undefined ? this.bins.find((b) => b.bin_id === binId) : undefined;
+      if (bin) return bin;
+    }
+
+    const hits = raycaster.intersectObject(this.bayGroup, true);
+    if (hits.length === 0) return null;
+    const point = hits[0].point;
+    const bayCount = Math.max(1, Math.round(this.currentWidth / CUBE_SIZE));
+    const cellW = this.currentWidth / bayCount;
+    const bay = Math.min(bayCount - 1, Math.max(0, Math.floor((point.x + this.currentWidth / 2) / cellW)));
+    const level = Math.min(this.currentLevels, Math.max(1, Math.round(point.y / LEVEL_HEIGHT)));
+    return this.bins.find((b) => b.bay === bay && b.level === level && b.face === this.currentFace) ?? null;
+  }
+
+  /** Resalta la casilla (cuadro) que el mouse tiene debajo — señal de "acá vas a poner el elemento"
+   * (o, en modo solo-vista, "esto es lo que vas a seleccionar"). */
+  private updateBinHover(e: PointerEvent) {
+    // El cuadro celeste de "acá vas a quedar" solo tiene sentido en pickMode (elegir dónde guardar
+    // un ítem nuevo, antes de clickear). En modo solo-vista no se muestra — ahí la única marca es el
+    // contorno sobre el elemento real, recién al seleccionarlo (ver setSelectedElementMarker).
+    if (!this.onSelectCell) {
+      this.setHoveredBin(null);
+      return;
+    }
+    this.setHoveredBin(this.resolveBinAtPointer(e));
+  }
+
+  private setHoveredBin(bin: Bin | null) {
+    if (bin === this.hoveredBin) return;
+    this.hoveredBin = bin;
+    if (this.hoverMarker) {
+      this.bayGroup?.remove(this.hoverMarker);
+      disposeObject3D(this.hoverMarker);
+      this.hoverMarker = null;
+    }
+    if (!bin || !this.bayGroup) return;
+    const bayCount = Math.max(1, Math.round(this.currentWidth / CUBE_SIZE));
+    const cellW = this.currentWidth / bayCount;
+    // Mismo nivel que donde en verdad se apoya el objeto (LEVEL_HEIGHT * level) —
+    // antes esto marcaba medio nivel más abajo, así que el resalte y el
+    // objeto puesto quedaban en cuadros distintos.
+    const centerY = LEVEL_HEIGHT * bin.level;
+    const x = -this.currentWidth / 2 + cellW * (bin.bay + 0.5);
+
+    const group = new THREE.Group();
+    const geom = new THREE.PlaneGeometry(cellW * 0.85, LEVEL_HEIGHT * 0.85);
+    const plane = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ color: '#38bdf8', transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
+    group.add(plane);
+    const outline = new THREE.LineSegments(new THREE.EdgesGeometry(geom), new THREE.LineBasicMaterial({ color: '#38bdf8' }));
+    group.add(outline);
+    const z = bin.face === 0 ? this.currentDepth / 2 + 0.01 : -this.currentDepth / 2 - 0.01;
+    group.position.set(x, centerY, z);
+    this.bayGroup.add(group);
+    this.hoverMarker = group;
+  }
+
+  /** Carga y ubica el modelo real del producto (si tiene uno asignado en el Catálogo), o el genérico si no, apoyado sobre el nivel de esta casilla. */
+  private async placeObjectInCell(bin: Bin) {
+    if (!this.bayGroup) return;
+    const bayCount = Math.max(1, Math.round(this.currentWidth / CUBE_SIZE));
+    const cellW = this.currentWidth / bayCount;
+    const fitSize = Math.min(cellW, LEVEL_HEIGHT) * GENERIC_OBJECT_FIT.scale;
     const requestId = ++this.objectRequestSeq;
 
-    const model = await (customFile ? loadObjectModelFromFile(customFile) : loadObjectModel(categoryForTipo(this.currentTipo))).catch(() => null);
-    if (!model || requestId !== this.objectRequestSeq || !this.bayGroup) return; // la selección cambió mientras cargaba
+    let model: THREE.Object3D | null = null;
+    if (this.productModelPath) model = await loadProductModel(this.productModelPath).catch(() => null);
+    if (!model) model = await loadObjectModel('bulto').catch(() => null);
+    if (!model || requestId !== this.objectRequestSeq || !this.bayGroup) return;
 
     this.objectBaseFit = fitSize;
-    this.objectBaseRotation = placement.rotationY;
+    this.objectBaseRotation = GENERIC_OBJECT_FIT.rotationY;
     model.scale.setScalar(fitSize);
-    model.rotation.y = placement.rotationY;
-    // El rack industrial es una estructura abierta con el tablero cerca del
-    // techo, no una cubículo cerrada con piso en cero — la fórmula genérica
-    // (pensada para "cajas"/"tubos") lo mandaba al piso en vez de encima.
-    const restY = this.currentTipo.id === 'rack' ? this.currentHeight : this.currentHeight - cellH * (cell.row + 1);
-    model.position.set(-this.currentWidth / 2 + cellW * (cell.col + 0.5), restY, 0);
+    model.rotation.y = GENERIC_OBJECT_FIT.rotationY;
+    const pos = this.binWorldPos(bin);
+    model.position.set(pos.x, pos.y, pos.z);
     if (this.objectMesh) {
       this.bayGroup.remove(this.objectMesh);
       disposeObject3D(this.objectMesh);
@@ -1064,40 +1207,22 @@ export class BayPreviewScene {
   }
 
   private handleClick(e: PointerEvent) {
-    if (!this.onSelectCell || !this.bayGroup || !this.currentTipo || this.currentTipo.montaje !== 'pared') return;
-    const rect = this.canvas.getBoundingClientRect();
-    const ndc = new THREE.Vector2(
-      ((e.clientX - rect.left) / rect.width) * 2 - 1,
-      -((e.clientY - rect.top) / rect.height) * 2 + 1
-    );
-    const raycaster = new THREE.Raycaster();
-    raycaster.setFromCamera(ndc, this.orbitCam.camera);
-    const hits = raycaster.intersectObject(this.bayGroup, true);
-    if (hits.length === 0) return;
-
-    // PREVIEW_SLOT no tiene posición/rotación, así que el punto del hit ya
-    // está en el espacio local del estante.
-    const point = hits[0].point;
-    const { rows, cols } = this.currentTipo;
-    const col = Math.min(cols - 1, Math.max(0, Math.floor((point.x + this.currentWidth / 2) / (this.currentWidth / cols))));
-    const row = Math.min(rows - 1, Math.max(0, Math.floor((this.currentHeight - point.y) / (this.currentHeight / rows))));
-
-    const cell: CellInfo = { row, col, code: cellCode(row, col) };
-    this.selectedCell = cell;
-    this.placeObjectInCell(cell);
-    this.onSelectCell(cell);
+    if ((!this.onSelectCell && !this.onSelectExisting) || !this.bayGroup) return;
+    const bin = this.resolveBinAtPointer(e);
+    if (!bin) return;
+    this.selectedBin = bin;
+    if (this.onSelectCell) {
+      this.placeObjectInCell(bin); // elegir ubicación: pone el ítem nuevo encima, tenga o no algo ya guardado
+      this.onSelectCell(bin);
+    } else {
+      this.setSelectedElementMarker(bin); // solo-vista: resalta el elemento real, nunca toca lo que ya está puesto
+      this.onSelectExisting?.(bin);
+    }
   }
 
-  /** Posición en pantalla (px) de la casilla elegida, para la etiqueta flotante. */
   getSelectedCellScreenPos(): { x: number; y: number } | null {
-    if (!this.selectedCell || !this.currentTipo) return null;
-    const cellW = this.currentWidth / this.currentTipo.cols;
-    const cellH = this.currentHeight / this.currentTipo.rows;
-    const pos = new THREE.Vector3(
-      -this.currentWidth / 2 + cellW * (this.selectedCell.col + 0.5),
-      this.currentHeight - cellH * this.selectedCell.row,
-      this.currentDepth / 2
-    );
+    if (!this.selectedBin) return null;
+    const pos = this.binWorldPos(this.selectedBin);
     pos.project(this.orbitCam.camera);
     if (pos.z > 1) return null;
     return {
