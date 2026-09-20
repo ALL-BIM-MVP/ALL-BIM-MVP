@@ -13,6 +13,7 @@ import { PURCHASE_ORDER_ERRORS } from "../../models/errors/almacen/purchase-orde
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { filePendingAlert, getPurchaseOrderItemStatus } from "./document-status.service.js";
 import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
@@ -101,9 +102,11 @@ const loadDetail = async (
     const header = headerResult.rows[0];
     if (!header) throw new AppError(INVOICE_ERRORS.NOT_FOUND);
 
-    const items = await client.query<InvoiceItem>(
+    const items = await client.query<Omit<InvoiceItem, "purchase_order_progress" | "alerts">>(
         `${ITEM_SELECT} WHERE i.invoice_id = $1 ORDER BY i.invoice_item_id`, [invoiceId]
     );
+    // Estado derivado (Fase 8): avance ACUMULADO de la línea de orden que cada línea factura.
+    const status = await getPurchaseOrderItemStatus(client, items.rows.filter((i) => i.purchase_order_item_id != null).map((i) => i.purchase_order_item_id!));
     const fileResult = await client.query<Omit<InvoiceFile, "url">>(
         `SELECT f.file_id, f.name, f.mime_type, f.file_size
         FROM invoices v INNER JOIN files f ON f.file_id = v.file_id WHERE v.invoice_id = $1`,
@@ -113,8 +116,12 @@ const loadDetail = async (
 
     return {
         ...header,
-        items: items.rows,
+        items: items.rows.map((i) => {
+            const s = i.purchase_order_item_id != null ? status.get(String(i.purchase_order_item_id)) : undefined;
+            return { ...i, purchase_order_progress: s?.progress ?? null, alerts: s ? s.alerts("invoice") : [] };
+        }),
         file: file ? { ...file, url: buildSignedFileUrl(file.file_id, "content") } : null,
+        alerts: file ? [] : [filePendingAlert()],
     };
 };
 

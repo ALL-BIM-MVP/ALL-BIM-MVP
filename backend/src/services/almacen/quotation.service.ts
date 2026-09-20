@@ -11,6 +11,7 @@ import { PURCHASE_REQUISITION_ERRORS } from "../../models/errors/almacen/purchas
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { filePendingAlert, getQuotationItemStatus } from "./document-status.service.js";
 import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
@@ -97,9 +98,11 @@ const loadDetail = async (
     const header = headerResult.rows[0];
     if (!header) throw new AppError(QUOTATION_ERRORS.NOT_FOUND);
 
-    const items = await client.query<QuotationItem>(
+    const items = await client.query<Omit<QuotationItem, "progress" | "alerts">>(
         `${ITEM_SELECT} WHERE i.quotation_id = $1 ORDER BY i.quotation_item_id`, [quotationId]
     );
+    // Estado derivado (Fase 8): cuánto se ordenó de cada línea y si fue adjudicada.
+    const status = await getQuotationItemStatus(client, items.rows.map((i) => i.quotation_item_id));
     const fileResult = await client.query<Omit<QuotationFile, "url">>(
         `SELECT f.file_id, f.name, f.mime_type, f.file_size
         FROM quotations q INNER JOIN files f ON f.file_id = q.file_id WHERE q.quotation_id = $1`,
@@ -109,8 +112,9 @@ const loadDetail = async (
 
     return {
         ...header,
-        items: items.rows,
+        items: items.rows.map((i) => ({ ...i, ...status.get(String(i.quotation_item_id))! })),
         file: file ? { ...file, url: buildSignedFileUrl(file.file_id, "content") } : null,
+        alerts: file ? [] : [filePendingAlert()],
     };
 };
 

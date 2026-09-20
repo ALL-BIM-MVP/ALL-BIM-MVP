@@ -1,3 +1,5 @@
+import type { QuotationItemProgress, StatusAlert } from "./document-status.models.js";
+
 // quotations (cotizaciones) — ver database/schema.sql y
 // docs/almacen-ingreso-productos/05-roadmap.md, Fase 4. Los NUMERIC (cantidades
 // y montos) llegan como string desde pg: el backend no los suma con `+`.
@@ -41,6 +43,9 @@ export interface QuotationItem {
     product: { product_id: number; code: string; name: string; unit: string };
     // Lo que pedía la línea del requerimiento, para compararlo con lo cotizado.
     requisition_item: { purchase_requisition_item_id: number; description: string; quantity_requested: string };
+    // Derivado (Fase 8): cuánto se ordenó de esta línea y si fue adjudicada.
+    progress: QuotationItemProgress;
+    alerts: StatusAlert[];
 }
 
 export interface QuotationFile {
@@ -54,4 +59,5 @@ export interface QuotationFile {
 export interface QuotationDetail extends Omit<QuotationRow, "items_count" | "has_file"> {
     items: QuotationItem[];
     file: QuotationFile | null;
+    alerts: StatusAlert[];
 }

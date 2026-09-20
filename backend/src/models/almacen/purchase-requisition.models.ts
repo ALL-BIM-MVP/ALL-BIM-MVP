@@ -1,3 +1,5 @@
+import type { RequisitionItemProgress, RequisitionSummary, StatusAlert } from "./document-status.models.js";
+
 // purchase_requisitions (requerimientos) — ver database/schema.sql y
 // docs/almacen-ingreso-productos/05-roadmap.md, Fase 3. Los NUMERIC
 // (cantidad, precio) llegan como string desde pg: el backend no los suma.
@@ -26,6 +28,9 @@ export interface PurchaseRequisitionItem {
     quantity_requested: string;
     estimated_unit_price: string | null;
     product: { product_id: number; code: string; name: string; unit: string };
+    // Derivado (Fase 8): avance de la línea por la cadena y avisos.
+    progress: RequisitionItemProgress;
+    alerts: StatusAlert[];
 }
 
 export interface PurchaseRequisitionFile {
@@ -40,4 +45,7 @@ export interface PurchaseRequisitionFile {
 export interface PurchaseRequisitionDetail extends Omit<PurchaseRequisitionRow, "items_count" | "has_file"> {
     items: PurchaseRequisitionItem[];
     file: PurchaseRequisitionFile | null;
+    // Derivado (Fase 8): cuántas líneas ya pasaron por cada etapa, y avisos del documento.
+    summary: RequisitionSummary;
+    alerts: StatusAlert[];
 }

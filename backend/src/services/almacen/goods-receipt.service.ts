@@ -12,6 +12,7 @@ import { assertModulePermission } from "../project-access.service.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertProductInProject } from "./product.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { getPurchaseOrderItemStatus, getReceiptStatus } from "./document-status.service.js";
 import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { PURCHASE_ORDER_ERRORS } from "../../models/errors/almacen/purchase-order.errors.js";
@@ -74,7 +75,7 @@ export const listGoodsReceiptsService = async (
         params.push(containsPattern(query.search));
         filter = `AND (concat(gr.delivery_note_series, '-', gr.delivery_note_number) ILIKE $5 OR s.name ILIKE $5)`;
     }
-    const { rows } = await pool.query<GoodsReceiptRow>(
+    const { rows } = await pool.query<Omit<GoodsReceiptRow, "documents" | "alerts">>(
         `${GOODS_RECEIPT_SELECT}
         WHERE gr.project_id = $1
             AND ($2::int IS NULL OR gr.supplier_id = $2)
@@ -83,20 +84,22 @@ export const listGoodsReceiptsService = async (
         ORDER BY gr.created_at DESC`,
         params
     );
-    return rows;
+    // Estado derivado (Fase 8): el "expediente" de cada ingreso y sus avisos (una sola consulta).
+    const status = await getReceiptStatus(pool, rows.map((r) => r.goods_receipt_id));
+    return rows.map((r) => ({ ...r, ...status.get(String(r.goods_receipt_id))! }));
 };
 
 const loadDetail = async (
     client: Pick<PoolClient, "query">, projectId: number, goodsReceiptId: number
 ): Promise<GoodsReceiptDetail> => {
-    const headerResult = await client.query<GoodsReceiptRow>(
+    const headerResult = await client.query<Omit<GoodsReceiptRow, "documents" | "alerts">>(
         `${GOODS_RECEIPT_SELECT} WHERE gr.goods_receipt_id = $1 AND gr.project_id = $2`,
         [goodsReceiptId, projectId]
     );
     const header = headerResult.rows[0];
     if (!header) throw new AppError(GOODS_RECEIPT_ERRORS.NOT_FOUND);
 
-    const itemsResult = await client.query<GoodsReceiptItemRow>(
+    const itemsResult = await client.query<Omit<GoodsReceiptItemRow, "purchase_order_progress" | "alerts">>(
         `SELECT gri.*,
             CASE WHEN oi.purchase_order_item_id IS NULL THEN NULL
                 ELSE json_build_object('purchase_order_item_id', oi.purchase_order_item_id, 'description', oi.description,
@@ -120,12 +123,26 @@ const loadDetail = async (
     );
     const file = fileResult.rows[0];
 
-    const items = itemsResult.rows.map((item) => ({
-        ...item,
-        locations: locationsResult.rows.filter((loc) => loc.goods_receipt_item_id === item.goods_receipt_item_id),
-    }));
+    // Estado derivado (Fase 8): expediente del ingreso y avance ACUMULADO de la línea de orden de cada línea.
+    const receiptStatus = (await getReceiptStatus(client, [goodsReceiptId])).get(String(goodsReceiptId))!;
+    const orderStatus = await getPurchaseOrderItemStatus(
+        client, itemsResult.rows.filter((i) => i.purchase_order_item_id != null).map((i) => i.purchase_order_item_id!)
+    );
 
-    return { ...header, items, file: file ? { ...file, url: buildSignedFileUrl(file.file_id, "content") } : null };
+    const items = itemsResult.rows.map((item) => {
+        const s = item.purchase_order_item_id != null ? orderStatus.get(String(item.purchase_order_item_id)) : undefined;
+        return {
+            ...item,
+            purchase_order_progress: s?.progress ?? null,
+            alerts: s ? s.alerts("receipt") : [],
+            locations: locationsResult.rows.filter((loc) => loc.goods_receipt_item_id === item.goods_receipt_item_id),
+        };
+    });
+
+    return {
+        ...header, ...receiptStatus, items,
+        file: file ? { ...file, url: buildSignedFileUrl(file.file_id, "content") } : null,
+    };
 };
 
 export const getGoodsReceiptByIdService = async (

@@ -1,3 +1,5 @@
+import type { PurchaseOrderItemProgress, StatusAlert } from "./document-status.models.js";
+
 // invoices (facturas) — ver database/schema.sql y
 // docs/almacen-ingreso-productos/05-roadmap.md, Fase 6. Los NUMERIC llegan como
 // string desde pg: el backend no los suma con `+`.
@@ -42,6 +44,9 @@ export interface InvoiceItem {
     product: { product_id: number; code: string; name: string; unit: string };
     // Lo que decía la línea de la orden (null = la factura no tiene orden).
     purchase_order_item: { purchase_order_item_id: number; description: string; quantity_ordered: string } | null;
+    // Derivado (Fase 8): avance ACUMULADO de la línea de orden que esta línea factura (null sin orden) y avisos.
+    purchase_order_progress: PurchaseOrderItemProgress | null;
+    alerts: StatusAlert[];
 }
 
 export interface InvoiceFile {
@@ -55,4 +60,5 @@ export interface InvoiceFile {
 export interface InvoiceDetail extends Omit<InvoiceRow, "items_count" | "has_file"> {
     items: InvoiceItem[];
     file: InvoiceFile | null;
+    alerts: StatusAlert[];
 }

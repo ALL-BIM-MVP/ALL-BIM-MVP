@@ -1,3 +1,5 @@
+import type { PurchaseOrderItemProgress, StatusAlert } from "./document-status.models.js";
+
 // purchase_orders (órdenes de compra) — ver database/schema.sql y
 // docs/almacen-ingreso-productos/05-roadmap.md, Fase 5. Los NUMERIC llegan como
 // string desde pg: el backend no los suma con `+`.
@@ -43,6 +45,9 @@ export interface PurchaseOrderItem {
     // Origen de la línea (null = la línea no cita ese documento).
     quotation_item: { quotation_item_id: number; description: string; quantity_quoted: string } | null;
     requisition_item: { purchase_requisition_item_id: number; description: string; quantity_requested: string } | null;
+    // Derivado (Fase 8): avance acumulado de la línea (ordenado / facturado / recibido / pendiente) y avisos.
+    progress: PurchaseOrderItemProgress;
+    alerts: StatusAlert[];
 }
 
 export interface PurchaseOrderFile {
@@ -56,4 +61,5 @@ export interface PurchaseOrderFile {
 export interface PurchaseOrderDetail extends Omit<PurchaseOrderRow, "items_count" | "has_file"> {
     items: PurchaseOrderItem[];
     file: PurchaseOrderFile | null;
+    alerts: StatusAlert[];
 }

@@ -1,3 +1,5 @@
+import type { PurchaseOrderItemProgress, ReceiptDocuments, StatusAlert } from "./document-status.models.js";
+
 // goods_receipts (Ingreso = guía de remisión + ubicación) — ver
 // docs/roadmap/almacen-bim-base-datos.md 4.1-4.3 y
 // docs/almacen-ingreso-productos/05-roadmap.md, Fase 7. Registro inmutable en lo
@@ -30,6 +32,9 @@ export interface GoodsReceiptRow {
     created_by: number;
     updated_at: Date | null;
     updated_by: number | null;
+    // Derivado (Fase 8): "expediente" del ingreso (qué documentos tiene su cadena) y avisos del documento.
+    documents: ReceiptDocuments;
+    alerts: StatusAlert[];
 }
 
 export interface GoodsReceiptItemLocationRow {
@@ -50,6 +55,9 @@ export interface GoodsReceiptItemRow {
     quantity_per_delivery_note: number | null;
     // Lo que decía la línea de la orden (null = el ingreso no tiene orden).
     purchase_order_item: { purchase_order_item_id: number; description: string; quantity_ordered: string } | null;
+    // Derivado (Fase 8): avance ACUMULADO de la línea de orden que esta línea recibe (null sin orden) y avisos.
+    purchase_order_progress: PurchaseOrderItemProgress | null;
+    alerts: StatusAlert[];
 }
 
 export interface GoodsReceiptItemWithLocations extends GoodsReceiptItemRow {

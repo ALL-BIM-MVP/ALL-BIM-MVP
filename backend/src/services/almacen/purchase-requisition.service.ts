@@ -13,6 +13,7 @@ import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertProductInProject } from "./product.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { filePendingAlert, getRequisitionItemStatus } from "./document-status.service.js";
 import { containsPattern } from "../../utils/like-search.js";
 import {
     lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
@@ -81,10 +82,12 @@ const loadDetail = async (
     const header = headerResult.rows[0];
     if (!header) throw new AppError(PURCHASE_REQUISITION_ERRORS.NOT_FOUND);
 
-    const items = await client.query<PurchaseRequisitionItem>(
+    const items = await client.query<Omit<PurchaseRequisitionItem, "progress" | "alerts">>(
         `${ITEM_SELECT} WHERE i.purchase_requisition_id = $1 ORDER BY i.purchase_requisition_item_id`,
         [purchaseRequisitionId]
     );
+    // Estado derivado (Fase 8): avance por la cadena y avisos, calculado al consultar.
+    const status = await getRequisitionItemStatus(client, items.rows.map((i) => i.purchase_requisition_item_id));
     const fileResult = await client.query<Omit<PurchaseRequisitionFile, "url">>(
         `SELECT f.file_id, f.name, f.mime_type, f.file_size
         FROM purchase_requisitions pr INNER JOIN files f ON f.file_id = pr.file_id
@@ -95,8 +98,10 @@ const loadDetail = async (
 
     return {
         ...header,
-        items: items.rows,
+        items: items.rows.map((i) => ({ ...i, ...status.items.get(String(i.purchase_requisition_item_id))! })),
         file: file ? { ...file, url: buildSignedFileUrl(file.file_id, "content") } : null,
+        summary: status.summary,
+        alerts: file ? [] : [filePendingAlert()],
     };
 };
 

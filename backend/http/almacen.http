@@ -1058,6 +1058,40 @@ GET {{baseUrl}}/projects/{{projectId}}/goods-receipts?search=T001-12
 Authorization: Bearer {{accessToken}}
 
 ### =====================================================================
+### 7B. ESTADO DERIVADO (Fase 8): avance por línea, adjudicación, expediente del ingreso y avisos
+### =====================================================================
+# No hay endpoints nuevos: el estado se CALCULA al consultar y viene dentro de los detalles que ya
+# existen (nunca se guarda, así que no puede quedar desactualizado). Los avisos (`alerts`) son
+# informativos y NUNCA bloquean. Solo cuentan los documentos activos (los ingresos no se dan de baja).
+#  - Requerimiento: cada línea trae `progress` {requested, offers_count, ordered, invoiced, received,
+#    pending_to_order, pending_to_receive, missing[]}; el detalle trae `summary` y `alerts`.
+#  - Cotización: cada línea trae `progress` {quoted, ordered, orders_count, awarded, pending_to_order}.
+#  - Orden: cada línea trae `progress` {ordered, invoiced, received, pending_to_invoice, pending_to_receive, quoted, requested}.
+#  - Factura e ingreso: cada línea trae `purchase_order_progress` (avance ACUMULADO de la línea de orden).
+#  - Ingreso: `documents` {requisition, quotation, purchase_order, invoice, delivery_note_file} con
+#    "presente" | "pendiente" | "no_aplica" (también en la lista de ingresos).
+
+### 7B.1 Requerimiento: en qué etapa está cada línea y cuáles faltan
+GET {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}
+Authorization: Bearer {{accessToken}}
+
+### 7B.2 Cotización: qué líneas fueron adjudicadas (alguna orden activa las cita)
+GET {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}
+Authorization: Bearer {{accessToken}}
+
+### 7B.3 Orden: ordenado / facturado / recibido / pendiente por línea, con avisos
+GET {{baseUrl}}/projects/{{projectId}}/purchase-orders/{{directOrderId}}
+Authorization: Bearer {{accessToken}}
+
+### 7B.4 Factura: lo facturado frente al avance acumulado de la línea de orden
+GET {{baseUrl}}/projects/{{projectId}}/invoices/{{invoiceId}}
+Authorization: Bearer {{accessToken}}
+
+### 7B.5 Ingreso: su expediente de documentos y sus avisos (orden, factura, archivo pendientes)
+GET {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptWithOrderId}}
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
 ### 8. VALES DE SALIDA (goods issues) — restan stock
 ### =====================================================================
 

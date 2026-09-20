@@ -15,6 +15,7 @@ import { QUOTATION_ERRORS } from "../../models/errors/almacen/quotation.errors.j
 import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { buildSet } from "../../utils/partial-update.js";
+import { filePendingAlert, getPurchaseOrderItemStatus } from "./document-status.service.js";
 import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
@@ -115,9 +116,11 @@ const loadDetail = async (
     const header = headerResult.rows[0];
     if (!header) throw new AppError(PURCHASE_ORDER_ERRORS.NOT_FOUND);
 
-    const items = await client.query<PurchaseOrderItem>(
+    const items = await client.query<Omit<PurchaseOrderItem, "progress" | "alerts">>(
         `${ITEM_SELECT} WHERE i.purchase_order_id = $1 ORDER BY i.purchase_order_item_id`, [purchaseOrderId]
     );
+    // Estado derivado (Fase 8): avance acumulado de cada línea (ordenado / facturado / recibido / pendiente).
+    const status = await getPurchaseOrderItemStatus(client, items.rows.map((i) => i.purchase_order_item_id));
     const fileResult = await client.query<Omit<PurchaseOrderFile, "url">>(
         `SELECT f.file_id, f.name, f.mime_type, f.file_size
         FROM purchase_orders o INNER JOIN files f ON f.file_id = o.file_id WHERE o.purchase_order_id = $1`,
@@ -127,8 +130,12 @@ const loadDetail = async (
 
     return {
         ...header,
-        items: items.rows,
+        items: items.rows.map((i) => {
+            const s = status.get(String(i.purchase_order_item_id))!;
+            return { ...i, progress: s.progress, alerts: s.alerts("order") };
+        }),
         file: file ? { ...file, url: buildSignedFileUrl(file.file_id, "content") } : null,
+        alerts: file ? [] : [filePendingAlert()],
     };
 };
 
