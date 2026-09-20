@@ -1,4 +1,5 @@
 import z from 'zod';
+import { dateOnlySchema } from './goods-receipt.schema.js';
 
 export const GoodsIssueIdParamSchema = z.object({
     projectId: z.coerce.number(),
@@ -46,7 +47,7 @@ export const CreateGoodsIssueBodySchema = z.object({
     destination_block: z.string().trim().min(1, "El bloque de destino no puede estar vacío").max(100),
     recipient_name: z.string().trim().min(1, "El nombre de quien retira no puede estar vacío").max(200),
     recipient_dni: recipientDniSchema,
-    issue_date: z.coerce.date(),
+    issue_date: dateOnlySchema,
     items: z.array(GoodsIssueItemInputSchema).min(1, "Un vale de salida necesita al menos un ítem."),
 });
 export type CreateGoodsIssueBody = z.infer<typeof CreateGoodsIssueBodySchema>;

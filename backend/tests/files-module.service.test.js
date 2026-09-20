@@ -17,6 +17,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 // Se apunta UPLOADS_DIR a una carpeta temporal ANTES de cargar dist/ (los
 // imports son dinámicos: UPLOADS_DIR se lee al importar el módulo) para no
@@ -57,7 +58,7 @@ const coverFile = (name) => fakeMulterFile(path.join(PUBLIC_UPLOADS_DIR, "covers
 const createUser = async (label) => {
     const { rows } = await pool.query(
         `INSERT INTO users (name, email, password_hash, role_id) VALUES ($1, $2, 'x', 4) RETURNING user_id`,
-        [`[test] ${label}`, `test-${label}-${Date.now()}@example.test`]
+        [`[test] ${label}`, `test-${label}-${randomUUID()}@example.test`]
     );
     return rows[0].user_id;
 };

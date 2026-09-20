@@ -17,13 +17,20 @@ import type {
 } from "../../models/almacen/goods-issue.models.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 
+// issue_date sale como texto AAAA-MM-DD (columna DATE): sin pasar por un
+// Date, no depende de la zona horaria del servidor. Fragmento fijo.
+const GOODS_ISSUE_SELECT = `
+    SELECT goods_issue_id, project_id, destination_sector, destination_level, destination_block,
+        recipient_name, recipient_dni, to_char(issue_date, 'YYYY-MM-DD') AS issue_date, created_at, created_by
+    FROM goods_issues`;
+
 export const listGoodsIssuesService = async (
     user: DecodedToken, { projectId }: ProjectIdParam
 ): Promise<GoodsIssueRow[]> => {
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
 
     const { rows } = await pool.query<GoodsIssueRow>(
-        `SELECT * FROM goods_issues WHERE project_id = $1 ORDER BY created_at DESC`,
+        `${GOODS_ISSUE_SELECT} WHERE project_id = $1 ORDER BY created_at DESC`,
         [projectId]
     );
     return rows;
@@ -35,7 +42,7 @@ export const getGoodsIssueByIdService = async (
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
 
     const headerResult = await pool.query<GoodsIssueRow>(
-        `SELECT * FROM goods_issues WHERE goods_issue_id = $1 AND project_id = $2`,
+        `${GOODS_ISSUE_SELECT} WHERE goods_issue_id = $1 AND project_id = $2`,
         [goodsIssueId, projectId]
     );
     const header = headerResult.rows[0];

@@ -20,6 +20,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 
 // deleteProjectByIdService borra la carpeta uploads/<projectId> del
 // disco: el ID de un proyecto de prueba podría coincidir con una carpeta
@@ -78,10 +79,15 @@ const seedAlmacenData = async () => {
         [bins[0].bin_id, productId, OWNER_USER_ID]
     );
 
-    const [{ goods_receipt_id: receiptId }] = await q(
-        `INSERT INTO goods_receipts (project_id, supplier_ruc, supplier_name, delivery_note_number, purchase_date, created_by)
-        VALUES ($1, '20123456789', '[test] proveedor', 'G-1', CURRENT_DATE, $2) RETURNING goods_receipt_id`,
+    const [{ supplier_id: supplierId }] = await q(
+        `INSERT INTO suppliers (project_id, ruc, name, created_by)
+        VALUES ($1, '20123456789', '[test] proveedor', $2) RETURNING supplier_id`,
         [projectId, OWNER_USER_ID]
+    );
+    const [{ goods_receipt_id: receiptId }] = await q(
+        `INSERT INTO goods_receipts (project_id, supplier_id, delivery_note_series, delivery_note_number, delivery_note_date, created_by)
+        VALUES ($1, $2, 'T001', '1', CURRENT_DATE, $3) RETURNING goods_receipt_id`,
+        [projectId, supplierId, OWNER_USER_ID]
     );
     const [{ goods_receipt_item_id: receiptItemId }] = await q(
         `INSERT INTO goods_receipt_items (goods_receipt_id, product_id, total_quantity) VALUES ($1, $2, 10) RETURNING goods_receipt_item_id`,
@@ -140,7 +146,7 @@ const seedAlmacenData = async () => {
 
     return {
         almacenFileId: fileIds.almacen, metradosFileId: fileIds.metrados, filePaths,
-        warehouseId, rackId, productId, binContentId, receiptId, receiptItemId, issueId, issueItemId, groupId,
+        supplierId, warehouseId, rackId, productId, binContentId, receiptId, receiptItemId, issueId, issueItemId, groupId,
         binIds: bins.map((b) => b.bin_id),
         movementIds: movements.map((m) => m.inventory_movement_id),
     };
@@ -150,6 +156,7 @@ const seedAlmacenData = async () => {
 const remainingSeededRows = async () => {
     const s = seeded;
     const checks = [
+        ["suppliers", "supplier_id", [s.supplierId]],
         ["warehouses", "warehouse_id", [s.warehouseId]],
         ["racks", "rack_id", [s.rackId]],
         ["bins", "bin_id", s.binIds],
@@ -193,7 +200,7 @@ before(async () => {
     const user = await pool.query(
         `INSERT INTO users (name, email, password_hash, role_id)
         VALUES ('[test] editor', $1, 'x', 4) RETURNING user_id`,
-        [`test-editor-${Date.now()}@example.test`]
+        [`test-editor-${randomUUID()}@example.test`]
     );
     editorId = user.rows[0].user_id;
     const member = await pool.query(
@@ -225,7 +232,7 @@ after(async () => {
 test("summary de un proyecto sin datos de Almacén: vacío, con todo en 0", async () => {
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        warehouses: 0, racks: 0, bins: 0, products: 0,
+        suppliers: 0, warehouses: 0, racks: 0, bins: 0, products: 0,
         goods_receipts: 0, goods_issues: 0, inventory_movements: 0, files: 0, is_empty: true,
     });
 });
@@ -234,7 +241,7 @@ test("summary con datos: cuenta todo (incluye grupos y movimientos) y is_empty=f
     seeded = await seedAlmacenData();
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1, is_empty: false,
     });
 });
@@ -269,7 +276,7 @@ test("un Editor puede ver el summary pero NO vaciar Almacén (403), y no se borr
 test("el dueño vacía Almacén: devuelve lo eliminado, no deja huérfanos y conserva las 3 categorías", async () => {
     const deleted = await emptyAlmacenContentService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(deleted, {
-        warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1,
     });
 

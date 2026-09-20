@@ -20,35 +20,43 @@ const GoodsReceiptItemLocationInputSchema = z.object({
 // por precisión de punto flotante en decimales.
 const GoodsReceiptItemInputSchema = z.object({
     product_id: z.coerce.number(),
+    // Lo que se RECIBIÓ físicamente (suma al stock y se reparte entre ubicaciones).
     total_quantity: z.coerce.number().positive(),
+    // Lo que decía la guía — opcional: puede diferir de lo recibido
+    // (faltantes, mermas, roturas). No se valida contra total_quantity.
+    quantity_per_delivery_note: z.coerce.number().positive().optional(),
     locations: z.array(GoodsReceiptItemLocationInputSchema).min(1, "Cada ítem necesita al menos una ubicación."),
 }).refine(
     (item) => Math.abs(item.locations.reduce((sum, l) => sum + l.quantity, 0) - item.total_quantity) < EPS,
     { message: "La suma de las cantidades por ubicación tiene que ser igual a total_quantity.", path: ["locations"] }
 );
 
-// RUC peruano (SUNAT): SIEMPRE 11 dígitos numéricos exactos, nunca
-// letras/guiones/espacios propios del identificador — mismo CHECK que
-// espeja goods_receipts.supplier_ruc en schema.sql (~ '^\d{11}$').
-// `.replace` antes de validar es tolerancia de tipeo/copy-paste (un
-// RUC copiado de una factura a veces trae espacios o un guion tipo
-// "20-123456789"), NO relaja la regla: lo que llega a la base sigue
-// siendo exactamente 11 dígitos limpios.
-const RUC_REGEX = /^\d{11}$/;
-export const supplierRucSchema = z.string().trim()
-    .transform((v) => v.replace(/[\s-]/g, ""))
-    .pipe(z.string().regex(RUC_REGEX, "El RUC debe tener exactamente 11 dígitos numéricos (formato SUNAT)"));
+// Guía de remisión: serie y número SEPARADOS, como vienen en el
+// documento (formato real de SUNAT, ver el comentario en schema.sql). La
+// serie se normaliza a mayúsculas; el número son 1 a 8 dígitos. Mismos
+// CHECK que goods_receipts.delivery_note_series/number en schema.sql.
+// Fecha "solo día" (columna DATE): llega y se guarda como texto
+// "YYYY-MM-DD", sin pasar por un Date — así no depende de la zona horaria
+// del servidor. Es lo que ya envía un <input type="date">. Exportada:
+// goods-issue.schema.ts la reusa para la fecha del vale.
+export const dateOnlySchema = z.iso.date("La fecha debe tener el formato AAAA-MM-DD");
+
+const deliveryNoteSeriesSchema = z.string().trim()
+    .transform((v) => v.toUpperCase())
+    .pipe(z.string().regex(/^[A-Z0-9]{1,4}$/, "La serie de la guía debe tener de 1 a 4 letras o números, sin guiones ni espacios"));
+const deliveryNoteNumberSchema = z.string().trim()
+    .regex(/^\d{1,8}$/, "El número de la guía debe tener de 1 a 8 dígitos");
 
 export const CreateGoodsReceiptBodySchema = z.object({
-    // 4 datos de compra (diseño 4.1) — separados, no un solo campo de texto libre.
-    supplier_ruc: supplierRucSchema,
-    // Los .max() de acá abajo espejan los VARCHAR(n) reales de
-    // schema.sql — sin esto, un texto más largo que la columna no lo
-    // rechaza un 400 legible, lo rechaza Postgres con un error crudo
-    // de "value too long for type character varying(n)".
-    supplier_name: z.string().trim().min(1, "El proveedor no puede estar vacío").max(200),
-    delivery_note_number: z.string().trim().min(1, "El número de guía no puede estar vacío").max(50),
-    purchase_date: z.coerce.date(),
+    // El proveedor se elige o se crea antes (GET/POST .../suppliers): acá
+    // solo viaja su id. El RUC y el nombre viven en `suppliers`.
+    supplier_id: z.coerce.number(),
+    delivery_note_series: deliveryNoteSeriesSchema,
+    delivery_note_number: deliveryNoteNumberSchema,
+    // Fecha de emisión que dice la guía.
+    delivery_note_date: dateOnlySchema,
+    // Fecha en que el material llegó de verdad; si no viene, la base usa hoy.
+    received_date: dateOnlySchema.optional(),
     items: z.array(GoodsReceiptItemInputSchema).min(1, "Un ingreso necesita al menos un ítem."),
 });
 export type CreateGoodsReceiptBody = z.infer<typeof CreateGoodsReceiptBodySchema>;

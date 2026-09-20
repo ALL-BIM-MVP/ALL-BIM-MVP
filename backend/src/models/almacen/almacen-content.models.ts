@@ -3,6 +3,7 @@
 // como contenido a la hora de vaciar el módulo o eliminar el proyecto.
 // Son COUNT(*)::int (números reales, no strings de BIGINT: no son IDs).
 export interface AlmacenContentCounts {
+    suppliers: number;
     warehouses: number;
     racks: number;
     bins: number;

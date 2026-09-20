@@ -11,6 +11,7 @@ import { assertModulePermission } from "../project-access.service.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertProductInProject } from "./product.service.js";
 import { assertBinInProject } from "./bin.service.js";
+import { assertSupplierInProject } from "./supplier.service.js";
 import { applyStockMovement } from "./inventory-movement.service.js";
 import type { CreateGoodsReceiptBody, GoodsReceiptIdParam } from "../../schemas/almacen/goods-receipt.schema.js";
 import type {
@@ -18,13 +19,26 @@ import type {
 } from "../../models/almacen/goods-receipt.models.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 
+// Columnas del ingreso + su proveedor embebido (json_build_object): RUC y
+// nombre salen de `suppliers`, el ingreso solo guarda supplier_id. Fragmento
+// fijo del servidor; usa el alias gr y hace el JOIN a suppliers como s.
+const GOODS_RECEIPT_SELECT = `
+    SELECT gr.goods_receipt_id, gr.project_id,
+        json_build_object('supplier_id', s.supplier_id, 'ruc', s.ruc, 'name', s.name) AS supplier,
+        gr.delivery_note_series, gr.delivery_note_number,
+        to_char(gr.delivery_note_date, 'YYYY-MM-DD') AS delivery_note_date,
+        to_char(gr.received_date, 'YYYY-MM-DD') AS received_date,
+        gr.created_at, gr.created_by
+    FROM goods_receipts gr
+    INNER JOIN suppliers s ON s.supplier_id = gr.supplier_id`;
+
 export const listGoodsReceiptsService = async (
     user: DecodedToken, { projectId }: ProjectIdParam
 ): Promise<GoodsReceiptRow[]> => {
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
 
     const { rows } = await pool.query<GoodsReceiptRow>(
-        `SELECT * FROM goods_receipts WHERE project_id = $1 ORDER BY created_at DESC`,
+        `${GOODS_RECEIPT_SELECT} WHERE gr.project_id = $1 ORDER BY gr.created_at DESC`,
         [projectId]
     );
     return rows;
@@ -36,7 +50,7 @@ export const getGoodsReceiptByIdService = async (
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
 
     const headerResult = await pool.query<GoodsReceiptRow>(
-        `SELECT * FROM goods_receipts WHERE goods_receipt_id = $1 AND project_id = $2`,
+        `${GOODS_RECEIPT_SELECT} WHERE gr.goods_receipt_id = $1 AND gr.project_id = $2`,
         [goodsReceiptId, projectId]
     );
     const header = headerResult.rows[0];
@@ -86,6 +100,8 @@ export const createGoodsReceiptService = async (
         // Validar que TODO lo referenciado exista en este proyecto
         // antes de insertar nada — mejor un 404/400 claro que una
         // transacción a medio armar.
+        await assertSupplierInProject(client, projectId, body.supplier_id);
+
         for (const item of body.items) {
             await assertProductInProject(client, projectId, item.product_id);
             for (const location of item.locations) {
@@ -94,19 +110,23 @@ export const createGoodsReceiptService = async (
         }
 
         const headerResult = await client.query<{ goods_receipt_id: number }>(
-            `INSERT INTO goods_receipts (project_id, supplier_ruc, supplier_name, delivery_note_number, purchase_date, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6)
+            `INSERT INTO goods_receipts
+                (project_id, supplier_id, delivery_note_series, delivery_note_number, delivery_note_date, received_date, created_by)
+            VALUES ($1,$2,$3,$4,$5, COALESCE($6::date, CURRENT_DATE), $7)
             RETURNING goods_receipt_id`,
-            [projectId, body.supplier_ruc, body.supplier_name, body.delivery_note_number, body.purchase_date, user.user_id]
+            [
+                projectId, body.supplier_id, body.delivery_note_series, body.delivery_note_number,
+                body.delivery_note_date, body.received_date ?? null, user.user_id,
+            ]
         );
         const goodsReceiptId = headerResult.rows[0]!.goods_receipt_id;
 
         for (const item of body.items) {
             const itemResult = await client.query<{ goods_receipt_item_id: number }>(
-                `INSERT INTO goods_receipt_items (goods_receipt_id, product_id, total_quantity)
-                VALUES ($1,$2,$3)
+                `INSERT INTO goods_receipt_items (goods_receipt_id, product_id, total_quantity, quantity_per_delivery_note)
+                VALUES ($1,$2,$3,$4)
                 RETURNING goods_receipt_item_id`,
-                [goodsReceiptId, item.product_id, item.total_quantity]
+                [goodsReceiptId, item.product_id, item.total_quantity, item.quantity_per_delivery_note ?? null]
             );
             const goodsReceiptItemId = itemResult.rows[0]!.goods_receipt_item_id;
 

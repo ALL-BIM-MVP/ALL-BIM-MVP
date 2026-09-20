@@ -13,7 +13,8 @@ export interface GoodsIssueRow {
     // REGISTRÓ acá).
     recipient_name: string;
     recipient_dni: string;
-    issue_date: Date;
+    // Fecha "solo día" como texto AAAA-MM-DD (no un Date con zona horaria).
+    issue_date: string;
     created_at: Date;
     created_by: number;
 }

@@ -1162,13 +1162,21 @@ CREATE TABLE bin_merge_members (
 --    salida), simétricos, + Kardex (inventory movements)
 -- ------------------------------------------------------------
 
--- Reducido para esta etapa a "4 datos de compra" + elegir
--- ubicación(es)+cantidad por ítem, sin Órdenes de Compra. Registro de
--- movimiento INMUTABLE: no se edita, no se da de baja (no tiene
--- deleted_at) — un error se corrige con un movimiento nuevo, nunca
--- reescribiendo este.
-CREATE TABLE goods_receipts (
-    goods_receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+-- ------------------------------------------------------------
+-- Proveedores (por proyecto) — Fase 2 de
+-- docs/almacen-ingreso-productos/05-roadmap.md
+-- ------------------------------------------------------------
+-- Un proveedor pertenece a UN proyecto: no hay catálogo global (cada
+-- proyecto puede ser una obra/cliente distinto, y aunque dos proyectos
+-- tengan el mismo RUC en el mundo real, cada uno mantiene su registro).
+-- El RUC y la razón social viven SOLO acá: los documentos (ingresos hoy;
+-- órdenes de compra, cotizaciones y facturas después) referencian
+-- supplier_id y nunca repiten el RUC ni el nombre. Editar el nombre
+-- cambia lo que muestran los documentos antiguos (no se copia en cada
+-- uno); el RUC solo se puede cambiar mientras el proveedor no tenga
+-- documentos (regla de la aplicación, no del esquema).
+CREATE TABLE suppliers (
+    supplier_id INT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
     -- RUC = "Registro Único de Contribuyentes", el identificador
     -- tributario peruano (lo asigna SUNAT) — jerga de dominio
@@ -1176,32 +1184,62 @@ CREATE TABLE goods_receipts (
     -- nombre de columna traducible. Formato REAL, no genérico: SIEMPRE
     -- 11 dígitos numéricos exactos (2 dígitos de tipo de contribuyente
     -- + 8 de cuerpo + 1 dígito verificador) — nunca letras, guiones ni
-    -- espacios, nunca menos ni más de 11. `VARCHAR(20)` sin CHECK
-    -- dejaba pasar cualquier cosa, incluido "1" — corregido. El
-    -- dígito verificador (checksum módulo 11 con pesos fijos) NO se
-    -- valida acá a propósito: implementarlo mal en un CHECK de SQL
-    -- rechazaría RUCs reales válidos, un daño peor que no validarlo —
-    -- si hace falta a futuro, con una referencia/librería confiable en
-    -- la aplicación, no adivinado en el esquema.
-    supplier_ruc VARCHAR(11) NOT NULL CHECK (supplier_ruc ~ '^\d{11}$'),
-    supplier_name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(supplier_name)) > 0),
-    -- "Guía de remisión" — el documento de despacho real; su NÚMERO sí
-    -- se traduce (a diferencia del RUC, acá no se pierde nada
-    -- específico del dominio). A propósito SIN un formato fijo tipo
-    -- RUC/DNI: a diferencia de esos (identificador emitido por una
-    -- entidad única con una regla nacional), el número de guía lo
-    -- define cada proveedor en SU propio documento físico/electrónico
-    -- — puede traer serie+correlativo con guion, sin guion, con
-    -- letras, etc. Acá solo se transcribe lo que dice el papel, no se
-    -- valida contra SUNAT.
-    delivery_note_number VARCHAR(50) NOT NULL CHECK (LENGTH(TRIM(delivery_note_number)) > 0),
-    -- Fecha del documento — distinta de created_at (cuándo se registró
-    -- en el sistema, puede no ser el mismo día).
-    purchase_date DATE NOT NULL,
+    -- espacios, nunca menos ni más de 11. El dígito verificador
+    -- (checksum módulo 11 con pesos fijos) NO se valida acá a propósito:
+    -- implementarlo mal en un CHECK de SQL rechazaría RUCs reales
+    -- válidos, un daño peor que no validarlo — si hace falta a futuro,
+    -- con una referencia/librería confiable en la aplicación, no
+    -- adivinado en el esquema.
+    ruc VARCHAR(11) NOT NULL CHECK (ruc ~ '^\d{11}$'),
+    -- Razón social tal como figura en los documentos.
+    name VARCHAR(200) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+-- Único mientras esté activo. También sirve para buscar por RUC dentro de
+-- un proyecto (project_id es su columna líder), por eso no hay un índice
+-- aparte solo por project_id.
+CREATE UNIQUE INDEX idx_un_suppliers_ruc_active ON suppliers (project_id, ruc) WHERE deleted_at IS NULL;
+
+-- Registro de movimiento INMUTABLE: no se edita, no se da de baja (no
+-- tiene deleted_at) — un error se corrige con un movimiento nuevo,
+-- nunca reescribiendo este. Los vínculos a documentos previos (orden de
+-- compra, factura) se agregan en fases siguientes como columnas
+-- opcionales.
+CREATE TABLE goods_receipts (
+    goods_receipt_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Solo el id: el RUC y la razón social viven en `suppliers`.
+    -- RESTRICT: no se puede borrar de motor un proveedor con ingresos.
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- "Guía de remisión" — el documento de despacho real, con su serie y
+    -- su número SEPARADOS como vienen en el documento ("T001-00000123"
+    -- es solo la forma de escribirlos juntos, con un guion). Formato REAL
+    -- (SUNAT, verificado): la serie tiene 4 caracteres alfanuméricos
+    -- (guía electrónica: 'T###' del remitente, 'V###' del transportista,
+    -- 'EG##' emitida desde el portal SUNAT) y el correlativo va de 1 a 8
+    -- dígitos. De la guía IMPRESA no se pudo confirmar el largo exacto de
+    -- la serie: se acepta de 1 a 4 alfanuméricos, sin guiones ni espacios
+    -- (la aplicación la normaliza a mayúsculas). Lo que sí no se acepta
+    -- es texto libre: un valor como "vvv" o "GR-23144141" no es una guía.
+    delivery_note_series VARCHAR(4) NOT NULL CHECK (delivery_note_series ~ '^[A-Za-z0-9]{1,4}$'),
+    delivery_note_number VARCHAR(8) NOT NULL CHECK (delivery_note_number ~ '^\d{1,8}$'),
+    -- Fecha de emisión que dice la guía.
+    delivery_note_date DATE NOT NULL,
+    -- Fecha en que el material llegó de verdad (recepción física) —
+    -- distinta de la fecha de la guía y de created_at (cuándo se
+    -- registró en el sistema, puede no ser el mismo día).
+    received_date DATE NOT NULL DEFAULT CURRENT_DATE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id)
 );
 CREATE INDEX idx_goods_receipts_project_id ON goods_receipts (project_id);
+-- "¿Este proveedor ya tiene documentos?" (RUC bloqueado, baja bloqueada) y
+-- el conteo por proveedor filtran por esto.
+CREATE INDEX idx_goods_receipts_supplier_id ON goods_receipts (supplier_id);
 
 CREATE TABLE goods_receipt_items (
     goods_receipt_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1210,7 +1248,14 @@ CREATE TABLE goods_receipt_items (
     -- RESTRICT: no se puede borrar de motor un producto con historial
     -- de ingresos.
     product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
-    total_quantity NUMERIC(18,6) NOT NULL CHECK (total_quantity > 0)
+    -- Lo que se RECIBIÓ físicamente (es lo que suma al stock). Se repartió
+    -- entre ubicaciones en goods_receipt_item_locations.
+    total_quantity NUMERIC(18,6) NOT NULL CHECK (total_quantity > 0),
+    -- Lo que decía la guía, cuando se quiere registrar: puede diferir de
+    -- lo recibido (faltantes, mermas, roturas). NULL = no se registró.
+    -- Son dos conceptos distintos: nunca se mezclan en una sola columna.
+    quantity_per_delivery_note NUMERIC(18,6)
+        CHECK (quantity_per_delivery_note IS NULL OR quantity_per_delivery_note > 0)
 );
 CREATE INDEX idx_goods_receipt_items_receipt_id ON goods_receipt_items (goods_receipt_id);
 CREATE INDEX idx_goods_receipt_items_product_id ON goods_receipt_items (product_id);
