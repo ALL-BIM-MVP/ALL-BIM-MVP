@@ -109,17 +109,19 @@ export const createGoodsReceiptService = async (
             }
         }
 
-        const headerResult = await client.query<{ goods_receipt_id: number }>(
+        const headerResult = await client.query<{ goods_receipt_id: number; received_date: string }>(
             `INSERT INTO goods_receipts
                 (project_id, supplier_id, delivery_note_series, delivery_note_number, delivery_note_date, received_date, created_by)
             VALUES ($1,$2,$3,$4,$5, COALESCE($6::date, CURRENT_DATE), $7)
-            RETURNING goods_receipt_id`,
+            RETURNING goods_receipt_id, to_char(received_date, 'YYYY-MM-DD') AS received_date`,
             [
                 projectId, body.supplier_id, body.delivery_note_series, body.delivery_note_number,
                 body.delivery_note_date, body.received_date ?? null, user.user_id,
             ]
         );
         const goodsReceiptId = headerResult.rows[0]!.goods_receipt_id;
+        // El default (hoy) lo resuelve la base: el Kardex usa la fecha ya guardada.
+        const receivedDate = headerResult.rows[0]!.received_date;
 
         for (const item of body.items) {
             const itemResult = await client.query<{ goods_receipt_item_id: number }>(
@@ -144,6 +146,7 @@ export const createGoodsReceiptService = async (
                     direction: "entrada",
                     referenceDocumentType: "goods_receipt",
                     referenceDocumentId: goodsReceiptId,
+                    movementDate: receivedDate,
                     userId: user.user_id,
                 });
             }

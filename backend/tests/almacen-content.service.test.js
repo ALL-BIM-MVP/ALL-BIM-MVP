@@ -115,8 +115,8 @@ const seedAlmacenData = async () => {
 
     const movements = await q(
         `INSERT INTO inventory_movements (product_id, type, quantity, bin_id, resulting_balance,
-            reference_document_type, reference_document_id, created_by)
-        VALUES ($1, 'entrada', 10, $2, 10, 'goods_receipt', $3, $5), ($1, 'salida', 3, $2, 7, 'goods_issue', $4, $5)
+            reference_document_type, reference_document_id, movement_date, created_by)
+        VALUES ($1, 'entrada', 10, $2, 10, 'goods_receipt', $3, CURRENT_DATE, $5), ($1, 'salida', 3, $2, 7, 'goods_issue', $4, CURRENT_DATE, $5)
         RETURNING inventory_movement_id`,
         [productId, bins[0].bin_id, receiptId, issueId, OWNER_USER_ID]
     );
@@ -157,7 +157,20 @@ const seedAlmacenData = async () => {
         [requisitionId, productId]
     );
 
+    // Una cotización de ese proveedor a ese requerimiento, con una línea.
+    const [{ quotation_id: quotationId }] = await q(
+        `INSERT INTO quotations (project_id, supplier_id, purchase_requisition_id, number, quotation_date, currency, created_by)
+        VALUES ($1, $2, $3, 'COT-1', CURRENT_DATE, 'PEN', $4) RETURNING quotation_id`,
+        [projectId, supplierId, requisitionId, OWNER_USER_ID]
+    );
+    const [{ quotation_item_id: quotationItemId }] = await q(
+        `INSERT INTO quotation_items (quotation_id, purchase_requisition_item_id, product_id, description, quantity_quoted, line_total)
+        VALUES ($1, $2, $3, '[test] línea cotizada', 5, 100) RETURNING quotation_item_id`,
+        [quotationId, requisitionItemId, productId]
+    );
+
     return {
+        quotationId, quotationItemId,
         requisitionId, requisitionItemId,
         almacenFileId: fileIds.almacen, metradosFileId: fileIds.metrados, filePaths,
         supplierId, warehouseId, rackId, productId, binContentId, receiptId, receiptItemId, issueId, issueItemId, groupId,
@@ -171,6 +184,8 @@ const remainingSeededRows = async () => {
     const s = seeded;
     const checks = [
         ["suppliers", "supplier_id", [s.supplierId]],
+        ["quotations", "quotation_id", [s.quotationId]],
+        ["quotation_items", "quotation_item_id", [s.quotationItemId]],
         ["purchase_requisitions", "purchase_requisition_id", [s.requisitionId]],
         ["purchase_requisition_items", "purchase_requisition_item_id", [s.requisitionItemId]],
         ["warehouses", "warehouse_id", [s.warehouseId]],
@@ -248,7 +263,7 @@ after(async () => {
 test("summary de un proyecto sin datos de Almacén: vacío, con todo en 0", async () => {
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        suppliers: 0, purchase_requisitions: 0, warehouses: 0, racks: 0, bins: 0, products: 0,
+        suppliers: 0, purchase_requisitions: 0, quotations: 0, warehouses: 0, racks: 0, bins: 0, products: 0,
         goods_receipts: 0, goods_issues: 0, inventory_movements: 0, files: 0, is_empty: true,
     });
 });
@@ -257,7 +272,7 @@ test("summary con datos: cuenta todo (incluye grupos y movimientos) y is_empty=f
     seeded = await seedAlmacenData();
     const summary = await getAlmacenSummaryService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(summary, {
-        suppliers: 1, purchase_requisitions: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, purchase_requisitions: 1, quotations: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1, is_empty: false,
     });
 });
@@ -292,7 +307,7 @@ test("un Editor puede ver el summary pero NO vaciar Almacén (403), y no se borr
 test("el dueño vacía Almacén: devuelve lo eliminado, no deja huérfanos y conserva las 3 categorías", async () => {
     const deleted = await emptyAlmacenContentService(asUser(OWNER_USER_ID), { projectId });
     assert.deepEqual(deleted, {
-        suppliers: 1, purchase_requisitions: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
+        suppliers: 1, purchase_requisitions: 1, quotations: 1, warehouses: 1, racks: 1, bins: 2, products: 1,
         goods_receipts: 1, goods_issues: 1, inventory_movements: 2, files: 1,
     });
 

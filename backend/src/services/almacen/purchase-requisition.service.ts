@@ -12,7 +12,10 @@ import { assertModulePermission } from "../project-access.service.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertProductInProject } from "./product.service.js";
-import { assertFileAttachable, deleteFileRow, removeFileBytes } from "./document-file.service.js";
+import { buildSet } from "../../utils/partial-update.js";
+import {
+    lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
+} from "./document-file.service.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 import type {
     CreatePurchaseRequisitionBody, CreatePurchaseRequisitionItemBody, ListPurchaseRequisitionsQuery,
@@ -154,18 +157,6 @@ export const createPurchaseRequisitionService = async (
     }
 };
 
-// Arma "SET col = $n, ..." solo con los campos enviados. Las columnas salen
-// de la lista fija de cada llamada (nunca de las claves del usuario).
-const buildSet = (
-    columns: readonly string[], body: Record<string, unknown>, firstParam: number
-): { set: string; values: unknown[] } => {
-    const sent = columns.filter((column) => body[column] !== undefined);
-    return {
-        set: sent.map((column, index) => `${column} = $${firstParam + index}`).join(", "),
-        values: sent.map((column) => body[column]),
-    };
-};
-
 const HEADER_COLUMNS = ["number", "requisition_date", "requester", "notes"] as const;
 
 export const updatePurchaseRequisitionService = async (
@@ -191,19 +182,13 @@ export const updatePurchaseRequisitionService = async (
     return loadDetail(pool, projectId, purchaseRequisitionId);
 };
 
-// Bloquea el requerimiento activo (FOR UPDATE) y devuelve su file_id: sirve
-// a las operaciones de líneas y de archivo para no pisarse entre sí.
-const lockRequisition = async (
-    client: PoolClient, projectId: number, purchaseRequisitionId: number
-): Promise<{ file_id: number | null }> => {
-    const { rows } = await client.query<{ file_id: number | null }>(
-        `SELECT file_id FROM purchase_requisitions
-        WHERE purchase_requisition_id = $1 AND project_id = $2 AND deleted_at IS NULL FOR UPDATE`,
-        [purchaseRequisitionId, projectId]
-    );
-    if (!rows[0]) throw new AppError(PURCHASE_REQUISITION_ERRORS.NOT_FOUND);
-    return rows[0];
+const REQUISITION_DOC: DocumentConfig = {
+    table: "purchase_requisitions",
+    idColumn: "purchase_requisition_id",
+    notFoundError: PURCHASE_REQUISITION_ERRORS.NOT_FOUND,
 };
+const lockRequisition = (client: PoolClient, projectId: number, purchaseRequisitionId: number) =>
+    lockDocument(client, REQUISITION_DOC, projectId, purchaseRequisitionId);
 
 const touchRequisition = (client: PoolClient, purchaseRequisitionId: number, userId: number) =>
     client.query(
@@ -223,14 +208,16 @@ export const deletePurchaseRequisitionService = async (
     let removed = null;
     try {
         await client.query("BEGIN");
-        const { file_id } = await lockRequisition(client, projectId, purchaseRequisitionId);
-        await client.query(
-            `UPDATE purchase_requisitions
-            SET deleted_at = NOW(), updated_at = NOW(), updated_by = $2, file_id = NULL
-            WHERE purchase_requisition_id = $1`,
-            [purchaseRequisitionId, user.user_id]
+        await lockRequisition(client, projectId, purchaseRequisitionId);
+        // Un requerimiento con cotizaciones activas no se da de baja: se dan de
+        // baja primero ellas. (El bloqueo de arriba serializa contra crear una
+        // cotización, que toma el requerimiento con FOR SHARE.)
+        const quoted = await client.query(
+            `SELECT 1 FROM quotations WHERE purchase_requisition_id = $1 AND deleted_at IS NULL LIMIT 1`,
+            [purchaseRequisitionId]
         );
-        if (file_id != null) removed = await deleteFileRow(client, file_id);
+        if (quoted.rowCount) throw new AppError(PURCHASE_REQUISITION_ERRORS.HAS_DOCUMENTS);
+        removed = await softDeleteDocument(client, REQUISITION_DOC, projectId, purchaseRequisitionId, user.user_id);
         await client.query("COMMIT");
     } catch (error) {
         await client.query("ROLLBACK");
@@ -253,18 +240,7 @@ export const setPurchaseRequisitionFileService = async (
     let removed = null;
     try {
         await client.query("BEGIN");
-        const { file_id: oldFileId } = await lockRequisition(client, projectId, purchaseRequisitionId);
-
-        // BIGINT llega como string desde pg: se compara como texto.
-        if (String(oldFileId ?? "") !== String(newFileId ?? "")) {
-            if (newFileId != null) await assertFileAttachable(client, projectId, newFileId);
-            await client.query(
-                `UPDATE purchase_requisitions SET file_id = $3, updated_at = NOW(), updated_by = $4
-                WHERE purchase_requisition_id = $1 AND project_id = $2`,
-                [purchaseRequisitionId, projectId, newFileId, user.user_id]
-            );
-            if (oldFileId != null) removed = await deleteFileRow(client, oldFileId);
-        }
+        removed = await replaceDocumentFile(client, REQUISITION_DOC, projectId, purchaseRequisitionId, user.user_id, newFileId);
         const detail = await loadDetail(client, projectId, purchaseRequisitionId);
         await client.query("COMMIT");
         await removeFileBytes(removed);
@@ -315,6 +291,18 @@ export const updatePurchaseRequisitionItemService = async (
         await lockRequisition(client, projectId, purchaseRequisitionId);
         if (body.product_id !== undefined) await assertProductInProject(client, projectId, body.product_id);
 
+        // Cantidad y producto son lo que las cotizaciones ya cotizaron: con una
+        // cotización ACTIVA sobre esta línea no cambian (la descripción y el
+        // precio estimado sí). Las líneas de cotizaciones dadas de baja no cuentan.
+        if (body.quantity_requested !== undefined || body.product_id !== undefined) {
+            const quoted = await client.query(
+                `SELECT 1 FROM quotation_items qi INNER JOIN quotations q ON q.quotation_id = qi.quotation_id
+                WHERE qi.purchase_requisition_item_id = $1 AND q.deleted_at IS NULL LIMIT 1`,
+                [itemId]
+            );
+            if (quoted.rowCount) throw new AppError(PURCHASE_REQUISITION_ERRORS.ITEM_LOCKED);
+        }
+
         const { set, values } = buildSet(ITEM_COLUMNS, body, 3);
         const { rowCount } = await client.query(
             `UPDATE purchase_requisition_items SET ${set}
@@ -360,9 +348,14 @@ export const deletePurchaseRequisitionItemService = async (
         if (exists.rowCount === 0) throw new AppError(PURCHASE_REQUISITION_ERRORS.ITEM_NOT_FOUND);
         if (count.rows[0]!.total <= 1) throw new AppError(PURCHASE_REQUISITION_ERRORS.LAST_ITEM);
 
-        await client.query(
-            `DELETE FROM purchase_requisition_items WHERE purchase_requisition_item_id = $1`, [itemId]
+        // Ninguna cotización (ni las dadas de baja, que se conservan) puede referirla.
+        const { rowCount: deleted } = await client.query(
+            `DELETE FROM purchase_requisition_items
+            WHERE purchase_requisition_item_id = $1
+                AND NOT EXISTS (SELECT 1 FROM quotation_items qi WHERE qi.purchase_requisition_item_id = $1)`,
+            [itemId]
         );
+        if (deleted === 0) throw new AppError(PURCHASE_REQUISITION_ERRORS.ITEM_LOCKED);
         await touchRequisition(client, purchaseRequisitionId, user.user_id);
         const detail = await loadDetail(client, projectId, purchaseRequisitionId);
         await client.query("COMMIT");

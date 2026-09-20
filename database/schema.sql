@@ -1256,6 +1256,75 @@ CREATE TABLE purchase_requisition_items (
 CREATE INDEX idx_purchase_requisition_items_requisition_id ON purchase_requisition_items (purchase_requisition_id);
 CREATE INDEX idx_purchase_requisition_items_product_id ON purchase_requisition_items (product_id);
 
+-- Cotización: un proveedor responde a UN requerimiento con precios (Fase 4 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Un requerimiento puede tener
+-- varias cotizaciones y cada una cubre solo algunas de sus líneas. Todavía no
+-- elige a quién comprar (eso es la orden de compra). Los montos son los que
+-- dice el documento: no se convierten ni se recalculan.
+CREATE TABLE quotations (
+    quotation_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    supplier_id INT NOT NULL REFERENCES suppliers(supplier_id) ON DELETE RESTRICT,
+    -- A qué requerimiento responde. RESTRICT: no se borra de motor un
+    -- requerimiento con cotizaciones (vaciar Almacén las borra antes).
+    purchase_requisition_id BIGINT NOT NULL REFERENCES purchase_requisitions(purchase_requisition_id) ON DELETE RESTRICT,
+    -- Número de la cotización tal como lo puso el proveedor (formato libre).
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
+    quotation_date DATE NOT NULL,
+    -- Moneda del documento (solo para dejar constancia, no hay conversión):
+    -- lista cerrada; agregar otra es cambiar este CHECK y su espejo en Zod.
+    currency VARCHAR(3) NOT NULL CHECK (currency IN ('PEN', 'USD')),
+    commercial_terms VARCHAR(1000) CHECK (commercial_terms IS NULL OR LENGTH(TRIM(commercial_terms)) > 0),
+    -- Hasta cuándo vale la oferta.
+    valid_until DATE,
+    -- Total tal como figura en el documento (NULL = no lo indica). No se
+    -- compara con la suma de las líneas: la respuesta trae ambos.
+    total_amount NUMERIC(18,6) CHECK (total_amount IS NULL OR total_amount >= 0),
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ,
+    CONSTRAINT chk_quotations_valid_until CHECK (valid_until IS NULL OR valid_until >= quotation_date)
+);
+-- Una misma cotización (proveedor + número) no se registra dos veces.
+CREATE UNIQUE INDEX idx_un_quotations_number_active
+    ON quotations (project_id, supplier_id, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_quotations_file_id ON quotations (file_id) WHERE file_id IS NOT NULL;
+CREATE INDEX idx_quotations_supplier_id ON quotations (supplier_id);
+CREATE INDEX idx_quotations_purchase_requisition_id ON quotations (purchase_requisition_id);
+
+CREATE TABLE quotation_items (
+    quotation_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    quotation_id BIGINT NOT NULL REFERENCES quotations(quotation_id) ON DELETE CASCADE,
+    -- Línea del requerimiento que se cotiza (la relación es POR LÍNEA). Que
+    -- sea de ESTE requerimiento lo valida el servicio. RESTRICT: una línea
+    -- cotizada no se borra de motor.
+    purchase_requisition_item_id BIGINT NOT NULL
+        REFERENCES purchase_requisition_items(purchase_requisition_item_id) ON DELETE RESTRICT,
+    -- Producto real del catálogo: hoy siempre el de la línea del requerimiento
+    -- (el servicio lo exige; relajarlo después es quitar esa validación).
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- Texto tal como lo dice la cotización (snapshot).
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_quoted NUMERIC(18,6) NOT NULL CHECK (quantity_quoted > 0),
+    -- Solo si el documento lo muestra: hay cotizaciones que dan únicamente el
+    -- total de la línea ("20 kg a S/ 340"). NULL = no figura.
+    unit_price NUMERIC(18,6) CHECK (unit_price IS NULL OR unit_price >= 0),
+    discount_amount NUMERIC(18,6) CHECK (discount_amount IS NULL OR discount_amount >= 0),
+    tax_amount NUMERIC(18,6) CHECK (tax_amount IS NULL OR tax_amount >= 0),
+    -- Monto de la línea tal como figura en el documento. No se valida contra
+    -- precio x cantidad (los proveedores redondean distinto).
+    line_total NUMERIC(18,6) NOT NULL CHECK (line_total >= 0),
+    notes VARCHAR(500) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0),
+    -- Una cotización no cotiza dos veces la misma línea del requerimiento.
+    UNIQUE (quotation_id, purchase_requisition_item_id)
+);
+CREATE INDEX idx_quotation_items_quotation_id ON quotation_items (quotation_id);
+CREATE INDEX idx_quotation_items_requisition_item_id ON quotation_items (purchase_requisition_item_id);
+CREATE INDEX idx_quotation_items_product_id ON quotation_items (product_id);
+
 -- Registro de movimiento INMUTABLE: no se edita, no se da de baja (no
 -- tiene deleted_at) — un error se corrige con un movimiento nuevo,
 -- nunca reescribiendo este. Los vínculos a documentos previos (orden de
@@ -1406,10 +1475,15 @@ CREATE TABLE inventory_movements (
     -- esas tablas (nunca se muestra tal cual a un usuario).
     reference_document_type VARCHAR(20) NOT NULL CHECK (reference_document_type IN ('goods_receipt', 'goods_issue')),
     reference_document_id BIGINT NOT NULL,
+    -- Fecha REAL del movimiento: la del documento que lo origina
+    -- (received_date del ingreso, issue_date del vale), sin hora. Es la que
+    -- muestra y filtra el Kardex. `created_at` es solo cuándo se registró en
+    -- el sistema (puede ser otro día): no se usa para filtrar por fecha.
+    movement_date DATE NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_by INT NOT NULL REFERENCES users(user_id)
 );
 -- Kardex filtrable por producto/fecha (Fase 4) — la consulta central
 -- de este historial.
-CREATE INDEX idx_inventory_movements_product_id ON inventory_movements (product_id, created_at);
+CREATE INDEX idx_inventory_movements_product_id ON inventory_movements (product_id, movement_date);
 CREATE INDEX idx_inventory_movements_bin_id ON inventory_movements (bin_id);

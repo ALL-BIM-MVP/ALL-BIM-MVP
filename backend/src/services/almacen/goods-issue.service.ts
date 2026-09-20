@@ -125,6 +125,7 @@ export const createGoodsIssueService = async (
                     direction: "salida",
                     referenceDocumentType: "goods_issue",
                     referenceDocumentId: goodsIssueId,
+                    movementDate: body.issue_date,
                     userId: user.user_id,
                 });
             }

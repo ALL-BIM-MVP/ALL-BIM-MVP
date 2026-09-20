@@ -24,6 +24,7 @@ import { inventoryMovementRouter } from './inventory-movement.routes.js';
 import { almacenContentRouter } from './almacen-content.routes.js';
 import { supplierRouter } from './supplier.routes.js';
 import { purchaseRequisitionRouter } from './purchase-requisition.routes.js';
+import { quotationRouter } from './quotation.routes.js';
 
 export { warehouseStyleRouter, model3DAssetUploadRouter };
 
@@ -31,6 +32,7 @@ export const projectAlmacenRouter = Router();
 projectAlmacenRouter.use(almacenContentRouter);
 projectAlmacenRouter.use(supplierRouter);
 projectAlmacenRouter.use(purchaseRequisitionRouter);
+projectAlmacenRouter.use(quotationRouter);
 projectAlmacenRouter.use(locationSearchRouter);
 projectAlmacenRouter.use(warehouseRouter);
 projectAlmacenRouter.use(rackRouter);

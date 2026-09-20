@@ -335,6 +335,7 @@ Content-Type: application/json
 ###
 @requisitionId = {{requisition.response.body.$.purchase_requisition_id}}
 @requisitionItemId = {{requisition.response.body.$.items[0].purchase_requisition_item_id}}
+@requisitionItem2Id = {{requisition.response.body.$.items[1].purchase_requisition_item_id}}
 
 ### 6.2 Listar (con búsqueda opcional por número o solicitante) / obtener
 GET {{baseUrl}}/projects/{{projectId}}/purchase-requisitions
@@ -356,11 +357,15 @@ Content-Type: application/json
 { "requester": "Ing. Residente" }
 
 ### 6.4 Líneas: agregar / editar parcial / quitar (la última no se puede quitar)
+# @name addedItem
 POST {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}/items
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 { "product_id": {{productId}}, "description": "Alambre N°16", "quantity_requested": 5 }
+
+###
+@requisitionItem3Id = {{addedItem.response.body.$.items[2].purchase_requisition_item_id}}
 
 ###
 PATCH {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}/items/{{requisitionItemId}}
@@ -407,6 +412,135 @@ Authorization: Bearer {{accessToken}}
 
 ### 6.8 Archivos del módulo (para ver el archivo pendiente/adjunto)
 GET {{baseUrl}}/projects/{{projectId}}/files?module_code=almacen
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 6B. COTIZACIONES (un proveedor responde a un requerimiento, por línea)
+### =====================================================================
+# Un requerimiento puede tener varias cotizaciones y cada una cubre solo
+# algunas de sus líneas. Todavía no se elige proveedor (eso es la orden de compra).
+# - Cada línea cotiza UNA línea del requerimiento y usa su mismo producto.
+# - line_total (obligatorio) es el monto de la línea tal como dice el documento;
+#   unit_price / discount_amount / tax_amount son opcionales (hay cotizaciones
+#   que solo dan el total: "20 kg a S/ 340"). No se compara precio x cantidad.
+# - total_amount (cabecera) es opcional; la respuesta trae también lines_total,
+#   la suma derivada de las líneas, para compararlos sin abrir el documento.
+# - currency: PEN o USD, obligatoria (solo constancia, no hay conversión).
+# - Una línea cotizada del requerimiento ya no cambia de cantidad/producto ni se quita.
+
+### 6B.1 Crear (cotiza solo una línea del requerimiento, con precio unitario)
+# @name quotation
+POST {{baseUrl}}/projects/{{projectId}}/quotations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "purchase_requisition_id": {{requisitionId}},
+  "number": "COT-2026-014",
+  "quotation_date": "2026-09-12",
+  "currency": "PEN",
+  "commercial_terms": "Pago a 30 días. Entrega en obra en 5 días.",
+  "valid_until": "2026-09-30",
+  "total_amount": 3540,
+  "items": [
+    {
+      "purchase_requisition_item_id": {{requisitionItem2Id}},
+      "description": "Cemento Sol bolsa 42.5 kg",
+      "quantity_quoted": 100,
+      "unit_price": 30,
+      "tax_amount": 540,
+      "line_total": 3540
+    }
+  ]
+}
+
+###
+@quotationId = {{quotation.response.body.$.quotation_id}}
+@quotationItemId = {{quotation.response.body.$.items[0].quotation_item_id}}
+
+### 6B.2 Listar (filtros opcionales: requerimiento, proveedor, texto) / obtener
+GET {{baseUrl}}/projects/{{projectId}}/quotations
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/quotations?purchase_requisition_id={{requisitionId}}&supplier_id={{supplierId}}
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/quotations?search=COT-2026
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}
+Authorization: Bearer {{accessToken}}
+
+### 6B.3 Editar la cabecera (PATCH parcial; null limpia total y validez).
+# El proveedor y el requerimiento no se cambian: si hubo error, se da de baja y se vuelve a crear.
+PATCH {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "commercial_terms": "Pago contra entrega", "valid_until": "2026-10-15" }
+
+### 6B.4 Líneas: agregar una que solo trae el total (sin precio unitario)
+POST {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "purchase_requisition_item_id": {{requisitionItem3Id}},
+  "description": "Alambre negro N°16 (5 kg)",
+  "quantity_quoted": 5,
+  "line_total": 42.5
+}
+
+###
+# Editar la línea (parcial): ahora sí se conoce el precio unitario
+PATCH {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}/items/{{quotationItemId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "notes": "Incluye flete", "discount_amount": 0 }
+
+### 6B.5 Documento físico: subir a `files` y adjuntar a la cotización
+# @name scanQuotation
+POST {{baseUrl}}/projects/{{projectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----Almacen
+
+------Almacen
+Content-Disposition: form-data; name="module_code"
+
+almacen
+------Almacen
+Content-Disposition: form-data; name="file"; filename="cotizacion-014.pdf"
+Content-Type: application/pdf
+
+< ./ejemplos/documento.pdf
+------Almacen--
+
+###
+@scanQuotationId = {{scanQuotation.response.body.$.file_id}}
+
+###
+PUT {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}/file
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": {{scanQuotationId}} }
+
+### 6B.6 Quitar la línea agregada en 6B.4 (una cotización no puede quedarse sin líneas)
+# Tomamos el id de la última línea de la cotización.
+# @name quotationNow
+GET {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}
+Authorization: Bearer {{accessToken}}
+
+###
+@quotationLastItemId = {{quotationNow.response.body.$.items[1].quotation_item_id}}
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}/items/{{quotationLastItemId}}
 Authorization: Bearer {{accessToken}}
 
 ### =====================================================================
@@ -498,7 +632,8 @@ Authorization: Bearer {{accessToken}}
 GET {{baseUrl}}/projects/{{projectId}}/inventory-movements
 Authorization: Bearer {{accessToken}}
 
-### 9.2 Filtrados por producto y rango de fechas (from/to opcionales)
+### 9.2 Filtrados por producto y rango de fechas (from/to opcionales, AAAA-MM-DD, inclusivos).
+# La fecha de cada movimiento es la del DOCUMENTO (received_date / issue_date), no la de registro.
 GET {{baseUrl}}/projects/{{projectId}}/inventory-movements?product_id={{productId}}&from=2026-09-01&to=2026-12-31
 Authorization: Bearer {{accessToken}}
 
@@ -608,6 +743,50 @@ Content-Type: application/json
 
 {}
 
+### 11.10b Cotización con moneda no permitida → 400
+POST {{baseUrl}}/projects/{{projectId}}/quotations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "purchase_requisition_id": {{requisitionId}}, "number": "COT-MONEDA",
+  "quotation_date": "2026-09-12", "currency": "EUR",
+  "items": [ { "purchase_requisition_item_id": {{requisitionItem2Id}}, "description": "x", "quantity_quoted": 1, "line_total": 1 } ]
+}
+
+### 11.10c Cotizar con un producto distinto al de la línea del requerimiento (la línea pide el de Materiales) → 400 QUOTATION_PRODUCT_MISMATCH
+POST {{baseUrl}}/projects/{{projectId}}/quotations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "purchase_requisition_id": {{requisitionId}}, "number": "COT-PRODUCTO",
+  "quotation_date": "2026-09-12", "currency": "PEN",
+  "items": [ { "purchase_requisition_item_id": {{requisitionItem2Id}}, "product_id": {{productId}}, "description": "x", "quantity_quoted": 1, "line_total": 1 } ]
+}
+
+### 11.10d Número de cotización repetido del mismo proveedor → 409 QUOTATION_DUPLICATE_NUMBER
+POST {{baseUrl}}/projects/{{projectId}}/quotations
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}}, "purchase_requisition_id": {{requisitionId}}, "number": "COT-2026-014",
+  "quotation_date": "2026-09-12", "currency": "PEN",
+  "items": [ { "purchase_requisition_item_id": {{requisitionItem2Id}}, "description": "x", "quantity_quoted": 1, "line_total": 1 } ]
+}
+
+### 11.10e Cambiar la cantidad de una línea del requerimiento ya cotizada → 409 PURCHASE_REQUISITION_ITEM_LOCKED
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}/items/{{requisitionItem2Id}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "quantity_requested": 999 }
+
+### 11.10f Dar de baja un requerimiento con cotizaciones activas → 409 PURCHASE_REQUISITION_HAS_DOCUMENTS
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}
+Authorization: Bearer {{accessToken}}
+
 ### 11.11 Eliminar un proyecto con Almacén con contenido → 409 ALMACEN_CONTENT_NOT_EMPTY
 DELETE {{baseUrl}}/projects/{{projectId}}
 Authorization: Bearer {{accessToken}}
@@ -615,6 +794,10 @@ Authorization: Bearer {{accessToken}}
 ### =====================================================================
 ### 12. BAJAS Y VACIAR ALMACÉN  (DESTRUCTIVO)
 ### =====================================================================
+
+### 12.0 Baja de la cotización (exige configure; elimina también su archivo). Antes que el requerimiento.
+DELETE {{baseUrl}}/projects/{{projectId}}/quotations/{{quotationId}}
+Authorization: Bearer {{accessToken}}
 
 ### 12.1 Baja del requerimiento (exige configure; elimina también su archivo)
 DELETE {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}

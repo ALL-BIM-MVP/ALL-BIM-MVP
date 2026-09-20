@@ -35,4 +35,22 @@ export const PURCHASE_REQUISITION_ERRORS = {
         }
     },
 
+    // Una línea cotizada no cambia de cantidad/producto ni se quita: las
+    // cotizaciones ya se hicieron sobre ella.
+    ITEM_LOCKED: {
+        statusCode: 409,
+        response: {
+            code: "PURCHASE_REQUISITION_ITEM_LOCKED",
+            message: "La línea ya fue cotizada: no se puede cambiar su cantidad ni su producto, ni quitarla."
+        }
+    },
+
+    HAS_DOCUMENTS: {
+        statusCode: 409,
+        response: {
+            code: "PURCHASE_REQUISITION_HAS_DOCUMENTS",
+            message: "No se puede dar de baja el requerimiento porque tiene cotizaciones registradas."
+        }
+    },
+
 } satisfies Record<string, ErrorFormat>;
