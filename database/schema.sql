@@ -1204,6 +1204,58 @@ CREATE TABLE suppliers (
 -- aparte solo por project_id.
 CREATE UNIQUE INDEX idx_un_suppliers_ruc_active ON suppliers (project_id, ruc) WHERE deleted_at IS NULL;
 
+-- Requerimiento: primer documento de la cadena de trazabilidad (Fase 3 de
+-- docs/almacen-ingreso-productos/05-roadmap.md). Es el pedido de "la obra
+-- necesita estos materiales"; NO mueve stock ni compra nada. Se conserva
+-- con baja lógica (auditoría): dar de baja borra además su archivo
+-- escaneado (ver purchase-requisition.service.ts).
+CREATE TABLE purchase_requisitions (
+    purchase_requisition_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    project_id INT NOT NULL REFERENCES projects(project_id) ON DELETE CASCADE,
+    -- Número tal como figura en el documento de la empresa (no hay formato
+    -- estándar: cada empresa numera distinto, "REQ-001", "RQ-2026-0034"…),
+    -- por eso solo se exige que no esté vacío.
+    number VARCHAR(30) NOT NULL CHECK (LENGTH(TRIM(number)) > 0),
+    requisition_date DATE NOT NULL,
+    -- Quién lo pidió: persona o área, como texto (no siempre es un usuario
+    -- del sistema).
+    requester VARCHAR(150) NOT NULL CHECK (LENGTH(TRIM(requester)) > 0),
+    notes VARCHAR(1000) CHECK (notes IS NULL OR LENGTH(TRIM(notes)) > 0),
+    -- Escaneo/foto del documento físico, en `files` (módulo almacen). NULL =
+    -- registrado, archivo pendiente. RESTRICT: un archivo en uso no se
+    -- borra desde files; se reemplaza o quita desde el documento. El
+    -- índice único garantiza un archivo por documento.
+    file_id BIGINT REFERENCES files(file_id) ON DELETE RESTRICT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by INT NOT NULL REFERENCES users(user_id),
+    updated_at TIMESTAMPTZ,
+    updated_by INT REFERENCES users(user_id),
+    deleted_at TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX idx_un_purchase_requisitions_number_active
+    ON purchase_requisitions (project_id, number) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX idx_un_purchase_requisitions_file_id
+    ON purchase_requisitions (file_id) WHERE file_id IS NOT NULL;
+
+CREATE TABLE purchase_requisition_items (
+    purchase_requisition_item_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    -- Compositiva: una línea no existe sin su requerimiento.
+    purchase_requisition_id BIGINT NOT NULL REFERENCES purchase_requisitions(purchase_requisition_id) ON DELETE CASCADE,
+    -- Siempre un producto real del catálogo: así toda la cadena (hasta la
+    -- ubicación) apunta a algo que existe. Si el producto aún no existe, se
+    -- crea antes en el catálogo (lo guía el frontend). El texto libre va en
+    -- `description`. RESTRICT: no se borra de motor un producto que algún
+    -- requerimiento pidió.
+    product_id BIGINT NOT NULL REFERENCES products(product_id) ON DELETE RESTRICT,
+    -- Descripción tal como dice el documento (siempre, aunque haya producto).
+    description VARCHAR(300) NOT NULL CHECK (LENGTH(TRIM(description)) > 0),
+    quantity_requested NUMERIC(18,6) NOT NULL CHECK (quantity_requested > 0),
+    -- Precio ESTIMADO (no es precio de compra; ese vive en cotización/factura).
+    estimated_unit_price NUMERIC(18,6) CHECK (estimated_unit_price IS NULL OR estimated_unit_price >= 0)
+);
+CREATE INDEX idx_purchase_requisition_items_requisition_id ON purchase_requisition_items (purchase_requisition_id);
+CREATE INDEX idx_purchase_requisition_items_product_id ON purchase_requisition_items (product_id);
+
 -- Registro de movimiento INMUTABLE: no se edita, no se da de baja (no
 -- tiene deleted_at) — un error se corrige con un movimiento nuevo,
 -- nunca reescribiendo este. Los vínculos a documentos previos (orden de

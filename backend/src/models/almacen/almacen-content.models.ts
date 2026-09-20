@@ -4,6 +4,7 @@
 // Son COUNT(*)::int (números reales, no strings de BIGINT: no son IDs).
 export interface AlmacenContentCounts {
     suppliers: number;
+    purchase_requisitions: number;
     warehouses: number;
     racks: number;
     bins: number;

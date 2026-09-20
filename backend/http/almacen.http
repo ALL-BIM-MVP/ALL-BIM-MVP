@@ -1,0 +1,637 @@
+### =====================================================================
+### ALMACÉN BIM — pruebas completas de la API (REST Client de VS Code)
+### =====================================================================
+# Cómo usarlo
+#  1. Backend corriendo (npm run dev). Ajustar baseUrl / credenciales si hace falta.
+#  2. Ejecutar de arriba hacia abajo: cada bloque captura los ids que necesita
+#     el siguiente (# @name + {{nombre.response.body.$.campo}}).
+#  3. La sección 0 crea un proyecto NUEVO cada vez. Para reutilizar uno, dejar
+#     `@projectId` fijo (descomentar la línea de abajo) y omitir el bloque 0.2.
+#  4. La sección 12 (bajas y vaciar Almacén) es DESTRUCTIVA: borra datos.
+#  5. Los archivos de ejemplo están en ./ejemplos (PDF y modelo .gltf mínimos).
+#
+# Permisos (módulo almacen): ver = view; crear/editar/adjuntar = process;
+# bajas de estructura/catálogo = delete; bajas de documentos de auditoría
+# (proveedor, requerimiento) y vaciar = configure / dueño o admin del proyecto.
+
+@baseUrl = http://localhost:4000/api
+# @projectId = 1
+
+### =====================================================================
+### 0. SESIÓN Y PROYECTO
+### =====================================================================
+
+### 0.1 Login
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ismael@email.com",
+  "password": "Test1234!"
+}
+
+###
+@accessToken = {{login.response.body.$.access_token}}
+
+### 0.2 Crear un proyecto de prueba (todos los campos son obligatorios, aunque sean null)
+# @name project
+POST {{baseUrl}}/projects
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Prueba Almacén (.http)",
+  "description": null,
+  "location": null,
+  "client": null,
+  "contractor": null,
+  "start_date": "2026-09-01",
+  "end_date": null
+}
+
+###
+@projectId = {{project.response.body.$.project_id}}
+
+### =====================================================================
+### 1. CATÁLOGOS
+### =====================================================================
+
+### 1.1 Estilos de almacén (catálogo global, sin proyecto)
+# @name styles
+GET {{baseUrl}}/warehouse-styles
+Authorization: Bearer {{accessToken}}
+
+###
+@styleId = {{styles.response.body.$[0].warehouse_style_id}}
+
+### 1.2 Categorías del proyecto: Partida (fija), Materiales y Equipo (relacionales).
+# Se crean solas con el proyecto; no hay endpoints para crearlas ni borrarlas.
+# @name categories
+GET {{baseUrl}}/projects/{{projectId}}/categories
+Authorization: Bearer {{accessToken}}
+
+###
+# Revisar el orden en la respuesta y ajustar los índices si hace falta.
+@categoryPartidaId = {{categories.response.body.$[0].category_id}}
+@categoryMaterialesId = {{categories.response.body.$[1].category_id}}
+
+### =====================================================================
+### 2. UBICACIONES: almacén → estante → casilla
+### =====================================================================
+# Las medidas van en metros; 1 cubo = 1.3 m. El almacén es una grilla de
+# cubos; los estantes ocupan 1 o 2 cubos de profundidad.
+
+### 2.1 Crear almacén (13 x 13 m = grilla de 10 x 10 cubos)
+# @name warehouse
+POST {{baseUrl}}/projects/{{projectId}}/warehouses
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Almacén central",
+  "warehouse_style_id": {{styleId}},
+  "corner1_x": 0, "corner1_z": 0,
+  "corner2_x": 13, "corner2_z": 13,
+  "direction": "norte",
+  "grid_width": 10,
+  "grid_depth": 10
+}
+
+###
+@warehouseId = {{warehouse.response.body.$.warehouse_id}}
+
+### 2.2 Listar / obtener almacenes
+GET {{baseUrl}}/projects/{{projectId}}/warehouses
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}
+Authorization: Bearer {{accessToken}}
+
+### 2.3 Editar almacén (PUT: se envían todos los campos)
+PUT {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Almacén central (editado)",
+  "warehouse_style_id": {{styleId}},
+  "corner1_x": 0, "corner1_z": 0,
+  "corner2_x": 13, "corner2_z": 13,
+  "direction": "norte",
+  "grid_width": 10,
+  "grid_depth": 10
+}
+
+### 2.4 Crear estante: 2 cubos de ancho x 1 de fondo, 2 niveles. Genera sus casillas solo.
+# direction: 0 o 1 (hacia dónde mira el estante)
+# @name rack
+POST {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Estante A",
+  "corner1_x": 0, "corner1_z": 0,
+  "corner2_x": 2.6, "corner2_z": 1.3,
+  "levels": 2,
+  "direction": 0
+}
+
+###
+@rackId = {{rack.response.body.$.rack_id}}
+@binId = {{rack.response.body.$.bins[0].bin_id}}
+@binId2 = {{rack.response.body.$.bins[1].bin_id}}
+
+### 2.5 Listar / obtener estantes (el detalle trae sus casillas con contenido)
+GET {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}
+Authorization: Bearer {{accessToken}}
+
+### 2.6 Renombrar estante (PUT: solo el nombre)
+PUT {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "name": "Estante A (editado)" }
+
+### 2.7 Renombrar casilla (PATCH: solo el nombre; la casilla no se crea ni se borra sola)
+PATCH {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}/bins/{{binId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "name": "A1 - herramientas" }
+
+### 2.8 Buscar una ubicación por texto (nombre de almacén, estante o casilla)
+GET {{baseUrl}}/projects/{{projectId}}/locations/search?q=herramientas
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 3. MODELOS 3D (biblioteca del USUARIO, reutilizable entre proyectos)
+### =====================================================================
+
+### 3.1 Subir un modelo (.glb o .gltf) — no cuelga de un proyecto
+# @name asset
+POST {{baseUrl}}/model-3d-assets
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----Almacen
+
+------Almacen
+Content-Disposition: form-data; name="file"; filename="cubo.gltf"
+Content-Type: model/gltf+json
+
+< ./ejemplos/cubo.gltf
+------Almacen--
+
+###
+@assetId = {{asset.response.body.$.model_3d_asset_id}}
+
+### 3.2 Modelos disponibles en el proyecto (propios, del sistema o ya usados aquí)
+GET {{baseUrl}}/projects/{{projectId}}/model-3d-assets
+Authorization: Bearer {{accessToken}}
+
+### 3.3 Contenido de un modelo
+GET {{baseUrl}}/projects/{{projectId}}/model-3d-assets/{{assetId}}/content
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 4. PRODUCTOS
+### =====================================================================
+# Categoría fija (Partida): se envía `code`. Relacional (Materiales/Equipo):
+# se envía `base_product_code` (código de una partida existente); el código
+# final es prefijo-código. La unidad se guarda en minúsculas.
+
+### 4.1 Producto de categoría fija (Partida)
+# @name product
+POST {{baseUrl}}/projects/{{projectId}}/products
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "category_id": {{categoryPartidaId}},
+  "code": "01.01.01",
+  "name": "Cemento Portland tipo I",
+  "unit": "bls"
+}
+
+###
+@productId = {{product.response.body.$.product_id}}
+
+### 4.2 Producto relacional (Materiales) basado en la partida anterior
+# @name productMaterial
+POST {{baseUrl}}/projects/{{projectId}}/products
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "category_id": {{categoryMaterialesId}},
+  "base_product_code": "01.01.01",
+  "name": "Cemento Sol (bolsa 42.5 kg)",
+  "unit": "bls"
+}
+
+###
+@productMaterialId = {{productMaterial.response.body.$.product_id}}
+
+### 4.3 Listar (con filtro opcional por categoría) / obtener
+GET {{baseUrl}}/projects/{{projectId}}/products
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/products?category_id={{categoryPartidaId}}
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}
+Authorization: Bearer {{accessToken}}
+
+### 4.4 Editar producto (PUT: nombre y unidad)
+PUT {{baseUrl}}/projects/{{projectId}}/products/{{productId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Cemento Portland tipo I (editado)",
+  "unit": "bls"
+}
+
+### 4.5 Asignar un modelo 3D al producto (null lo quita)
+PUT {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/model-3d
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "model_3d_asset_id": {{assetId}} }
+
+### =====================================================================
+### 5. PROVEEDORES (por proyecto; el RUC es único entre los activos)
+### =====================================================================
+
+### 5.1 Crear proveedor (el RUC tolera espacios o guiones al escribirlo)
+# @name supplier
+POST {{baseUrl}}/projects/{{projectId}}/suppliers
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ruc": "20-123456789",
+  "name": "Cementos del Sur S.A.C."
+}
+
+###
+@supplierId = {{supplier.response.body.$.supplier_id}}
+
+### 5.2 Listar y buscar (autocompletado): por el comienzo del RUC o por parte del nombre
+GET {{baseUrl}}/projects/{{projectId}}/suppliers
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/suppliers?search=2012
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/suppliers?search=cementos
+Authorization: Bearer {{accessToken}}
+
+### 5.3 Obtener uno (documents_count = cuántos documentos lo usan)
+GET {{baseUrl}}/projects/{{projectId}}/suppliers/{{supplierId}}
+Authorization: Bearer {{accessToken}}
+
+### 5.4 Editar (PUT completo). El RUC solo cambia mientras no tenga documentos.
+PUT {{baseUrl}}/projects/{{projectId}}/suppliers/{{supplierId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "ruc": "20123456789",
+  "name": "Cementos del Sur SAC"
+}
+
+### =====================================================================
+### 6. REQUERIMIENTOS (auditoría: no mueven stock)
+### =====================================================================
+
+### 6.1 Crear (con sus líneas; cada línea lleva un producto REAL del catálogo: si aún no existe,
+# se crea antes con POST /products — el frontend lo ofrece dentro de la misma pantalla)
+# @name requisition
+POST {{baseUrl}}/projects/{{projectId}}/purchase-requisitions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "number": "REQ-001",
+  "requisition_date": "2026-09-10",
+  "requester": "Almacenero de obra",
+  "notes": "Para el vaciado de la losa",
+  "items": [
+    { "product_id": {{productId}}, "description": "Cemento Portland tipo I", "quantity_requested": 100, "estimated_unit_price": 28.5 },
+    { "product_id": {{productMaterialId}}, "description": "Cemento Sol bolsa 42.5 kg (como dice el papel)", "quantity_requested": 20 }
+  ]
+}
+
+###
+@requisitionId = {{requisition.response.body.$.purchase_requisition_id}}
+@requisitionItemId = {{requisition.response.body.$.items[0].purchase_requisition_item_id}}
+
+### 6.2 Listar (con búsqueda opcional por número o solicitante) / obtener
+GET {{baseUrl}}/projects/{{projectId}}/purchase-requisitions
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/purchase-requisitions?search=REQ
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}
+Authorization: Bearer {{accessToken}}
+
+### 6.3 Editar la cabecera (PATCH parcial: solo lo enviado; notes null la limpia)
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "requester": "Ing. Residente" }
+
+### 6.4 Líneas: agregar / editar parcial / quitar (la última no se puede quitar)
+POST {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}/items
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "product_id": {{productId}}, "description": "Alambre N°16", "quantity_requested": 5 }
+
+###
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}/items/{{requisitionItemId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "quantity_requested": 120, "estimated_unit_price": null }
+
+###
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}/items/{{requisitionItemId}}
+Authorization: Bearer {{accessToken}}
+
+### 6.5 Documento físico: (1) subir el archivo a `files` con module_code=almacen
+# @name scan
+POST {{baseUrl}}/projects/{{projectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----Almacen
+
+------Almacen
+Content-Disposition: form-data; name="module_code"
+
+almacen
+------Almacen
+Content-Disposition: form-data; name="file"; filename="requerimiento-001.pdf"
+Content-Type: application/pdf
+
+< ./ejemplos/documento.pdf
+------Almacen--
+
+###
+@scanId = {{scan.response.body.$.file_id}}
+
+### 6.6 (2) adjuntarlo al requerimiento. Con file_id null se quita; reemplazar o quitar
+# ELIMINA el archivo anterior del sistema (sin historial de versiones).
+PUT {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}/file
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": {{scanId}} }
+
+### 6.7 Un archivo adjunto no se puede borrar desde /files (responde 409 FILE_IN_USE)
+DELETE {{baseUrl}}/projects/{{projectId}}/files/{{scanId}}
+Authorization: Bearer {{accessToken}}
+
+### 6.8 Archivos del módulo (para ver el archivo pendiente/adjunto)
+GET {{baseUrl}}/projects/{{projectId}}/files?module_code=almacen
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 7. INGRESOS (goods receipts) — suman stock; no se editan ni se borran
+### =====================================================================
+# La cantidad recibida (total_quantity) se reparte entre casillas (locations)
+# y la suma tiene que dar EXACTO el total. quantity_per_delivery_note es lo
+# que decía la guía (opcional).
+# Guía de remisión: serie (1-4 letras/números, se pasa a mayúsculas) + número (1-8 dígitos).
+
+### 7.1 Crear ingreso
+# @name receipt
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "delivery_note_series": "t001",
+  "delivery_note_number": "123",
+  "delivery_note_date": "2026-09-10",
+  "received_date": "2026-09-12",
+  "items": [
+    {
+      "product_id": {{productId}},
+      "total_quantity": 97,
+      "quantity_per_delivery_note": 100,
+      "locations": [
+        { "bin_id": {{binId}}, "quantity": 60 },
+        { "bin_id": {{binId2}}, "quantity": 37 }
+      ]
+    }
+  ]
+}
+
+###
+@receiptId = {{receipt.response.body.$.goods_receipt_id}}
+
+### 7.2 Listar / obtener
+GET {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 8. VALES DE SALIDA (goods issues) — restan stock
+### =====================================================================
+
+### 8.1 Crear vale (recipient_dni: 8 dígitos)
+# @name issue
+POST {{baseUrl}}/projects/{{projectId}}/goods-issues
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "destination_sector": "Sector 1",
+  "destination_level": "Nivel 2",
+  "destination_block": "Bloque A",
+  "recipient_name": "Juan Pérez",
+  "recipient_dni": "12345678",
+  "issue_date": "2026-09-15",
+  "items": [
+    {
+      "product_id": {{productId}},
+      "total_quantity": 20,
+      "locations": [ { "bin_id": {{binId}}, "quantity": 20 } ]
+    }
+  ]
+}
+
+###
+@issueId = {{issue.response.body.$.goods_issue_id}}
+
+### 8.2 Listar / obtener
+GET {{baseUrl}}/projects/{{projectId}}/goods-issues
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/goods-issues/{{issueId}}
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 9. KARDEX (movimientos de inventario)
+### =====================================================================
+
+### 9.1 Todos los movimientos
+GET {{baseUrl}}/projects/{{projectId}}/inventory-movements
+Authorization: Bearer {{accessToken}}
+
+### 9.2 Filtrados por producto y rango de fechas (from/to opcionales)
+GET {{baseUrl}}/projects/{{projectId}}/inventory-movements?product_id={{productId}}&from=2026-09-01&to=2026-12-31
+Authorization: Bearer {{accessToken}}
+
+### 9.3 Stock del producto y ubicación principal
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 10. RESUMEN DEL CONTENIDO DE ALMACÉN
+### =====================================================================
+
+### 10.1 Cuánto guarda Almacén en este proyecto (incluye lo dado de baja); is_empty
+GET {{baseUrl}}/projects/{{projectId}}/almacen/summary
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 11. CASOS QUE DEBEN FALLAR (revisar el código de error)
+### =====================================================================
+
+### 11.1 RUC inválido → 400 INVALID_REQUEST_DATA
+POST {{baseUrl}}/projects/{{projectId}}/suppliers
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "ruc": "123", "name": "Proveedor con RUC malo" }
+
+### 11.2 RUC repetido → 409 SUPPLIER_DUPLICATE_RUC
+POST {{baseUrl}}/projects/{{projectId}}/suppliers
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "ruc": "20123456789", "name": "Otro con el mismo RUC" }
+
+### 11.3 Cambiar el RUC de un proveedor con documentos → 409 SUPPLIER_RUC_LOCKED
+PUT {{baseUrl}}/projects/{{projectId}}/suppliers/{{supplierId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "ruc": "20999999999", "name": "Cementos del Sur SAC" }
+
+### 11.4 Baja de un proveedor con documentos → 409 SUPPLIER_HAS_DOCUMENTS
+DELETE {{baseUrl}}/projects/{{projectId}}/suppliers/{{supplierId}}
+Authorization: Bearer {{accessToken}}
+
+### 11.5 Ingreso con la suma de casillas distinta al total → 400
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "delivery_note_series": "T001",
+  "delivery_note_number": "124",
+  "delivery_note_date": "2026-09-10",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 10, "locations": [ { "bin_id": {{binId}}, "quantity": 4 } ] } ]
+}
+
+### 11.6 Guía con formato libre (no es serie + número) → 400
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "supplier_id": {{supplierId}},
+  "delivery_note_series": "GR-23144141",
+  "delivery_note_number": "abc",
+  "delivery_note_date": "2026-09-10",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 10, "locations": [ { "bin_id": {{binId}}, "quantity": 10 } ] } ]
+}
+
+### 11.7 Vale por más stock del que hay → error de stock insuficiente
+POST {{baseUrl}}/projects/{{projectId}}/goods-issues
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "destination_sector": "Sector 1", "destination_level": "Nivel 2", "destination_block": "Bloque A",
+  "recipient_name": "Juan Pérez", "recipient_dni": "12345678", "issue_date": "2026-09-15",
+  "items": [ { "product_id": {{productId}}, "total_quantity": 9999, "locations": [ { "bin_id": {{binId}}, "quantity": 9999 } ] } ]
+}
+
+### 11.8 Requerimiento sin líneas → 400
+POST {{baseUrl}}/projects/{{projectId}}/purchase-requisitions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "number": "REQ-VACIO", "requisition_date": "2026-09-10", "requester": "Alguien", "items": [] }
+
+### 11.9 Número de requerimiento repetido → 409 PURCHASE_REQUISITION_DUPLICATE_NUMBER
+POST {{baseUrl}}/projects/{{projectId}}/purchase-requisitions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "number": "REQ-001", "requisition_date": "2026-09-10", "requester": "Alguien", "items": [ { "product_id": {{productId}}, "description": "Algo", "quantity_requested": 1 } ] }
+
+### 11.9b Línea sin producto → 400 (el producto del catálogo es obligatorio)
+POST {{baseUrl}}/projects/{{projectId}}/purchase-requisitions
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "number": "REQ-SIN-PRODUCTO", "requisition_date": "2026-09-10", "requester": "Alguien", "items": [ { "description": "Clavos sin catálogo", "quantity_requested": 1 } ] }
+
+### 11.10 PATCH vacío → 400
+PATCH {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{}
+
+### 11.11 Eliminar un proyecto con Almacén con contenido → 409 ALMACEN_CONTENT_NOT_EMPTY
+DELETE {{baseUrl}}/projects/{{projectId}}
+Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 12. BAJAS Y VACIAR ALMACÉN  (DESTRUCTIVO)
+### =====================================================================
+
+### 12.1 Baja del requerimiento (exige configure; elimina también su archivo)
+DELETE {{baseUrl}}/projects/{{projectId}}/purchase-requisitions/{{requisitionId}}
+Authorization: Bearer {{accessToken}}
+
+### 12.2 Baja de un producto sin movimientos (el que tiene historial se rechaza)
+DELETE {{baseUrl}}/projects/{{projectId}}/products/{{productMaterialId}}
+Authorization: Bearer {{accessToken}}
+
+### 12.3 Baja de un estante: se rechaza mientras tenga casillas (409 RACK_HAS_BINS)
+DELETE {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}
+Authorization: Bearer {{accessToken}}
+
+### 12.4 VACIAR TODO ALMACÉN del proyecto (solo dueño/administrador). Conserva las 3 categorías.
+DELETE {{baseUrl}}/projects/{{projectId}}/almacen/content
+Authorization: Bearer {{accessToken}}
+
+### 12.5 Ahora sí se puede eliminar el proyecto (si no hay contenido de otros módulos)
+DELETE {{baseUrl}}/projects/{{projectId}}
+Authorization: Bearer {{accessToken}}

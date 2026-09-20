@@ -111,8 +111,12 @@ export const getModel3DAssetContentService = async (
     const asset = rows[0];
     if (!asset) throw new AppError(MODEL_3D_ASSET_ERRORS.MODEL_3D_ASSET_NOT_FOUND);
 
-    const existsOnDisk = await fs.access(asset.file_path).then(() => true).catch(() => false);
+    // UPLOADS_DIR puede ser relativo (ej. "./uploads" en el .env): lo guardado
+    // en la base también lo es, y res.sendFile exige una ruta absoluta. Mismo
+    // criterio que files.controller.ts (path.resolve).
+    const absolutePath = path.resolve(asset.file_path);
+    const existsOnDisk = await fs.access(absolutePath).then(() => true).catch(() => false);
     if (!existsOnDisk) throw new AppError(MODEL_3D_ASSET_ERRORS.MODEL_3D_ASSET_NOT_FOUND);
 
-    return { absolutePath: asset.file_path, format: asset.format };
+    return { absolutePath, format: asset.format };
 };

@@ -286,15 +286,25 @@ export const deleteFileService = async (
         [fileId]
     );
 
-    const result = await pool.query<{ file_path : string; thumbnail_path : string | null }>(
-        `DELETE FROM files f
-        USING projects p
-        WHERE f.project_id = p.project_id
-            AND f.file_id = $1 AND f.project_id = $2
-            AND (f.uploaded_by = $3 OR p.owner_id = $3)
-        RETURNING f.file_path, f.thumbnail_path`,
-        [fileId, projectId, userId]
-    );
+    // 23001 = restrict_violation (así responde Postgres a un ON DELETE
+    // RESTRICT; 23503 es el de NO ACTION): un documento de Almacén usa este
+    // archivo (purchase_requisitions.file_id).
+    let result;
+    try {
+        result = await pool.query<{ file_path : string; thumbnail_path : string | null }>(
+            `DELETE FROM files f
+            USING projects p
+            WHERE f.project_id = p.project_id
+                AND f.file_id = $1 AND f.project_id = $2
+                AND (f.uploaded_by = $3 OR p.owner_id = $3)
+            RETURNING f.file_path, f.thumbnail_path`,
+            [fileId, projectId, userId]
+        );
+    } catch (error) {
+        const code = (error as { code? : string }).code;
+        if (code === "23001" || code === "23503") throw new AppError(FILE_ERRORS.FILE_IN_USE);
+        throw error;
+    }
 
     const deleted = result.rows[0];
 

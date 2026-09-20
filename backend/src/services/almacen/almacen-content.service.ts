@@ -34,6 +34,7 @@ export const countAlmacenContent = async (
     const { rows } = await client.query<AlmacenContentCounts>(
         `SELECT
             (SELECT COUNT(*) FROM suppliers WHERE project_id = $1)::int AS suppliers,
+            (SELECT COUNT(*) FROM purchase_requisitions WHERE project_id = $1)::int AS purchase_requisitions,
             (SELECT COUNT(*) FROM warehouses WHERE project_id = $1)::int AS warehouses,
             (SELECT COUNT(*) FROM racks r INNER JOIN warehouses w ON w.warehouse_id = r.warehouse_id
                 WHERE w.project_id = $1)::int AS racks,
@@ -98,6 +99,10 @@ export const emptyAlmacenContentService = async (
         // Los ítems y sus repartos por casilla se van solos (ON DELETE CASCADE).
         const receipts = await client.query(`DELETE FROM goods_receipts WHERE project_id = $1`, [projectId]);
         const issues = await client.query(`DELETE FROM goods_issues WHERE project_id = $1`, [projectId]);
+        // Requerimientos (con baja lógica incluida); sus líneas se van solas
+        // (CASCADE). Van ANTES de products (RESTRICT desde sus líneas) y de
+        // files (RESTRICT desde file_id).
+        const requisitions = await client.query(`DELETE FROM purchase_requisitions WHERE project_id = $1`, [projectId]);
         // Los proveedores (incluidos los dados de baja) se borran DESPUÉS de los
         // ingresos: goods_receipts.supplier_id es RESTRICT. Los documentos
         // futuros que también los referencien se borran antes de esta línea.
@@ -153,6 +158,7 @@ export const emptyAlmacenContentService = async (
 
         return {
             suppliers: suppliers.rowCount ?? 0,
+            purchase_requisitions: requisitions.rowCount ?? 0,
             warehouses: warehouses.rowCount ?? 0,
             racks: racks.rowCount ?? 0,
             bins: bins.rowCount ?? 0,

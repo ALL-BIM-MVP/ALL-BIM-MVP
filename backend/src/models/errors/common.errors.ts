@@ -42,6 +42,23 @@ export const COMMON_ERRORS = {
             code: "INVALID_QUERY_PARAMETER",
             message: "Los parámetros de consulta enviados no son válidos."
         }
-    }   
+    },
+
+    // Lo lanza express.json() antes de llegar a ningún controller.
+    INVALID_JSON_BODY: {
+        statusCode: 400,
+        response: {
+            code: "INVALID_JSON_BODY",
+            message: "El cuerpo de la solicitud no es un JSON válido."
+        }
+    },
+
+    PAYLOAD_TOO_LARGE: {
+        statusCode: 413,
+        response: {
+            code: "PAYLOAD_TOO_LARGE",
+            message: "El cuerpo de la solicitud es demasiado grande."
+        }
+    }
 
 } satisfies Record<string, ErrorFormat>;

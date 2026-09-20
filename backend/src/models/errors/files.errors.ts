@@ -23,6 +23,15 @@ export const FILE_ERRORS = {
             message: "No se pudo guardar el archivo en el servidor."
         }
     },
+    // El archivo es el documento físico de un documento de Almacén
+    // (FK RESTRICT): se reemplaza o se quita desde el documento.
+    FILE_IN_USE: {
+        statusCode: 409,
+        response: {
+            code: "FILE_IN_USE",
+            message: "El archivo está adjunto a un documento. Reemplácelo o quítelo desde el documento."
+        }
+    },
     FILE_NOT_FOUND: {
         statusCode: 404,
         response: {
