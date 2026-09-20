@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
-import RegisterInvitedForm from '../components/RegisterInvitedForm';
+import RegisterInvitedForm from '../components/auth/RegisterInvitedForm';
 import fondo from '../assets/fondo.jpg';
 import logo from '../assets/logo3.png';
 

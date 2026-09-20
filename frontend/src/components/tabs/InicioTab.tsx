@@ -13,7 +13,7 @@ import { resolveMediaUrl } from '../../utils/media';
 import { projectService } from '../../services/project.service';
 import { getMyModuleAccess } from '../../services/module.service';
 import type { ModuleAccess } from '../../services/module.service';
-import ElementoConjuntoConfigModal from './ElementoConjuntoConfigModal';
+import ElementoConjuntoConfigModal from './Metrados/ElementoConjuntoConfigModal';
 
 interface EditForm {
   name: string;

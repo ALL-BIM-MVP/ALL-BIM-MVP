@@ -68,19 +68,6 @@ function decodeFlatMeshIntoColorGroups(flatMesh: any, target: Map<string, ColorG
 function buildGeometryPayload({ color, opacity, geometries }: ColorGroup) {
   if (geometries.length === 0) return null;
 
-  const posToExpressIds = new Map<string, Set<number>>();
-  for (const geom of geometries) {
-    const posAttr = geom.getAttribute('position') as THREE.BufferAttribute;
-    const idAttr = geom.getAttribute('expressId') as THREE.BufferAttribute;
-    for (let i = 0; i < posAttr.count; i++) {
-      const key = `${posAttr.getX(i).toFixed(4)}_${posAttr.getY(i).toFixed(4)}_${posAttr.getZ(i).toFixed(4)}`;
-      const id = idAttr.getX(i);
-      let set = posToExpressIds.get(key);
-      if (!set) { set = new Set<number>(); posToExpressIds.set(key, set); }
-      set.add(id);
-    }
-  }
-
   let merged = mergeGeometries(geometries, false);
   geometries.forEach((g) => g.dispose());
   if (!merged) return null;
@@ -100,31 +87,17 @@ function buildGeometryPayload({ color, opacity, geometries }: ColorGroup) {
     }
   }
 
-  const edgesGeometry = new THREE.EdgesGeometry(merged, 40);
-  const edgePos = edgesGeometry.getAttribute('position') as THREE.BufferAttribute;
-  const edgeExpressId = new Float32Array(edgePos.count);
-  const edgeCandidateIds: number[][] = new Array(edgePos.count);
-  for (let i = 0; i < edgePos.count; i++) {
-    const key = `${edgePos.getX(i).toFixed(4)}_${edgePos.getY(i).toFixed(4)}_${edgePos.getZ(i).toFixed(4)}`;
-    const candidates = posToExpressIds.get(key);
-    const list = candidates ? Array.from(candidates) : [];
-    edgeCandidateIds[i] = list;
-    edgeExpressId[i] = list.length > 0 ? list[0] : -1;
-  }
-
   const boosted = boostSaturation(color, 1.3);
   const position = (merged.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
   const normal = (merged.getAttribute('normal') as THREE.BufferAttribute).array as Float32Array;
   const index = merged.getIndex()!.array as Uint32Array | Uint16Array;
   const expressId = (merged.getAttribute('expressId') as THREE.BufferAttribute).array as Float32Array;
-  const edgePosition = (edgesGeometry.getAttribute('position') as THREE.BufferAttribute).array as Float32Array;
 
   return {
     color: { r: boosted.r, g: boosted.g, b: boosted.b },
     opacity,
     position, normal, index: new Uint32Array(index), expressId,
     ranges,
-    edgePosition, edgeExpressId, edgeCandidateIds,
   };
 }
 
@@ -240,7 +213,7 @@ function post(msg: any, transfer: Transferable[] = []) {
 }
 
 function collectTransfers(payload: any): Transferable[] {
-  return [payload.position.buffer, payload.normal.buffer, payload.index.buffer, payload.expressId.buffer, payload.edgePosition.buffer, payload.edgeExpressId.buffer];
+  return [payload.position.buffer, payload.normal.buffer, payload.index.buffer, payload.expressId.buffer];
 }
 
 async function handleOpenModel(buffer: ArrayBuffer, reqId: string) {

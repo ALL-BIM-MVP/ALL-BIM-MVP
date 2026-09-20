@@ -28,7 +28,10 @@ export interface TypeGroup {
 
 export type LevelGroup = TypeGroup;
 
-export type ViewPreset = 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom';
+export type ViewPreset =
+  | 'front' | 'back' | 'left' | 'right' | 'top' | 'bottom'
+  | 'top-front-right' | 'top-front-left' | 'top-back-right' | 'top-back-left'
+  | 'bottom-front-right' | 'bottom-front-left' | 'bottom-back-right' | 'bottom-back-left';
 
 export interface MeasurePoint {
   x: number;

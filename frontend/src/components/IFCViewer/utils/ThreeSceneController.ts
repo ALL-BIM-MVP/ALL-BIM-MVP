@@ -18,6 +18,15 @@ const UP = new THREE.Vector3(0, 1, 0);
 
 const STROKE_RADIUS = 0.015;
 const STROKE_RADIAL_SEGMENTS = 12;
+const ZOOM_SPEED_FAR = 0.001;
+const ZOOM_SPEED_NEAR = 0.000015;
+const ZOOM_NEAR_DISTANCE = 7;
+const MIN_ZOOM_STEP = 0.3;
+const MIN_ZOOM_STEP_NEAR = 0.1;
+const PAN_SPEED_FAR = 0.0015;
+const PAN_SPEED_NEAR = 0.000005;
+const PAN_NEAR_DISTANCE = 7;
+const MIN_PAN_SPEED = 0.02;
 
 class OrbitCameraController {
   camera: THREE.PerspectiveCamera;
@@ -51,15 +60,22 @@ class OrbitCameraController {
     this.camera.updateMatrixWorld(true);
   }
 
-  orbit(deltaX: number, deltaY: number) {
-    const s = 0.006;
+  // proximity: distancia real a la geometría más cercana adelante de la
+  // cámara — sin ella, velocidad normal.
+  orbit(deltaX: number, deltaY: number, proximity = Infinity) {
+    if (!Number.isFinite(proximity)) proximity = Infinity;
+    const s = 0.006 * Math.max(0.02, Math.min(1, proximity / 7));
     this.spherical.theta -= deltaX * s;
     this.spherical.phi = Math.max(0.05, Math.min(Math.PI - 0.05, this.spherical.phi - deltaY * s));
     this.syncFromSpherical();
   }
 
-  pan(deltaX: number, deltaY: number) {
-    const panSpeed = this.spherical.radius * 0.0015;
+  pan(deltaX: number, deltaY: number, proximity = Infinity) {
+    const distanceFactor = Number.isFinite(proximity)
+      ? Math.min(1, proximity / PAN_NEAR_DISTANCE)
+      : 1;
+    const panFactor = THREE.MathUtils.lerp(PAN_SPEED_NEAR, PAN_SPEED_FAR, distanceFactor);
+    const panSpeed = Math.max(MIN_PAN_SPEED, this.spherical.radius * panFactor);
     const right = new THREE.Vector3();
     const up = new THREE.Vector3();
     this.camera.matrix.extractBasis(right, up, new THREE.Vector3());
@@ -70,9 +86,53 @@ class OrbitCameraController {
     this.syncFromSpherical();
   }
 
-  zoom(deltaY: number) {
-    const factor = Math.exp(deltaY * 0.001);
-    this.spherical.radius = Math.max(0.05, Math.min(5000, this.spherical.radius * factor));
+  // mouseX/mouseY/viewWidth/viewHeight (todos en el mismo espacio, CSS px)
+  // son opcionales: si vienen, el punto de orbitación (target) se corre
+  // hacia donde apunta el cursor en cada paso de zoom, en vez de quedarse
+  // siempre centrado en el mismo lugar.
+  zoom(deltaY: number, mouseX?: number, mouseY?: number, viewWidth?: number, viewHeight?: number, proximity = Infinity) {
+    if (!Number.isFinite(proximity)) proximity = Infinity;
+    const proximityFactor = Math.min(1, proximity / ZOOM_NEAR_DISTANCE);
+    const zoomSpeed = THREE.MathUtils.lerp(ZOOM_SPEED_NEAR, ZOOM_SPEED_FAR, proximityFactor);
+    const oldRadius = this.spherical.radius;
+    const requestedStep = oldRadius * (Math.exp(Math.abs(deltaY) * zoomSpeed) - 1);
+    const minimumStep = Number.isFinite(proximity) ? MIN_ZOOM_STEP_NEAR : MIN_ZOOM_STEP;
+    const step = Math.max(minimumStep, requestedStep);
+    const direction = Math.sign(deltaY);
+    const rawRadius = oldRadius + direction * step;
+    const newRadius = Math.max(0.05, Math.min(5000, rawRadius));
+    const viewDirection = new THREE.Vector3().subVectors(this.target, this.camera.position).normalize();
+
+    if (mouseX !== undefined && mouseY !== undefined && viewWidth && viewHeight) {
+      const ndcX = (mouseX / viewWidth) * 2 - 1;
+      const ndcY = -(mouseY / viewHeight) * 2 + 1;
+      const raycaster = new THREE.Raycaster();
+      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), this.camera);
+
+      // Plano que pasa por target, perpendicular a la vista — no hace
+      // falta pegarle a geometría real, solo saber qué punto hay "bajo
+      // el cursor" a esa profundidad.
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(viewDirection, this.target);
+      const hit = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(plane, hit)) {
+        // shift = 1 - newRadius/oldRadius: corre el target una fracción
+        // del camino hacia `hit`, la misma fracción que cambió el radio.
+        // Con esto, zoom in seguido de zoom out por la misma cantidad
+        // deja el target exactamente donde estaba (es invertible).
+        const shift = 1 - newRadius / oldRadius;
+        this.target.lerp(hit, shift);
+      }
+    }
+
+    // Cuando el radio mínimo ya fue alcanzado, continuar el zoom hacia
+    // dentro desplaza cámara y target en la dirección de la vista para
+    // atravesar el elemento en lugar de quedarse bloqueado en el límite.
+    const passThroughDistance = direction < 0 ? Math.max(0, 0.05 - rawRadius) : 0;
+    if (passThroughDistance > 0) {
+      this.target.addScaledVector(viewDirection, passThroughDistance);
+    }
+
+    this.spherical.radius = newRadius;
     this.syncFromSpherical();
   }
 
@@ -96,6 +156,14 @@ class OrbitCameraController {
       left: new THREE.Vector3(-1, 0, 0),
       top: new THREE.Vector3(0, 1, 0),
       bottom: new THREE.Vector3(0, -1, 0),
+      'top-front-right': new THREE.Vector3(1, 1, 1),
+      'top-front-left': new THREE.Vector3(-1, 1, 1),
+      'top-back-right': new THREE.Vector3(1, 1, -1),
+      'top-back-left': new THREE.Vector3(-1, 1, -1),
+      'bottom-front-right': new THREE.Vector3(1, -1, 1),
+      'bottom-front-left': new THREE.Vector3(-1, -1, 1),
+      'bottom-back-right': new THREE.Vector3(1, -1, -1),
+      'bottom-back-left': new THREE.Vector3(-1, -1, -1),
     };
     const endSpherical = new THREE.Spherical().setFromVector3(dirByPreset[preset].clone().multiplyScalar(radius));
     if (preset === 'top' || preset === 'bottom') endSpherical.phi += 0.0001;
@@ -185,7 +253,7 @@ class OrbitCameraController {
     return { x: (v.x * 0.5 + 0.5) * canvasWidth, y: (-v.y * 0.5 + 0.5) * canvasHeight };
   }
 
-  fitToBounds(bounds: ModelBounds) {
+  fitToBounds(bounds: ModelBounds, marginFactor = 0.9) {
     const center = new THREE.Vector3(
       (bounds.min.x + bounds.max.x) / 2,
       (bounds.min.y + bounds.max.y) / 2,
@@ -197,7 +265,7 @@ class OrbitCameraController {
       bounds.max.z - bounds.min.z
     );
     this.target.copy(center);
-    this.spherical.radius = Math.max(size.length() * 0.9, 1);
+    this.spherical.radius = Math.max(size.length() * marginFactor, 1);
     this.spherical.theta = Math.PI / 4;
     this.spherical.phi = Math.PI / 3;
     this.syncFromSpherical();
@@ -271,21 +339,6 @@ export class ThreeSceneController {
         }
         ghostedAttr.needsUpdate = true;
       }
-
-      
-      const edges = mesh.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
-      if (edges) {
-        const edgeGhostedAttr = edges.geometry.getAttribute('ghosted') as THREE.BufferAttribute | undefined;
-        if (edgeGhostedAttr) {
-          const candidatesPerVertex = (edges.userData.candidateIdsPerVertex as number[][] | undefined) ?? [];
-          for (let i = 0; i < edgeGhostedAttr.count; i++) {
-            const candidates = candidatesPerVertex[i];
-            const isGhosted = !!candidates && candidates.length > 0 && candidates.every((id) => this.ghostedIds.has(id));
-            edgeGhostedAttr.setX(i, isGhosted ? 1 : 0);
-          }
-          edgeGhostedAttr.needsUpdate = true;
-        }
-      }
     }
   }
 
@@ -307,6 +360,11 @@ export class ThreeSceneController {
   async init() {}
 
   getCamera() { return this.cameraController; }
+
+  // Los hooks de Fragments (medición, cruz de ejes) raycastean contra el
+  // modelo directamente, sin pasar por this.meshes/isPointClippedAway
+  // de acá — necesitan el plano para filtrar sus propios hits fantasma.
+  getClipPlane() { return this.clipPlane; }
 
   showElementMarker(expressId: number) {
     this.clearElementMarker();
@@ -382,9 +440,9 @@ export class ThreeSceneController {
   setModelBounds(bounds: ModelBounds | null) { this.modelBounds = bounds; }
   getModelBounds() { return this.modelBounds; }
 
-  fitToView() {
+  fitToView(marginFactor?: number) {
     if (this.modelBounds) {
-      this.cameraController.fitToBounds(this.modelBounds);
+      this.cameraController.fitToBounds(this.modelBounds, marginFactor);
 
       this.panelCompensationBaseTarget = this.cameraController.target.clone();
     }
@@ -407,34 +465,10 @@ export class ThreeSceneController {
         hiddenAttr.setX(i, isHidden ? 1 : 0);
       }
       hiddenAttr.needsUpdate = true;
-
-      const edges = mesh.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
-      if (edges) {
-        const edgeHiddenAttr = edges.geometry.getAttribute('hidden') as THREE.BufferAttribute;
-        const candidatesPerVertex = (edges.userData.candidateIdsPerVertex as number[][] | undefined) ?? [];
-        const isElementHidden = (id: number) =>
-          (this.isolatedIds ? !this.isolatedIds.has(id) : false) || this.hiddenIds.has(id);
-        const anyFilterActive = this.isolatedIds !== null || this.hiddenIds.size > 0;
-
-        for (let i = 0; i < edgeHiddenAttr.count; i++) {
-          const candidates = candidatesPerVertex[i];
-          const isHidden = !candidates || candidates.length === 0
-            ? anyFilterActive
-            : candidates.some(isElementHidden);
-          edgeHiddenAttr.setX(i, isHidden ? 1 : 0);
-        }
-        edgeHiddenAttr.needsUpdate = true;
-      }
     }
   }
   setHiddenEntities(ids: Set<number>) { this.hiddenIds = ids; this.applyVisibilityFlags(); }
 
-  setEdgesVisible(visible: boolean) {
-    for (const mesh of this.meshes) {
-      const edges = mesh.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments | undefined;
-      if (edges) edges.visible = visible;
-    }
-  }
   setIsolatedEntities(ids: Set<number> | null) { this.isolatedIds = ids; this.applyVisibilityFlags(); }
   getHiddenIds() { return this.hiddenIds; }
 
@@ -445,6 +479,14 @@ export class ThreeSceneController {
     const index = geom.getIndex();
     const vIdx = index ? index.getX(faceIndex * 3) : faceIndex * 3;
     return hiddenAttr.getX(vIdx) === 1;
+  }
+
+  // Con un corte activo, la geometría del lado invisible sigue entera en
+  // 3D (el clipping es solo visual, a nivel GPU) — sin este chequeo el
+  // raycast de click/medición/snap puede pegarle a ese fantasma en vez
+  // de a la cara que realmente se ve.
+  private isPointClippedAway(point: THREE.Vector3): boolean {
+    return this.clipPlane !== null && this.clipPlane.distanceToPoint(point) < 0;
   }
 
   setSelection(ids: number[]) {
@@ -734,6 +776,7 @@ export class ThreeSceneController {
     const hit = hits.find((h) => {
       if (!h.object.visible || h.faceIndex === undefined) return false;
       if (this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)) return false;
+      if (this.isPointClippedAway(h.point)) return false;
       if (this.walkThroughBoxes.length > 0 && this.isPointWalkThrough(h.point)) return false;
       return true;
     });
@@ -743,7 +786,19 @@ export class ThreeSceneController {
     return Math.min(distance, safeDistance);
   }
 
-  
+  // distancia real a lo primero que hay adelante de la cámara — zoom/orbit
+  // adaptativo (web-ifc)
+  raycastForward(): number {
+    const camera = this.cameraController.camera;
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    this.raycaster.set(camera.position, dir);
+    this.raycaster.far = Infinity;
+    const hits = this.raycaster.intersectObjects(this.meshes, false);
+    const hit = hits.find((h) => h.object.visible && h.faceIndex !== undefined);
+    return hit ? hit.distance : Infinity;
+  }
+
   findFloorHeight(x: number, z: number, referenceY?: number, maxDelta = 2.5): number | null {
     if (!this.modelBounds) return null;
     const fromY = this.modelBounds.max.y + 5; // bien arriba de todo, con margen
@@ -758,7 +813,8 @@ export class ThreeSceneController {
       (h) =>
         h.object.visible &&
         h.faceIndex !== undefined &&
-        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!) &&
+        !this.isPointClippedAway(h.point)
     );
     if (validHits.length === 0) return null;
 
@@ -787,7 +843,8 @@ export class ThreeSceneController {
       (h) =>
         h.object.visible &&
         h.faceIndex !== undefined &&
-        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!) &&
+        !this.isPointClippedAway(h.point)
     );
     if (!hit) return { expressId: null };
 
@@ -818,7 +875,8 @@ export class ThreeSceneController {
       (h) =>
         h.object.visible &&
         h.faceIndex !== undefined &&
-        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!) &&
+        !this.isPointClippedAway(h.point)
     );
 
     // Mientras se arrastra un punto ya puesto (measure/cross le pasan el
@@ -954,7 +1012,8 @@ export class ThreeSceneController {
       (h) =>
         h.object.visible &&
         h.faceIndex !== undefined &&
-        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!) &&
+        !this.isPointClippedAway(h.point)
     );
     if (!hit) return null;
 
@@ -984,6 +1043,7 @@ export class ThreeSceneController {
       const depthHit = depthHits.find((h) => {
         if (!h.object.visible || h.faceIndex === undefined) return false;
         if (this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)) return false;
+        if (this.isPointClippedAway(h.point)) return false;
         const hMesh = h.object as THREE.Mesh;
         const hIndex = hMesh.geometry.getIndex();
         if (!hIndex) return false;
@@ -1024,7 +1084,8 @@ export class ThreeSceneController {
       (h) =>
         h.object.visible &&
         h.faceIndex !== undefined &&
-        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!)
+        !this.isHitOnHiddenVertex(h.object as THREE.Mesh, h.faceIndex!) &&
+        !this.isPointClippedAway(h.point)
     );
     if (!hit) return null;
 

@@ -1,7 +1,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
-import { coplanarTrianglesFromMesh, computeCrossArms, clipArmTipForScreen } from '../utils/crossMath';
+import { coplanarTrianglesFromMesh, computeCrossArms, clipArmTipForScreen, buildTempMeshForItem } from '../utils/crossMath';
 import { cameraOrCanvasChanged, type CameraSnapshot } from '../utils/cameraChangeDetector';
 
 interface Vec3 { x: number; y: number; z: number; }
@@ -30,39 +30,6 @@ let idCounter = 0;
 const nextId = () => `fragcross_${++idCounter}`;
 
 
-async function buildTempMeshForItem(model: any, localId: number, modelWorldMatrix: THREE.Matrix4): Promise<THREE.Mesh | null> {
-  const [pieces] = await model.getItemsGeometry([localId]);
-  if (!pieces || pieces.length === 0) return null;
-
-  const positions: number[] = [];
-  const indices: number[] = [];
-  let vertexOffset = 0;
-  const v = new THREE.Vector3();
-
-  for (const piece of pieces) {
-    if (!piece.positions || !piece.indices) continue;
-    const pieceMatrix = modelWorldMatrix.clone().multiply(piece.transform as THREE.Matrix4);
-    const count = piece.positions.length / 3;
-    for (let i = 0; i < count; i++) {
-      v.set(piece.positions[i * 3], piece.positions[i * 3 + 1], piece.positions[i * 3 + 2]);
-      v.applyMatrix4(pieceMatrix);
-      positions.push(v.x, v.y, v.z);
-    }
-    for (let i = 0; i < piece.indices.length; i++) {
-      indices.push(piece.indices[i] + vertexOffset);
-    }
-    vertexOffset += count;
-  }
-  if (positions.length === 0 || indices.length === 0) return null;
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setIndex(indices);
-  const mesh = new THREE.Mesh(geometry);
-
-  mesh.matrixAutoUpdate = false;
-  return mesh;
-}
 
 export function useFragmentsCrossTool(
   rendererRef: React.RefObject<any>,

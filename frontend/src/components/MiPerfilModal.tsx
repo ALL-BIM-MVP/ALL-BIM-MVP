@@ -2,7 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Camera, Trash2, Loader2, AlertCircle, Save, ShieldAlert, X as XIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { updateMyProfile, uploadMyPhoto, deleteMyPhoto, deleteMyAccount } from '../services/users.service';
-import AvatarCropper from './AvatarCropper';
+import AvatarCropper from './auth/AvatarCropper';
 
 interface MiPerfilModalProps {
   isOpen: boolean;

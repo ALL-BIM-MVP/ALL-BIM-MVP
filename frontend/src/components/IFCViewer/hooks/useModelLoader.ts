@@ -60,12 +60,6 @@ export function useModelLoader(
   const pendingScreenshotRef = useRef<PendingScreenshot | null>(null);
   useEffect(() => { pendingScreenshotRef.current = pendingScreenshot; }, [pendingScreenshot]);
 
-  const [edgesVisible, setEdgesVisible] = useState(false);
-  const toggleEdges = useCallback(() => setEdgesVisible((prev) => !prev), []);
-  useEffect(() => {
-    rendererRef.current?.setEdgesVisible?.(edgesVisible);
-  }, [edgesVisible, ready, rendererRef]);
-
   useEffect(() => {
     let isMounted = true;
     let rafId: number | null = null;
@@ -184,6 +178,9 @@ export function useModelLoader(
           }
 
           let lastTime = performance.now();
+          let fragmentsUpdateBusy = false;
+          let lastFragmentsUpdateAt = 0;
+          const FRAGMENTS_UPDATE_INTERVAL_MS = 150;
           const renderLoop = () => {
             if (!isMounted || !controller) return;
             if (!isActiveRef.current) {
@@ -194,13 +191,24 @@ export function useModelLoader(
             const now = performance.now();
             const dt = Math.min((now - lastTime) / 1000, 0.1);
             lastTime = now;
-           
+
             controller.getCamera().update(dt);
             onFrame?.(dt);
             controller.render({
               clearColor: getClearColor?.() ?? [0.9333, 0.9333, 0.9333, 1],
               sectionPlane: getSectionPlane?.(),
             });
+
+            // Fragments necesita que se le avise para resolver streaming/LOD
+            // pendiente — sin esto, moverse a una zona nueva deja elementos
+            // a medio resolver (se ven atenuados) hasta el próximo update()
+            // incidental (ej. al seleccionar algo).
+            if (!fragmentsUpdateBusy && now - lastFragmentsUpdateAt > FRAGMENTS_UPDATE_INTERVAL_MS) {
+              lastFragmentsUpdateAt = now;
+              fragmentsUpdateBusy = true;
+              fragmentsInstance!.update().catch(() => {}).finally(() => { fragmentsUpdateBusy = false; });
+            }
+
             rafId = requestAnimationFrame(renderLoop);
           };
           renderLoop();
@@ -462,7 +470,6 @@ export function useModelLoader(
     loading, error, progress, debugInfo, ready, typeGroups, levelGroups, paramIndex,
     handleFitToView, setPresetView,
     takeScreenshot, pendingScreenshot, discardScreenshot, downloadScreenshot,
-    edgesVisible, toggleEdges,
   };
 }
 
@@ -493,22 +500,6 @@ function materializeMesh(payload: MeshPayload): THREE.Mesh {
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.userData.expressIdRanges = payload.ranges;
-
-  const edgesGeometry = new THREE.BufferGeometry();
-  edgesGeometry.setAttribute('position', new THREE.BufferAttribute(payload.edgePosition, 3));
-  edgesGeometry.setAttribute('expressId', new THREE.BufferAttribute(payload.edgeExpressId, 1));
-  edgesGeometry.setAttribute('hidden', new THREE.BufferAttribute(new Float32Array(payload.edgeExpressId.length), 1));
-  // Mismo atributo "ghosted" para las líneas de contorno, así el contorno
-  // de los elementos atenuados también se ve tenue (no solo la cara).
-  edgesGeometry.setAttribute('ghosted', new THREE.BufferAttribute(new Float32Array(payload.edgeExpressId.length), 1));
-
-  const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x5a5a5a, transparent: true, opacity: 0.3 });
-  applyEdgeHiddenShader(edgesMaterial);
-  const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
-  edges.userData.candidateIdsPerVertex = payload.edgeCandidateIds;
-  edges.visible = false;
-  edges.raycast = () => {};
-  mesh.add(edges);
 
   return mesh;
 }
@@ -567,18 +558,6 @@ function applyPerElementShader(material: THREE.MeshStandardMaterial) {
   material.customProgramCacheKey = () => 'per-element-vis-sel-ghost';
 }
 
-function applyEdgeHiddenShader(material: THREE.LineBasicMaterial) {
-  material.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', `attribute float hidden;\nattribute float ghosted;\nvarying float vHidden;\nvarying float vGhosted;\n#include <common>`)
-      .replace('#include <begin_vertex>', `#include <begin_vertex>\nvHidden = hidden;\nvGhosted = ghosted;`);
-    shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', `varying float vHidden;\nvarying float vGhosted;\n#include <common>`)
-      .replace('#include <color_fragment>', `#include <color_fragment>\nif (vHidden > 0.5) { discard; }\nif (vGhosted > 0.5) { diffuseColor.a *= ${GHOSTED_ALPHA_FACTOR.toFixed(3)}; }`);
-  };
-  material.customProgramCacheKey = () => 'edge-hidden-ghost';
-}
-
 interface MeshPayload {
   color: { r: number; g: number; b: number };
   opacity: number;
@@ -587,7 +566,4 @@ interface MeshPayload {
   index: Uint32Array;
   expressId: Float32Array;
   ranges: { expressId: number; start: number; end: number }[];
-  edgePosition: Float32Array;
-  edgeExpressId: Float32Array;
-  edgeCandidateIds: number[][];
 }

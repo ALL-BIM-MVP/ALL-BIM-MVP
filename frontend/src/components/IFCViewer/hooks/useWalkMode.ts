@@ -7,6 +7,7 @@ const SPRINT_MULTIPLIER = 1.8;
 const FLOOR_FOLLOW_SPEED = 20;
 const COLLISION_CHECK_HEIGHT = 0.4;
 const BOUNDS_MARGIN = 1;
+const NEAR_FLOOR_MAX_DELTA = 2.5; // si no hay piso real a menos de esto, se cae al piso más cercano
 
 export function useWalkMode(
   rendererRef: React.RefObject<any>,
@@ -309,6 +310,32 @@ export function useWalkMode(
         if (len3 > 1e-6) {
           startYaw = Math.atan2(dirX, -dirZ);
           startPitch = Math.max(-1.4, Math.min(1.4, Math.asin(dirY / len3)));
+        }
+      }
+
+      // Si no hay ningún piso real cerca de esa altura (por ejemplo,
+      // entrando desde afuera/arriba del modelo), aparecer ahí mismo deja
+      // flotando en el aire — en ese caso sí se cae al piso real más
+      // cercano, en vez de mantener la altura exacta de la cámara orbital.
+      const bounds = renderer.getModelBounds?.();
+      if (bounds) {
+        if (hasFragmentsModel) {
+          const results = await fragmentsRaycastAll({ x: startX, y: bounds.max.y + 5, z: startZ }, { x: 0, y: -1, z: 0 }).catch(() => null);
+          if (results && results.length > 0) {
+            let nearest = results[0];
+            let nearestDiff = Math.abs(nearest.point.y - startY);
+            for (const r of results) {
+              const diff = Math.abs(r.point.y - startY);
+              if (diff < nearestDiff) { nearest = r; nearestDiff = diff; }
+            }
+            if (nearestDiff > NEAR_FLOOR_MAX_DELTA) startY = results[0].point.y + EYE_HEIGHT;
+          }
+        } else {
+          const floorY = renderer.findFloorHeight?.(startX, startZ, startY, NEAR_FLOOR_MAX_DELTA) ?? null;
+          if (floorY === null) {
+            const fallbackY = renderer.findFloorHeight?.(startX, startZ) ?? null;
+            if (fallbackY !== null) startY = fallbackY + EYE_HEIGHT;
+          }
         }
       }
     } else {

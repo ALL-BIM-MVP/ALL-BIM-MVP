@@ -180,3 +180,75 @@ export function computeCrossArms(
     vNeg: endPoint(vAxis, tvNeg, -1),
   };
 }
+
+// Mesh temporal (solo geometría, sin material) para un único elemento de
+// Fragments — mismo mecanismo que ya usaba useFragmentsCrossTool.ts,
+// movido acá para que useFragmentsMeasureTool.ts también lo reuse.
+export async function buildTempMeshForItem(model: any, localId: number, modelWorldMatrix: THREE.Matrix4): Promise<THREE.Mesh | null> {
+  const [pieces] = await model.getItemsGeometry([localId]);
+  if (!pieces || pieces.length === 0) return null;
+
+  const positions: number[] = [];
+  const indices: number[] = [];
+  let vertexOffset = 0;
+  const v = new THREE.Vector3();
+
+  for (const piece of pieces) {
+    if (!piece.positions || !piece.indices) continue;
+    const pieceMatrix = modelWorldMatrix.clone().multiply(piece.transform as THREE.Matrix4);
+    const count = piece.positions.length / 3;
+    for (let i = 0; i < count; i++) {
+      v.set(piece.positions[i * 3], piece.positions[i * 3 + 1], piece.positions[i * 3 + 2]);
+      v.applyMatrix4(pieceMatrix);
+      positions.push(v.x, v.y, v.z);
+    }
+    for (let i = 0; i < piece.indices.length; i++) {
+      indices.push(piece.indices[i] + vertexOffset);
+    }
+    vertexOffset += count;
+  }
+  if (positions.length === 0 || indices.length === 0) return null;
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setIndex(indices);
+  const mesh = new THREE.Mesh(geometry);
+
+  mesh.matrixAutoUpdate = false;
+  return mesh;
+}
+
+// Contorno real (segmentos) donde un plano de corte atraviesa una malla —
+// clippingPlanes de three.js solo oculta triángulos al dibujar, no genera
+// esta geometría, así que sin esto no hay nada ahí para engancharse.
+export function planeMeshIntersectionSegments(mesh: THREE.Mesh, plane: THREE.Plane): { a: THREE.Vector3; b: THREE.Vector3 }[] {
+  const geom = mesh.geometry as THREE.BufferGeometry;
+  const pos = geom.getAttribute('position') as THREE.BufferAttribute;
+  const index = geom.getIndex();
+  const matrixWorld = mesh.matrixWorld;
+  const triCount = index ? index.count / 3 : pos.count / 3;
+  const getIdx = (i: number) => (index ? index.getX(i) : i);
+
+  const segments: { a: THREE.Vector3; b: THREE.Vector3 }[] = [];
+  const vA = new THREE.Vector3(), vB = new THREE.Vector3(), vC = new THREE.Vector3();
+
+  for (let t = 0; t < triCount; t++) {
+    vA.fromBufferAttribute(pos, getIdx(t * 3)).applyMatrix4(matrixWorld);
+    vB.fromBufferAttribute(pos, getIdx(t * 3 + 1)).applyMatrix4(matrixWorld);
+    vC.fromBufferAttribute(pos, getIdx(t * 3 + 2)).applyMatrix4(matrixWorld);
+    const dA = plane.distanceToPoint(vA);
+    const dB = plane.distanceToPoint(vB);
+    const dC = plane.distanceToPoint(vC);
+
+    const pts: THREE.Vector3[] = [];
+    const edgeCross = (p1: THREE.Vector3, d1: number, p2: THREE.Vector3, d2: number) => {
+      if ((d1 >= 0) === (d2 >= 0)) return;
+      pts.push(p1.clone().lerp(p2, d1 / (d1 - d2)));
+    };
+    edgeCross(vA, dA, vB, dB);
+    edgeCross(vB, dB, vC, dC);
+    edgeCross(vC, dC, vA, dA);
+    if (pts.length === 2) segments.push({ a: pts[0], b: pts[1] });
+  }
+  return segments;
+}

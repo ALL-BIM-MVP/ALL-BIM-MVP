@@ -10,7 +10,7 @@ import MainLayout from './layouts/MainLayout';
 import Register from './pages/Register';
 import DashboardProjects from './pages/DashboardProjects';
 import MisInvitaciones from './pages/MisInvitaciones';
-import FragmentsPreview from './components/FragmentsPreview';
+import FragmentsPreview from './components/IFCViewer/FragmentsPreview';
 import Ayuda from './pages/Ayuda';
 import { GlobalHelpShortcut } from './components/GlobalHelpShortcut';
 

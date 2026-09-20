@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Search, ChevronDown, ChevronUp, ChevronRight, X as XIcon,
   Info, History, Box, Layers, Tag, ListTree, Shapes, Link2, Copy, Check,
@@ -14,6 +14,7 @@ interface PropertiesPanelProps {
   entity: SelectedEntity | null;
   onSelectResult: (expressId: number) => void;
   onDeselect: () => void;
+  fileName?: string;
 }
 
 const SECTION_ICONS: Record<string, React.ReactNode> = {
@@ -29,10 +30,15 @@ const SECTION_ICONS: Record<string, React.ReactNode> = {
 
 const Row: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   <div className="flex justify-between gap-3 text-xs px-1.5 py-1">
-    <span className="text-gray-500">{label}</span>
-    <span className="text-[#0056b3] text-right truncate max-w-[160px] font-medium">{value || '—'}</span>
+    <span className="text-gray-500 flex-shrink-0">{label}</span>
+    <span className="text-[#0056b3] text-right truncate flex-1 min-w-0 font-medium" title={value || undefined}>{value || '—'}</span>
   </div>
 );
+
+const MIN_PANEL_WIDTH = 260;
+const MIN_PANEL_HEIGHT = 200;
+const MAX_PANEL_WIDTH = 640;
+const MAX_PANEL_HEIGHT = 720;
 
 // Botón chiquito de copiar — usado en el header para GUID/ID interno
 // (punto 6 de pendientes-sin-definir-frontend.md: antes se mostraban
@@ -84,8 +90,29 @@ const SectionHeader: React.FC<{
 };
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
-  isOpen, onClose, paramIndex, entity, onSelectResult, onDeselect,
+  isOpen, onClose, paramIndex, entity, onSelectResult, onDeselect, fileName,
 }) => {
+  const [size, setSize] = useState({ width: 320, height: 440 });
+  const resizeStartRef = useRef({ x: 0, y: 0, w: 0, h: 0 });
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    resizeStartRef.current = { x: e.clientX, y: e.clientY, w: size.width, h: size.height };
+    const onMove = (ev: MouseEvent) => {
+      const { x, y, w, h } = resizeStartRef.current;
+      setSize({
+        width: Math.max(MIN_PANEL_WIDTH, Math.min(MAX_PANEL_WIDTH, w + (ev.clientX - x))),
+        height: Math.max(MIN_PANEL_HEIGHT, Math.min(MAX_PANEL_HEIGHT, h + (ev.clientY - y))),
+      });
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
   const [query, setQuery] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(
     new Set(['caracteristicas', 'historial', 'material', 'capa', 'clasificacion', 'propiedades', 'tipo', 'definidopor'])
@@ -167,11 +194,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   const showSearchAndSections = !entity || detailsExpanded;
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl shadow-2xl w-80 max-h-[440px] flex flex-col overflow-hidden">
+    <div
+      className="bg-white border border-gray-200 rounded-xl shadow-2xl flex flex-col overflow-hidden relative"
+      style={{ width: size.width, maxWidth: '90cqw', maxHeight: size.height }}
+    >
       <div className="flex items-start justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
         {entity ? (
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-gray-800 truncate">{entity.name}</p>
+            <p className="text-sm font-semibold text-gray-800 truncate" title={entity.name}>{entity.name}</p>
             {/* GUID primero — es el identificador que se conoce desde
                 Revit, más familiar que el ID interno del IFC. Los dos
                 etiquetados y copiables (antes se mostraban crudos, uno
@@ -179,7 +209,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             {entity.globalId && (
               <p className="text-[11px] text-gray-400 flex items-center gap-1 min-w-0">
                 <span className="text-gray-300 flex-shrink-0">GUID:</span>
-                <span className="font-mono truncate">{entity.globalId}</span>
+                <span className="font-mono truncate" title={entity.globalId}>{entity.globalId}</span>
                 <CopyIdButton value={entity.globalId} />
               </p>
             )}
@@ -243,10 +273,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 onClick={() => onSelectResult(r.expressId)}
                 className="w-full text-left px-4 py-2.5 hover:bg-gray-50 border-b border-gray-100 transition-colors"
               >
-                <p className="text-xs font-semibold text-gray-700 truncate">{r.elementName}</p>
+                <p className="text-xs font-semibold text-gray-700 truncate" title={r.elementName}>{r.elementName}</p>
                 <p className="text-[10px] text-gray-400">{formatTypeName(r.typeName)}</p>
                 {r.matches.slice(0, 2).map((m, i) => (
-                  <p key={i} className="text-[10px] text-[#0056b3] mt-0.5 truncate">
+                  <p key={i} className="text-[10px] text-[#0056b3] mt-0.5 truncate" title={`${m.paramName}: ${m.paramValue}`}>
                     {m.paramName}: {m.paramValue}
                   </p>
                 ))}
@@ -265,6 +295,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <Row label="Descripción" value={entity.description} />
                 <Row label="Tipo de objeto" value={entity.objectType} />
                 <Row label="Tag" value={entity.tag} />
+                <Row label="Archivo" value={fileName || ''} />
               </div>
             )}
 
@@ -339,6 +370,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           </>
         )}
       </div>
+
+      <div
+        onMouseDown={handleResizeStart}
+        title="Arrastrar para agrandar"
+        className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
+        style={{ background: 'linear-gradient(135deg, transparent 50%, #cbd5e1 50%)' }}
+      />
     </div>
   );
 };
