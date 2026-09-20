@@ -408,28 +408,30 @@ test("la cadena de documentos usa lo EFECTIVO: el ajuste sube lo recibido de la 
     await assertStockInvariant("con la orden");
 });
 
-test("la hoja de vida y el Kardex muestran los ajustes como eventos propios, con su motivo y el documento corregido", async () => {
+test("la hoja de vida y el Kardex muestran los ajustes dentro del ingreso o del vale que corrigen, con su motivo", async () => {
     const h = await hsvc.getProductHistoryService(owner(), { projectId, productId }, {});
-    const adjusted = h.timeline.filter((e) => e.kind === "adjusted");
-    assert.ok(adjusted.length >= 5, "correcciones e ingreso anulado");
-    const first = adjusted.find((e) => e.reason === "Error de digitación");
-    assert.equal(first.document.type, "inventory_adjustment");
-    assert.match(first.document.label, /^Ajuste #\d+$/);
-    assert.equal(first.adjusted_document.type, "goods_receipt");
-    assert.equal(first.adjusted_document.label, "T001-1");
-    assert.equal(first.direction, "entrada");
-    assert.equal(first.quantity, "18.000000");
-    const onIssue = adjusted.find((e) => e.reason === "Solo se retiraron 40");
-    assert.equal(onIssue.adjusted_document.type, "goods_issue");
-    assert.equal(onIssue.direction, "entrada", "devolver lo retirado de más es una entrada de stock");
-    const receivedEvent = h.timeline.find((e) => e.kind === "received" && e.document.label === "T001-1");
-    assert.equal(receivedEvent.quantity, "79.000000", "el ingreso original se sigue viendo como se registró");
+    const entryOf = (label) => h.items.find((i) => i.type === "entrada" && i.status === "recibido" && i.label === label);
+    const receipt = entryOf("T001-1");
+    assert.equal(receipt.quantity_registered, "79.000000", "el ingreso original se sigue viendo como se registró");
+    const corrected = receipt.adjustments.find((a) => a.reason === "Error de digitación");
+    assert.equal(corrected.kind, "correccion");
+    assert.match(corrected.label, /^Ajuste #\d+$/);
+    assert.equal(corrected.items[0].quantity_delta, "18.000000");
+    assert.equal(corrected.items[0].stock_effect, "18.000000");
+    assert.equal(receipt.quantity_effective, String((Number(receipt.quantity_registered) + Number(receipt.quantity_adjusted)).toFixed(6)));
+    assert.ok(h.items.some((i) => i.type === "entrada" && i.voided && i.adjustments.some((a) => a.kind === "anulacion")), "un ingreso anulado se ve como anulado, con su ajuste");
+    const issue = h.items.find((i) => i.type === "salida" && i.adjustments.some((a) => a.reason === "Solo se retiraron 40"));
+    const onIssue = issue.adjustments.find((a) => a.reason === "Solo se retiraron 40");
+    assert.equal(onIssue.items[0].quantity_delta, "-20.000000");
+    assert.equal(onIssue.items[0].stock_effect, "20.000000", "devolver lo retirado de más es una entrada de stock");
+    assert.equal(issue.quantity_effective, String((Number(issue.quantity_registered) + Number(issue.quantity_adjusted)).toFixed(6)));
     // El Kardex lista los movimientos de ajuste con su referencia.
     const kardex = await kdxsvc.listInventoryMovementsService(owner(), ctx(), { product_id: productId });
     assert.ok(kardex.some((m) => m.reference_document_type === "inventory_adjustment"));
-    // Los saldos de la hoja de vida siguen siendo los del Kardex.
-    const stockEvents = h.timeline.filter((e) => e.balance_after !== null);
-    assert.deepEqual(stockEvents.map((e) => Number(e.balance_after)), kardex.map((k) => Number(k.resulting_balance)));
+    // Todos los saldos de la hoja de vida (ubicaciones y ajustes) siguen siendo los del Kardex.
+    const balances = h.items.flatMap((i) => [...i.locations.map((l) => Number(l.balance_after)), ...i.adjustments.flatMap((a) => a.items.map((x) => Number(x.balance_after)))])
+        .sort((x, y) => x - y);
+    assert.deepEqual(balances, kardex.map((k) => Number(k.resulting_balance)).sort((x, y) => x - y));
     assert.equal(h.stock.total, String((await stockOf(productId)).toFixed(6)));
     await assertStockInvariant("hoja de vida");
 });

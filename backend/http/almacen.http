@@ -1105,9 +1105,17 @@ Authorization: Bearer {{accessToken}}
 #  Devuelve `documents` (agrupados por tipo) y `threads`: cada hilo es UN ELEMENTO con todas sus líneas
 #  (requerimiento, ofertas, órdenes, facturas e ingresos con las casillas donde quedó lo recibido).
 #  Solo documentos vigentes. `truncated` avisa si se alcanzó el tope de líneas.
-#  GET /products/:productId/history?bin_id=&from=&to=  — la HOJA DE VIDA del producto del catálogo:
-#    stock actual por casilla, totales entrado/salido/neto y la línea de tiempo (pedido, ordenado, facturado,
-#    recibido, salido). El almacén no maneja lotes: no se atribuye qué unidades salieron de qué ingreso.
+#  GET /products/:productId/history — la HOJA DE VIDA del producto del catálogo, en dos procesos:
+#    ENTRADAS = cada ingreso, que se despliega en sus documentos (requerimiento, cotización, orden, factura y
+#    la guía con su vale de entrada; repetidos en cada guía). Sin guía todavía = status "en_curso".
+#    SALIDAS  = cada vale, un solo documento con su número, destino y responsable.
+#    Los ajustes van dentro del ingreso o del vale que corrigen. Además: stock actual, totales entrado/salido/neto.
+#    Filtros: bin_id, from, to (AAAA-MM-DD inclusivas), type=all|entrada|salida, include_in_progress=true|false.
+#    Orden: sort=date (mezclado) | entrada_first | salida_first (agrupado por tipo), direction=asc|desc.
+#    El almacén no maneja lotes: no se atribuye qué unidades salieron de qué ingreso.
+#  GET /warehouses/:warehouseId/racks/:rackId/history  y  .../bins/:binId/history — hoja de vida de una UBICACIÓN
+#    (estante o casilla): lo que hay ahora y los movimientos de todos los productos. Mismos filtros y orden
+#    (from, to, type, sort, direction) más product_id.
 
 ### 7C.1 Hacia atrás desde un ingreso: de dónde viene
 GET {{baseUrl}}/projects/{{projectId}}/traceability/goods-receipt/{{receiptWithOrderId}}?direction=backward
@@ -1140,6 +1148,30 @@ Authorization: Bearer {{accessToken}}
 
 ###
 GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?from=2026-09-16&to=2026-09-30
+Authorization: Bearer {{accessToken}}
+
+### 7C.7 Hoja de vida: solo salidas, solo entradas, o agrupada (salidas primero) y de la más antigua a la más reciente
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?type=salida
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?type=entrada&include_in_progress=false
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/products/{{productId}}/history?sort=salida_first&direction=asc
+Authorization: Bearer {{accessToken}}
+
+### 7C.8 Hoja de vida de una UBICACIÓN: el estante completo y una casilla (mismos filtros y orden)
+GET {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}/history
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}/bins/{{binId}}/history?type=entrada&sort=date&direction=desc
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}/history?product_id={{productId}}&from=2026-09-16
 Authorization: Bearer {{accessToken}}
 
 ### =====================================================================

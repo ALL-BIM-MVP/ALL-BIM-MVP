@@ -39,6 +39,7 @@ const rcsvc = await import("../dist/services/almacen/goods-receipt.service.js");
 const isvc = await import("../dist/services/almacen/invoice.service.js");
 const tsvc = await import("../dist/services/almacen/traceability.service.js");
 const hsvc = await import("../dist/services/almacen/product-history.service.js");
+const lsvc = await import("../dist/services/almacen/location-history.service.js");
 const gisvc = await import("../dist/services/almacen/goods-issue.service.js");
 const tschemas = await import("../dist/schemas/almacen/traceability.schema.js");
 const hschemas = await import("../dist/schemas/almacen/product-history.schema.js");
@@ -174,6 +175,10 @@ test("Zod: el tipo de documento y la dirección; por defecto la dirección es al
     assert.equal(Q.safeParse({ direction: "sideways" }).success, false);
     const { ProductHistoryQuerySchema: H } = hschemas;
     assert.equal(H.safeParse({ bin_id: "3", from: "2026-09-01", to: "2026-09-30" }).success, true);
+    const defaults = H.parse({});
+    assert.deepEqual([defaults.type, defaults.sort, defaults.direction, defaults.include_in_progress], ["all", "date", "desc", true]);
+    assert.equal(H.parse({ include_in_progress: "false" }).include_in_progress, false);
+    for (const bad of [{ type: "todo" }, { sort: "x" }, { direction: "up" }, { include_in_progress: "maybe" }]) assert.equal(H.safeParse(bad).success, false, JSON.stringify(bad));
     for (const bad of [{ from: "01/09/2026" }, { to: "2026-9-1" }, { bin_id: "x" }, { from: "2026-09-01T00:00:00Z" }]) assert.equal(H.safeParse(bad).success, false, JSON.stringify(bad));
 });
 
@@ -333,82 +338,206 @@ test("solo cuentan los documentos ACTIVOS: una orden o una factura dada de baja 
 // ---------------------------------------------------------------------------------------------
 const history = (query = {}, product = productId, user = owner()) => hsvc.getProductHistoryService(user, { projectId, productId: product }, query);
 
-test("HOJA DE VIDA del producto: stock actual por casilla, totales entrado/salido/neto y la línea de tiempo completa", async () => {
+test("HOJA DE VIDA del producto: stock actual, totales y una lista con entradas (ingresos con sus documentos) y salidas (vales)", async () => {
     const h = await history();
     assert.equal(h.product.code, "T-1");
-    assert.deepEqual(h.filters, { bin_id: null, from: null, to: null });
+    assert.deepEqual(h.filters, { bin_id: null, from: null, to: null, type: "all", sort: "date", direction: "desc", include_in_progress: true });
     // Entraron 60 + 15 + 25 + 5 = 105 y salieron 30 -> quedan 75: 50 en A1 y 25 en A2.
     assert.deepEqual(h.totals, { entered: "105.000000", exited: "30.000000", net: "75.000000" });
     assert.equal(h.stock.total, "75.000000");
     assert.deepEqual(h.stock.by_bin.map((b) => [b.quantity, b.label.split(" · ").pop()]), [["50.000000", "A1"], ["25.000000", "A2"]], "por casilla, con su nombre completo");
     assert.equal(h.truncated, false);
 
-    const kinds = (k) => h.timeline.filter((e) => e.kind === k);
-    assert.equal(kinds("received").length, 4, "rc1 (1), rc2 (2 casillas) y la entrada rápida (1)");
-    assert.equal(kinds("issued").length, 1);
-    assert.equal(kinds("requested").length, 2, "las dos líneas del requerimiento con este producto");
-    assert.equal(kinds("ordered").length, 1, "OC-A (la B se dio de baja en el test anterior)");
-    assert.equal(kinds("invoiced").length, 0, "F001-100 se dio de baja");
-    // Más reciente primero, y lo último de la cadena primero dentro de un mismo día.
-    const dates = h.timeline.map((e) => e.date);
-    assert.deepEqual(dates, [...dates].sort().reverse());
-    assert.equal(h.timeline[0].kind, "issued");
-    assert.equal(h.timeline[0].date, "2026-09-25");
+    const entries = h.items.filter((i) => i.type === "entrada");
+    const exits = h.items.filter((i) => i.type === "salida");
+    assert.equal(entries.filter((e) => e.status === "recibido").length, 3, "T001-1, T001-2 y la entrada rápida T001-4");
+    assert.equal(entries.filter((e) => e.status === "en_curso").length, 1, "la línea 3 del requerimiento aún no tiene orden ni guía");
+    assert.equal(exits.length, 1);
+    const dates = h.items.map((i) => i.date);
+    assert.deepEqual(dates, [...dates].sort().reverse(), "mezclado por fecha, el más reciente primero");
+    assert.equal(h.items[0].type, "salida");
+    assert.equal(h.items[0].date, "2026-09-25");
 });
 
-test("cada evento de stock trae su documento, su casilla y el saldo total DESPUÉS del movimiento (igual que el Kardex)", async () => {
+test("una ENTRADA es un ingreso que se despliega en sus documentos (repetidos en cada guía); la rápida no tiene documentos previos", async () => {
     const h = await history();
-    const stockEvents = h.timeline.filter((e) => e.kind === "received" || e.kind === "issued");
-    const kardex = await kdxsvc.listInventoryMovementsService(owner(), ctx(), { product_id: productId });
-    assert.equal(stockEvents.length, kardex.length);
-    assert.deepEqual(stockEvents.map((e) => Number(e.balance_after)), kardex.map((k) => Number(k.resulting_balance)), "el saldo es el snapshot del Kardex");
-    const issued = h.timeline.find((e) => e.kind === "issued");
-    assert.equal(issued.document.type, "goods_issue");
-    assert.equal(issued.destination, "Torre A · Piso 3 · Bloque B");
-    assert.equal(issued.recipient_name, "Juan Pérez");
-    assert.equal(issued.quantity, "30.000000");
-    assert.equal(JSON.stringify(h).includes("12345678"), false, "el DNI de quien retira no se expone en la historia");
-    const fromOrder = h.timeline.find((e) => e.kind === "received" && e.document.label === "T001-1");
-    assert.equal(fromOrder.purchase_order, "OC-A");
-    assert.equal(fromOrder.entry_type, "normal");
-    assert.equal(fromOrder.supplier.name, "Cementos del Sur SAC");
-    const fast = h.timeline.find((e) => e.kind === "received" && e.document.label === "T001-4");
-    assert.equal(fast.entry_type, "rapida");
-    assert.equal(fast.purchase_order, null, "la entrada rápida no cita orden");
-    const requested = h.timeline.find((e) => e.kind === "requested");
-    assert.equal(requested.requester, "Almacenero");
-    assert.equal(requested.document.label, "REQ-001");
-    const ordered = h.timeline.find((e) => e.kind === "ordered");
-    assert.equal(ordered.document.label, "OC-A");
-    assert.equal(ordered.currency, "PEN");
+    const entry = (label) => h.items.find((i) => i.type === "entrada" && i.status === "recibido" && i.label === label);
+    const second = entry("T001-2");
+    assert.equal(second.receipt.supplier.ruc, "20123456789");
+    assert.equal(second.receipt.supplier.name, "Cementos del Sur SAC");
+    assert.equal(second.receipt.delivery_note_date, "2026-09-20");
+    assert.equal(second.receipt.received_date, "2026-09-23");
+    assert.equal(second.receipt.entry_type, "normal");
+    assert.deepEqual(second.locations.map((l) => l.quantity), ["15.000000", "25.000000"]);
+    assert.deepEqual([second.quantity_registered, second.quantity_adjusted, second.quantity_effective], ["40.000000", "0.000000", "40.000000"]);
+    assert.deepEqual(second.adjustments, []);
+    // Los mismos documentos de origen aparecen completos en las dos guías de la misma orden.
+    for (const label of ["T001-1", "T001-2"]) {
+        const d = entry(label).documents;
+        assert.deepEqual([d.requisitions.map((x) => x.label), d.quotations.map((x) => x.label), d.purchase_orders.map((x) => x.label), d.invoices.length],
+            [["REQ-001"], ["COT-A"], ["OC-A"], 0], label);
+    }
+    const d = entry("T001-2").documents;
+    assert.equal(d.requisitions[0].requester, "Almacenero");
+    assert.equal(d.requisitions[0].quantity, "100.000000");
+    assert.equal(d.quotations[0].supplier.ruc, "20123456789");
+    assert.equal(d.purchase_orders[0].currency, "PEN");
+    assert.equal(d.purchase_orders[0].line_total, "3000.000000");
+    const fast = entry("T001-4");
+    assert.equal(fast.receipt.entry_type, "rapida");
+    assert.deepEqual([fast.documents.requisitions, fast.documents.quotations, fast.documents.purchase_orders, fast.documents.invoices], [[], [], [], []]);
 });
 
-test("con bin_id la historia es de ESA casilla (solo movimientos de stock, sin compras); con from/to se recorta por fechas", async () => {
+test("una entrada EN CURSO tiene documentos previos pero ninguna guía: sin recibo ni cantidades recibidas", async () => {
+    const h = await history();
+    const pending = h.items.find((i) => i.type === "entrada" && i.status === "en_curso");
+    assert.equal(pending.receipt, null);
+    assert.deepEqual([pending.quantity_registered, pending.quantity_effective], [null, null]);
+    assert.deepEqual(pending.locations, []);
+    assert.equal(pending.documents.requisitions[0].description, "Cemento para losa");
+    assert.equal(pending.documents.requisitions[0].label, "REQ-001");
+    assert.equal(pending.date, "2026-09-10", "la del documento más reciente de la cadena");
+    // Sin las "en curso" y sin duplicar lo ya recibido.
+    const without = await history({ include_in_progress: false });
+    assert.equal(without.items.filter((i) => i.status === "en_curso").length, 0);
+    assert.equal(without.items.length, h.items.length - 1);
+});
+
+test("una SALIDA es un solo documento con su número, destino y responsable (sin DNI), y los saldos coinciden con el Kardex", async () => {
+    const h = await history();
+    const exit = h.items.find((i) => i.type === "salida");
+    assert.equal(exit.label, exit.issue.number);
+    assert.equal(exit.issue.destination_sector, "Torre A");
+    assert.equal(exit.issue.destination_level, "Piso 3");
+    assert.equal(exit.issue.destination_block, "Bloque B");
+    assert.equal(exit.issue.recipient_name, "Juan Pérez");
+    assert.deepEqual([exit.quantity_registered, exit.quantity_effective], ["30.000000", "30.000000"]);
+    assert.equal(JSON.stringify(h).includes("recipient_dni"), false, "el DNI de quien retira no se expone en la historia");
+    // El saldo de cada casilla es el snapshot del Kardex (mismos valores, sin importar el orden).
+    const balances = h.items.flatMap((i) => i.locations.map((l) => Number(l.balance_after))).sort((x, y) => x - y);
+    const kardex = await kdxsvc.listInventoryMovementsService(owner(), ctx(), { product_id: productId });
+    assert.equal(balances.length, kardex.length);
+    assert.deepEqual(balances, kardex.map((k) => Number(k.resulting_balance)).sort((x, y) => x - y));
+});
+
+test("FILTROS y ORDEN: tipo, sort (mezclado o agrupado), direction, fechas y casilla", async () => {
+    const types = (h) => h.items.map((i) => i.type);
+    assert.deepEqual([...new Set(types(await history({ type: "entrada" })))], ["entrada"]);
+    assert.deepEqual(types(await history({ type: "salida" })), ["salida"]);
+    const entriesFirst = types(await history({ sort: "entrada_first" }));
+    assert.deepEqual(entriesFirst, [...entriesFirst].sort().reverse().sort((x, y) => (x === "entrada" ? -1 : 1) - (y === "entrada" ? -1 : 1)));
+    assert.equal(entriesFirst.at(-1), "salida");
+    const exitsFirst = await history({ sort: "salida_first" });
+    assert.equal(exitsFirst.items[0].type, "salida");
+    const entriesInOrder = exitsFirst.items.filter((i) => i.type === "entrada").map((i) => i.date);
+    assert.deepEqual(entriesInOrder, [...entriesInOrder].sort().reverse(), "dentro de cada grupo, por fecha");
+    const asc = await history({ direction: "asc" });
+    assert.deepEqual(asc.items.map((i) => i.date), [...asc.items.map((i) => i.date)].sort());
+    assert.deepEqual((await history({ direction: "asc", sort: "salida_first" })).filters, { bin_id: null, from: null, to: null, type: "all", sort: "salida_first", direction: "asc", include_in_progress: true });
+
     const binBHistory = await history({ bin_id: binB });
-    assert.deepEqual(binBHistory.filters, { bin_id: binB, from: null, to: null });
     assert.equal(binBHistory.stock.total, "25.000000");
+    assert.equal(binBHistory.filters.bin_id, String(binB), "los ids también viajan como texto en los filtros");
     assert.deepEqual(binBHistory.totals, { entered: "25.000000", exited: "0.000000", net: "25.000000" });
-    assert.ok(binBHistory.timeline.every((e) => (e.kind === "received" || e.kind === "issued") && e.bin.bin_id === binB), "solo movimientos de esa casilla");
-    assert.equal(binBHistory.timeline.length, 1);
-    assert.equal(binBHistory.timeline[0].document.label, "T001-2");
+    assert.equal(binBHistory.items.length, 1, "solo el ingreso que dejó material en esa casilla (y sin entradas en curso)");
+    assert.equal(binBHistory.items[0].label, "T001-2");
+    assert.deepEqual(binBHistory.items[0].locations.map((l) => [l.bin_id, l.quantity]).map(([b, qty]) => [String(b), qty]), [[String(binB), "25.000000"]], "solo las casillas filtradas");
 
     const late = await history({ from: "2026-09-24" });
     assert.deepEqual(late.totals, { entered: "5.000000", exited: "30.000000", net: "-25.000000" }, "los totales son del rango");
     assert.equal(late.stock.total, "75.000000", "el stock actual no depende de las fechas");
-    assert.ok(late.timeline.every((e) => e.date >= "2026-09-24"));
-    assert.equal((await history({ from: "2026-12-01" })).timeline.length, 0);
-    assert.equal((await history({ to: "2026-09-21" })).timeline.filter((e) => e.kind === "issued").length, 0);
+    assert.ok(late.items.every((i) => i.date >= "2026-09-24"));
+    assert.equal((await history({ from: "2026-12-01" })).items.length, 0);
+    assert.equal((await history({ to: "2026-09-21" })).items.filter((i) => i.type === "salida").length, 0);
 });
 
 test("otro producto tiene su propia historia; un producto o una casilla de otro proyecto dan 404; el permiso es de lectura", async () => {
     const y = await history({}, productY);
     assert.equal(y.product.code, "T-2");
     assert.deepEqual(y.totals, { entered: "90.000000", exited: "0.000000", net: "90.000000" }, "rc3 (70) + el ingreso normal sin orden (20)");
-    assert.ok(y.timeline.filter((e) => e.kind === "received").some((e) => e.purchase_order === null && e.entry_type === "normal"), "el ingreso normal sin orden se ve como tal");
+    const withoutOrder = y.items.find((i) => i.status === "recibido" && i.receipt.entry_type === "normal" && i.documents.purchase_orders.length === 0);
+    assert.ok(withoutOrder, "el ingreso normal sin orden se ve como tal, sin documentos previos");
     await assert.rejects(history({}, otherProductId), codeOf("PRODUCT_NOT_FOUND"));
     await assert.rejects(history({ bin_id: 999999999 }), codeOf("BIN_NOT_FOUND"));
     assert.equal((await history({}, productId, asUser(plainId))).product.code, "T-1");
     await assert.rejects(history({}, productId, asUser(outsiderId)), codeOf("PROJECT_NOT_FOUND_OR_UNAUTHORIZED"));
+});
+
+// ---------------------------------------------------------------------------------------------
+// Hoja de vida de una UBICACIÓN (estante y casilla)
+// ---------------------------------------------------------------------------------------------
+test("HOJA DE VIDA de la ubicación: qué hay ahora y los movimientos físicos de todos los productos, con los mismos filtros", async () => {
+    const [{ warehouse_id: warehouseId, rack_id: rackId }] = await q(
+        `SELECT w.warehouse_id, r.rack_id FROM racks r JOIN warehouses w ON w.warehouse_id = r.warehouse_id WHERE w.project_id = $1`, [projectId]);
+    const ctxRack = { projectId, warehouseId, rackId };
+    const rack = await lsvc.getRackHistoryService(owner(), ctxRack, {});
+    assert.equal(rack.location.level, "rack");
+    assert.equal(rack.location.bin, null);
+    assert.deepEqual(rack.contents.map((c) => [c.product.code, c.quantity]), [["T-1", "75.000000"], ["T-2", "90.000000"]]);
+    assert.equal(rack.contents[0].product.display_id, 1);
+    // T-1: 4 entradas + 1 salida; T-2: rc3 y el ingreso sin orden.
+    assert.equal(rack.items.length, 7);
+    assert.equal(rack.items.filter((m) => m.type === "salida").length, 1);
+    const dates = rack.items.map((m) => m.date);
+    assert.deepEqual(dates, [...dates].sort().reverse());
+    const receipt = rack.items.find((m) => m.document.label === "T001-2" && m.bin.label.endsWith("A2"));
+    assert.equal(receipt.type, "entrada");
+    assert.equal(receipt.supplier.ruc, "20123456789");
+    assert.equal(receipt.quantity, "25.000000");
+    assert.equal(receipt.balance_after, "100.000000", "saldo TOTAL del producto después del movimiento (igual que el Kardex)");
+    const issue = rack.items.find((m) => m.type === "salida");
+    assert.equal(issue.destination, "Torre A · Piso 3 · Bloque B");
+    assert.equal(issue.recipient_name, "Juan Pérez");
+    assert.equal(JSON.stringify(rack).includes("recipient_dni"), false);
+
+    assert.equal((await lsvc.getRackHistoryService(owner(), ctxRack, { type: "entrada" })).items.length, 6);
+    assert.equal((await lsvc.getRackHistoryService(owner(), ctxRack, { product_id: productId })).items.length, 5);
+    assert.equal((await lsvc.getRackHistoryService(owner(), ctxRack, { sort: "salida_first" })).items[0].type, "salida");
+    const asc = await lsvc.getRackHistoryService(owner(), ctxRack, { direction: "asc" });
+    assert.deepEqual(asc.items.map((m) => m.date), [...asc.items.map((m) => m.date)].sort());
+    assert.equal((await lsvc.getRackHistoryService(owner(), ctxRack, { from: "2026-09-25" })).items.length, 1);
+
+    const inB = await lsvc.getBinHistoryService(owner(), { ...ctxRack, binId: binB }, {});
+    assert.equal(inB.location.level, "bin");
+    assert.equal(String(inB.location.bin.bin_id), String(binB));
+    assert.deepEqual(inB.contents.map((c) => [c.product.code, c.quantity]), [["T-1", "25.000000"], ["T-2", "20.000000"]]);
+    assert.equal(inB.items.length, 2, "solo lo que pasó por la casilla A2");
+    assert.ok(inB.items.every((m) => String(m.bin.bin_id) === String(binB)));
+
+    await assert.rejects(lsvc.getRackHistoryService(owner(), { ...ctxRack, rackId: 999999999 }, {}), codeOf("RACK_NOT_FOUND"));
+    await assert.rejects(lsvc.getBinHistoryService(owner(), { ...ctxRack, binId: 999999999 }, {}), codeOf("BIN_NOT_FOUND"));
+    assert.equal((await lsvc.getRackHistoryService(asUser(plainId), ctxRack, {})).items.length, 7, "el permiso es de lectura");
+    await assert.rejects(lsvc.getRackHistoryService(asUser(outsiderId), ctxRack, {}), codeOf("PROJECT_NOT_FOUND_OR_UNAUTHORIZED"));
+    const { LocationHistoryQuerySchema: L } = await import("../dist/schemas/almacen/location-history.schema.js");
+    assert.equal(L.safeParse({ type: "entrada", sort: "salida_first", direction: "asc", product_id: "3", from: "2026-09-01" }).success, true);
+    for (const bad of [{ type: "todo" }, { sort: "x" }, { direction: "up" }, { from: "01/09/2026" }]) assert.equal(L.safeParse(bad).success, false, JSON.stringify(bad));
+});
+
+test("los ids BIGINT viajan SIEMPRE como texto (también dentro de objetos embebidos); solo los INT son números", async () => {
+    const INT_IDS = new Set(["display_id", "next_display_id", "supplier_id", "category_id", "base_category_id", "warehouse_id", "project_id", "warehouse_style_id", "created_by", "updated_by", "voided_by"]);
+    const offenders = [];
+    const walk = (value, where) => {
+        if (Array.isArray(value)) return value.forEach((v) => walk(v, where));
+        if (!value || typeof value !== "object") return;
+        for (const [key, v] of Object.entries(value)) {
+            const isId = key.endsWith("_id") || key === "id" || key === "item_id";
+            if (isId && !INT_IDS.has(key) && typeof v === "number") offenders.push(`${where}: ${key}`);
+            walk(v, where);
+        }
+    };
+    const [{ warehouse_id: warehouseId, rack_id: rackId }] = await q(
+        `SELECT w.warehouse_id, r.rack_id FROM racks r JOIN warehouses w ON w.warehouse_id = r.warehouse_id WHERE w.project_id = $1`, [projectId]);
+    walk(await trace("requisition", S.req.purchase_requisition_id, "all"), "trazabilidad");
+    walk(await history(), "hoja de vida");
+    walk(await history({ bin_id: binA }), "hoja de vida (casilla)");
+    walk(await lsvc.getRackHistoryService(owner(), { projectId, warehouseId, rackId }, { product_id: productId }), "ubicación");
+    walk(await kdxsvc.listInventoryMovementsService(owner(), ctx(), {}), "kardex");
+    walk(await rcsvc.getGoodsReceiptByIdService(owner(), { projectId, goodsReceiptId: S.rc2.goods_receipt_id }), "ingreso");
+    walk(await gisvc.getGoodsIssueByIdService(owner(), { projectId, goodsIssueId: S.issue.goods_issue_id }), "vale");
+    walk(await psvc.getPurchaseOrderByIdService(owner(), { projectId, purchaseOrderId: S.poA.purchase_order_id }), "orden");
+    walk(await qsvc.getQuotationByIdService(owner(), { projectId, quotationId: S.qA.quotation_id }), "cotización");
+    walk(await rsvc.getPurchaseRequisitionByIdService(owner(), { projectId, purchaseRequisitionId: S.req.purchase_requisition_id }), "requerimiento");
+    assert.deepEqual(offenders, []);
 });
 
 test("una orden hecha solo desde el requerimiento (sin cotización) se une a la línea del requerimiento en su hilo", async () => {
@@ -422,6 +551,10 @@ test("una orden hecha solo desde el requerimiento (sin cotización) se une a la 
     assert.deepEqual(docSets(back), { req: ["REQ-001"], quo: [], po: ["OC-R"], inv: [], rc: [] });
     assert.equal(back.threads.length, 1);
     assert.equal(back.threads[0].requisition_items.length, 1);
+    // En la hoja de vida, la línea ya no está "solo pedida": ahora hay una orden en curso (sin guía).
+    const inProgress = (await history()).items.filter((i) => i.status === "en_curso");
+    assert.equal(inProgress.length, 1);
+    assert.deepEqual([inProgress[0].documents.requisitions.map((d) => d.label), inProgress[0].documents.purchase_orders.map((d) => d.label)], [["REQ-001"], ["OC-R"]]);
 });
 
 test("una casilla que quedó en cero ya no figura en el stock actual, pero sus movimientos siguen en la historia", async () => {
@@ -435,8 +568,8 @@ test("una casilla que quedó en cero ya no figura en el stock actual, pero sus m
     const inB = await history({ bin_id: binB });
     assert.equal(inB.stock.total, "0.000000");
     assert.deepEqual(inB.stock.by_bin, []);
-    assert.equal(inB.timeline.length, 2, "la entrada de 25 y la salida de 25 siguen en la historia de la casilla");
-    assert.equal(inB.timeline[0].kind, "issued");
+    assert.equal(inB.items.length, 2, "la entrada de 25 y la salida de 25 siguen en la historia de la casilla");
+    assert.equal(inB.items[0].type, "salida");
 });
 
 test("la trazabilidad y la hoja de vida no modifican nada", async () => {
@@ -449,6 +582,30 @@ test("la trazabilidad y la hoja de vida no modifican nada", async () => {
     const before = await snapshot();
     for (let i = 0; i < 3; i++) { await trace("requisition", S.req.purchase_requisition_id, "all"); await history(); await history({ bin_id: binA }); }
     assert.equal(await snapshot(), before);
+});
+
+test("EN CURSO: una orden cuya única guía fue anulada vuelve a estar en curso, y un requerimiento dado de baja no aparece", async () => {
+    const asvc = await import("../dist/services/almacen/inventory-adjustment.service.js");
+    const supplier = (await ssvc.createSupplierService(owner(), ctx(), { ruc: "20111111111", name: "Proveedor de la prueba" })).supplier_id;
+    const order = await mkOrder(supplier, "OC-V", {}, [[{ product_id: productId }, 4, 40]]);
+    const line = { purchase_order_item_id: order.items[0].purchase_order_item_id };
+    const inProgress = async () => (await history()).items.filter((i) => i.status === "en_curso" && i.documents.purchase_orders.some((d) => d.label === "OC-V"));
+    assert.equal((await inProgress()).length, 1, "recién ordenada: en curso");
+    const rc = await receive(supplier, "90", order, [[line, 4, [{ bin_id: binA, quantity: 4 }]]], "2026-09-27");
+    assert.equal((await inProgress()).length, 0, "con su guía ya no está en curso");
+    await asvc.voidGoodsReceiptService(owner(), ctx(), rc.goods_receipt_id, { reason: "Guía equivocada" });
+    const after = await history();
+    const voided = after.items.find((i) => i.status === "recibido" && i.label === "T001-90");
+    assert.equal(voided.voided, true);
+    assert.equal(voided.quantity_effective, "0.000000");
+    assert.equal((await inProgress()).length, 1, "la guía anulada no cuenta: la orden vuelve a estar en curso");
+
+    const removed = await rsvc.createPurchaseRequisitionService(owner(), ctx(), {
+        number: "REQ-BAJA-2", requisition_date: "2026-09-11", requester: "Otro", items: [{ product_id: productId, description: "Cemento dado de baja", quantity_requested: 9 }] });
+    const listed = async () => (await history()).items.some((i) => i.type === "entrada" && i.documents.requisitions.some((d) => d.description === "Cemento dado de baja"));
+    assert.equal(await listed(), true);
+    await rsvc.deletePurchaseRequisitionService(owner(), { projectId, purchaseRequisitionId: removed.purchase_requisition_id });
+    assert.equal(await listed(), false, "un documento dado de baja sale de la hoja de vida");
 });
 
 test("vaciar Almacén sigue funcionando", async () => {
