@@ -19,7 +19,7 @@ import { containsPattern } from "../../utils/like-search.js";
 import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { PURCHASE_ORDER_ERRORS } from "../../models/errors/almacen/purchase-order.errors.js";
 import {
-    lockDocument, removeFileBytes, replaceDocumentFile, type DocumentConfig,
+    attachFileOnCreate, lockDocument, removeFileBytes, replaceDocumentFile, type DocumentConfig,
 } from "./document-file.service.js";
 import { assertBinInProject } from "./bin.service.js";
 import { assertSupplierInProject } from "./supplier.service.js";
@@ -295,6 +295,9 @@ export const createGoodsReceiptService = async (
                 });
             }
         }
+
+                // Documento creado a partir de un archivo ya subido (lectura por IA): archivo y documento se guardan juntos.
+        if (body.file_id != null) await attachFileOnCreate(client, RECEIPT_DOC, projectId, goodsReceiptId, body.file_id);
 
         const detail = await loadDetail(client, projectId, goodsReceiptId);
         await client.query("COMMIT");

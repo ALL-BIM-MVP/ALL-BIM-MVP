@@ -17,7 +17,7 @@ import { buildSignedFileUrl } from "../../utils/file-signing.js";
 import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertSupplierInProject } from "./supplier.service.js";
 import {
-    lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
+    attachFileOnCreate, lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
 } from "./document-file.service.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 import type {
@@ -198,6 +198,9 @@ export const createQuotationService = async (
         );
         const quotationId = rows[0]!.quotation_id;
         for (const item of body.items) await insertItem(client, quotationId, body.purchase_requisition_id, item);
+
+                // Documento creado a partir de un archivo ya subido (lectura por IA): archivo y documento se guardan juntos.
+        if (body.file_id != null) await attachFileOnCreate(client, QUOTATION_DOC, projectId, quotationId, body.file_id);
 
         const detail = await loadDetail(client, projectId, quotationId);
         await client.query("COMMIT");

@@ -16,7 +16,7 @@ import { buildSet } from "../../utils/partial-update.js";
 import { filePendingAlert, getRequisitionItemStatus } from "./document-status.service.js";
 import { containsPattern } from "../../utils/like-search.js";
 import {
-    lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
+    attachFileOnCreate, lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
 } from "./document-file.service.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 import type {
@@ -148,6 +148,9 @@ export const createPurchaseRequisitionService = async (
         );
         const purchaseRequisitionId = rows[0]!.purchase_requisition_id;
         for (const item of body.items) await insertItem(client, purchaseRequisitionId, item);
+
+                // Documento creado a partir de un archivo ya subido (lectura por IA): archivo y documento se guardan juntos.
+        if (body.file_id != null) await attachFileOnCreate(client, REQUISITION_DOC, projectId, purchaseRequisitionId, body.file_id);
 
         const detail = await loadDetail(client, projectId, purchaseRequisitionId);
         await client.query("COMMIT");

@@ -1,5 +1,5 @@
 import z from 'zod';
-import { AT_LEAST_ONE, atLeastOne, descriptionSchema, idSchema } from './document-common.schema.js';
+import { AT_LEAST_ONE, atLeastOne, descriptionSchema, fileIdSchema, idSchema } from './document-common.schema.js';
 
 export const GoodsReceiptIdParamSchema = z.object({
     projectId: z.coerce.number(),
@@ -71,6 +71,7 @@ export const CreateGoodsReceiptBodySchema = z.object({
     delivery_note_date: dateOnlySchema,
     // Fecha en que el material llegó de verdad; si no viene, la base usa hoy.
     received_date: dateOnlySchema.optional(),
+    file_id: fileIdSchema,
     items: z.array(GoodsReceiptItemInputSchema).min(1, "Un ingreso necesita al menos un ítem."),
 }).refine(
     (body) => body.entry_type === "normal" || body.purchase_order_id == null,

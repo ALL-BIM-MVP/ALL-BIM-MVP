@@ -1,7 +1,7 @@
 import z from 'zod';
 import { dateOnlySchema } from './goods-receipt.schema.js';
 import {
-    AT_LEAST_ONE, amountSchema, atLeastOne, currencySchema, descriptionSchema, idSchema, notesSchema, quantitySchema,
+    AT_LEAST_ONE, amountSchema, fileIdSchema, atLeastOne, currencySchema, descriptionSchema, idSchema, notesSchema, quantitySchema,
 } from './document-common.schema.js';
 
 export const InvoiceIdParamSchema = z.object({
@@ -68,6 +68,7 @@ export const CreateInvoiceBodySchema = z.object({
     subtotal_amount: amountSchema.nullable().optional(),
     tax_amount: amountSchema.nullable().optional(),
     total_amount: amountSchema.nullable().optional(),
+    file_id: fileIdSchema,
     items: z.array(CreateInvoiceItemBodySchema).min(1, "Una factura necesita al menos una línea.").max(500),
 });
 export type CreateInvoiceBody = z.infer<typeof CreateInvoiceBodySchema>;

@@ -1,7 +1,7 @@
 import z from 'zod';
 import { dateOnlySchema } from './goods-receipt.schema.js';
 import {
-    AT_LEAST_ONE, amountSchema, atLeastOne, currencySchema, descriptionSchema, documentNumberSchema, idSchema, notesSchema,
+    AT_LEAST_ONE, amountSchema, fileIdSchema, atLeastOne, currencySchema, descriptionSchema, documentNumberSchema, idSchema, notesSchema,
     quantitySchema, termsSchema,
 } from './document-common.schema.js';
 
@@ -62,6 +62,7 @@ export const CreatePurchaseOrderBodySchema = z.object({
     currency: currencySchema,
     commercial_terms: termsSchema.nullable().optional(),
     total_amount: amountSchema.nullable().optional(),
+    file_id: fileIdSchema,
     items: z.array(CreatePurchaseOrderItemBodySchema).min(1, "Una orden de compra necesita al menos una línea.").max(500),
 });
 export type CreatePurchaseOrderBody = z.infer<typeof CreatePurchaseOrderBodySchema>;
