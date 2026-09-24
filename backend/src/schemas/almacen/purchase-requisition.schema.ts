@@ -1,5 +1,6 @@
 import z from 'zod';
 import { dateOnlySchema } from './goods-receipt.schema.js';
+import { fileIdSchema } from './document-common.schema.js';
 
 export const PurchaseRequisitionIdParamSchema = z.object({
     projectId: z.coerce.number(),
@@ -47,6 +48,7 @@ export const CreatePurchaseRequisitionBodySchema = z.object({
     requisition_date: dateOnlySchema,
     requester: requesterSchema,
     notes: notesSchema.nullable().optional(),
+    file_id: fileIdSchema,
     items: z.array(CreatePurchaseRequisitionItemBodySchema)
         .min(1, "Un requerimiento necesita al menos una línea.").max(500),
 });

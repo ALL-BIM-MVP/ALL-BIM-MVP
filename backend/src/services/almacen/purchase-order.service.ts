@@ -22,7 +22,7 @@ import { ALMACEN_MODULE_CODE } from "./warehouse.service.js";
 import { assertSupplierInProject } from "./supplier.service.js";
 import { assertProductInProject } from "./product.service.js";
 import {
-    lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
+    attachFileOnCreate, lockDocument, removeFileBytes, replaceDocumentFile, softDeleteDocument, type DocumentConfig,
 } from "./document-file.service.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 import type {
@@ -292,6 +292,9 @@ export const createPurchaseOrderService = async (
         );
         const purchaseOrderId = rows[0]!.purchase_order_id;
         for (const item of body.items) await insertItem(client, projectId, purchaseOrderId, origin, item);
+
+                // Documento creado a partir de un archivo ya subido (lectura por IA): archivo y documento se guardan juntos.
+        if (body.file_id != null) await attachFileOnCreate(client, ORDER_DOC, projectId, purchaseOrderId, body.file_id);
 
         const detail = await loadDetail(client, projectId, purchaseOrderId);
         await client.query("COMMIT");
