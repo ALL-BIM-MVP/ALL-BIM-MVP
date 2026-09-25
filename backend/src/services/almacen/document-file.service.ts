@@ -83,6 +83,20 @@ export const lockDocument = async (
     return rows[0];
 };
 
+// Adjunta un archivo ya subido a un documento RECIÉN creado, dentro de la transacción de
+// su creación: si algo falla (número repetido, línea inválida) no queda ni documento ni
+// vínculo. Mismas reglas que un adjunto posterior: del proyecto, del módulo Almacén y
+// no usado por otro documento.
+export const attachFileOnCreate = async (
+    client: PoolClient, doc: DocumentConfig, projectId: number, documentId: number, fileId: number
+): Promise<void> => {
+    await assertFileAttachable(client, projectId, fileId);
+    await client.query(
+        `UPDATE ${doc.table} SET file_id = $3 WHERE ${doc.idColumn} = $1 AND project_id = $2`,
+        [documentId, projectId, fileId]
+    );
+};
+
 // Reemplaza el archivo del documento (newFileId null = quitarlo) DENTRO de la
 // transacción del llamador y devuelve los bytes del archivo anterior, que se
 // borran con removeFileBytes DESPUÉS del COMMIT. Mismo archivo = no hace nada.

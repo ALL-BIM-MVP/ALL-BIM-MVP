@@ -1,6 +1,7 @@
 import jwt, {type SignOptions} from "jsonwebtoken";
 import type { AuthPayload, DecodedToken } from "../models/auth.models.js";
 import ms, { type StringValue } from 'ms';
+import { randomUUID } from "node:crypto";
 import { AUTH_ERRORS } from "../models/errors/auth.errors.js";
 import { AppError } from "../models/errors/app-error.js";
 if (!process.env.JWT_SECRET) {
@@ -29,7 +30,9 @@ export const generateAccessToken = (payload : AuthPayload) : string => {
 };
 
 export const generateRefreshToken = (payload : AuthPayload) : string => {
-    return jwt.sign(payload, JWT_REFRESH_SECRET, {expiresIn: JWT_REFRESH_EXPIRES_IN});
+    // jwtid único: dos inicios de sesión del mismo usuario en el mismo segundo daban el MISMO token y el
+    // INSERT en refresh_tokens (token_hash único) fallaba con un 500.
+    return jwt.sign(payload, JWT_REFRESH_SECRET, {expiresIn: JWT_REFRESH_EXPIRES_IN, jwtid: randomUUID()});
 };
 
 export const verifyAccessToken = (token : string) : DecodedToken => {

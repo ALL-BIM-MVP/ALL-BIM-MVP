@@ -1,7 +1,7 @@
 import z from 'zod';
 import { dateOnlySchema } from './goods-receipt.schema.js';
 import {
-    AT_LEAST_ONE, amountSchema, atLeastOne, currencySchema, descriptionSchema, documentNumberSchema, idSchema, notesSchema,
+    AT_LEAST_ONE, amountSchema, fileIdSchema, atLeastOne, currencySchema, descriptionSchema, documentNumberSchema, idSchema, notesSchema,
     quantitySchema, termsSchema,
 } from './document-common.schema.js';
 
@@ -59,6 +59,7 @@ export const CreateQuotationBodySchema = z.object({
     valid_until: dateOnlySchema.nullable().optional(),
     // Total del documento, opcional (null = no lo indica).
     total_amount: amountSchema.nullable().optional(),
+    file_id: fileIdSchema,
     items: z.array(CreateQuotationItemBodySchema).min(1, "Una cotización necesita al menos una línea.").max(500),
 }).refine(
     (body) => new Set(body.items.map((i) => i.purchase_requisition_item_id)).size === body.items.length,

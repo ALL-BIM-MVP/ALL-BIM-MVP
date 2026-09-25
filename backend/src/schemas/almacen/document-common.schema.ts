@@ -8,6 +8,8 @@ import z from 'zod';
 export const MAX_NUMERIC = 999_999_999_999;
 
 export const idSchema = z.coerce.number().int().positive();
+// Archivo ya subido (POST /files) que se adjunta al documento al crearlo (lectura por IA). Opcional.
+export const fileIdSchema = idSchema.nullable().optional();
 export const documentNumberSchema = z.string().trim().min(1, "El número no puede estar vacío").max(30);
 // Moneda: lista cerrada (mismo CHECK que quotations/purchase_orders/invoices.currency).
 export const currencySchema = z.enum(["PEN", "USD"]);

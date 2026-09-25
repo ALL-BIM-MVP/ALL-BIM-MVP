@@ -1755,3 +1755,52 @@ Authorization: Bearer {{accessToken}}
 ### 12.5 Ahora sí se puede eliminar el proyecto (si no hay contenido de otros módulos)
 DELETE {{baseUrl}}/projects/{{projectId}}
 Authorization: Bearer {{accessToken}}
+
+### =====================================================================
+### 13. LECTURA DE DOCUMENTOS CON IA (opcional: gasta cuota de la IA)
+### =====================================================================
+# Requiere GEMINI_API_KEY (y opcionalmente AI_MODEL) en backend/.env. Sin clave responde 503
+# DOCUMENT_DRAFT_AI_NOT_CONFIGURED. El archivo de ejemplo de esta carpeta NO es un documento real:
+# para ver una lectura de verdad, subir una foto o PDF de una factura/guía y usar su file_id.
+# Flujo: subir el archivo -> pedir el borrador -> (el usuario revisa) -> crear el documento con ese file_id.
+
+### 13.1 Subir el archivo de un documento real (cambiar la ruta por la de tu foto o PDF)
+# @name draftFile
+POST {{baseUrl}}/projects/{{projectId}}/files
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=----BoundaryDraft
+
+------BoundaryDraft
+Content-Disposition: form-data; name="module_code"
+
+almacen
+------BoundaryDraft
+Content-Disposition: form-data; name="file"; filename="factura.png"
+Content-Type: image/png
+
+< ./ejemplos/factura.png
+------BoundaryDraft--
+
+###
+@draftFileId = {{draftFile.response.body.$.file_id}}
+
+### 13.2 Pedir el borrador (invoice | goods-receipt | quotation | purchase-order | requisition). No guarda nada.
+POST {{baseUrl}}/projects/{{projectId}}/document-drafts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": {{draftFileId}}, "document_type": "invoice" }
+
+### 13.3 Casos de error: archivo inexistente (404) y tipo de documento inválido (400)
+POST {{baseUrl}}/projects/{{projectId}}/document-drafts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": 999999999, "document_type": "invoice" }
+
+###
+POST {{baseUrl}}/projects/{{projectId}}/document-drafts
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "file_id": {{draftFileId}}, "document_type": "recibo" }
