@@ -1,23 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
 import * as THREE from 'three';
 import { SimpleOrbitCamera } from '../utils/CityScene';
 import { loadObjectModelFromArrayBuffer } from '../utils/objectModels';
 import { productService } from '../../../services/almacen/product.service';
 
-interface ModelPreviewModalProps {
+interface InlineModelPreviewProps {
   projectId: number;
   assetId: number;
-  onClose: () => void;
+  className?: string;
 }
 
-/** Visor aislado y chico — solo para confirmar que un modelo 3D subido al catálogo abre bien, nada más. */
-const ModelPreviewModal: React.FC<ModelPreviewModalProps> = ({ projectId, assetId, onClose }) => {
+/** Recuadro fijo (sin modal) con el modelo 3D de un producto — se arrastra para orbitar. El
+ * tamaño lo decide quien lo usa (className); pensado para un panel lateral, no un visor principal. */
+const InlineModelPreview: React.FC<InlineModelPreviewProps> = ({ projectId, assetId, className = 'w-20 h-20' }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (!canvasRef.current || !containerRef.current) return;
@@ -28,8 +27,8 @@ const ModelPreviewModal: React.FC<ModelPreviewModalProps> = ({ projectId, assetI
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#e7ebf0');
     const orbitCam = new SimpleOrbitCamera(container.clientWidth / Math.max(1, container.clientHeight), 0.5, 15);
-    orbitCam.target.set(0, 0.5, 0);
-    orbitCam.setRadius(2.5);
+    orbitCam.target.set(0, 0.6, 0);
+    orbitCam.setRadius(1.9);
 
     const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -78,13 +77,13 @@ const ModelPreviewModal: React.FC<ModelPreviewModalProps> = ({ projectId, assetI
       .then((buffer) => loadObjectModelFromArrayBuffer(buffer))
       .then((model) => {
         if (disposed) return;
-        model.scale.setScalar(1.6);
+        model.scale.setScalar(2.2);
         scene.add(model);
         setLoading(false);
       })
-      .catch((err) => {
+      .catch(() => {
         if (disposed) return;
-        setError(err instanceof Error ? err.message : 'No se pudo cargar el modelo 3D.');
+        setError(true);
         setLoading(false);
       });
 
@@ -109,24 +108,13 @@ const ModelPreviewModal: React.FC<ModelPreviewModalProps> = ({ projectId, assetI
     };
   }, [projectId, assetId]);
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-      <div className="w-full max-w-lg h-[28rem] bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col">
-        <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
-          <p className="text-sm font-semibold text-gray-700">Modelo 3D</p>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-full p-1.5">
-            <X size={16} />
-          </button>
-        </div>
-        <div ref={containerRef} className="relative flex-1">
-          <canvas ref={canvasRef} className="w-full h-full block cursor-grab active:cursor-grabbing" />
-          {loading && <p className="absolute inset-0 flex items-center justify-center text-sm text-gray-400 pointer-events-none">Cargando modelo...</p>}
-          {error && <p className="absolute inset-0 flex items-center justify-center text-sm text-red-500 px-6 text-center pointer-events-none">{error}</p>}
-        </div>
-      </div>
-    </div>,
-    document.body
+  return (
+    <div ref={containerRef} className={`relative flex-shrink-0 bg-gray-50 border border-gray-200 rounded-lg overflow-hidden ${className}`}>
+      <canvas ref={canvasRef} className="w-full h-full block cursor-grab active:cursor-grabbing" />
+      {loading && !error && <p className="absolute inset-0 flex items-center justify-center text-[10px] text-gray-400 pointer-events-none">Cargando...</p>}
+      {error && <p className="absolute inset-0 flex items-center justify-center text-[10px] text-red-400 text-center px-1 pointer-events-none">Sin vista previa</p>}
+    </div>
   );
 };
 
-export default ModelPreviewModal;
+export default InlineModelPreview;

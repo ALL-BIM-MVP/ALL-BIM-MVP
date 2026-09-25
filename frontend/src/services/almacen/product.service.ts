@@ -1,5 +1,5 @@
 import { api } from '../api';
-import { Product, ProductCreateInput, ProductUpdateInput } from '../../types/almacen.types';
+import { Model3DAsset, Product, ProductCreateInput, ProductHistoryResponse, ProductUpdateInput } from '../../types/almacen.types';
 
 // Mismo problema de siempre: total_stock sale de un SUM sobre una
 // columna NUMERIC (vuelve como string), Y product_id es BIGINT (Postgres
@@ -43,17 +43,39 @@ export const productService = {
     await api.delete(`/api/projects/${projectId}/products/${productId}`);
   },
 
-  // Sube el .glb/.gltf al mismo endpoint genérico de archivos que ya usa
-  // el visor IFC (POST /api/projects/:id/files, file_type "other" — no
-  // hay un tipo "modelo 3D" propio en el enum del backend). Devuelve una
-  // ruta ya resoluble con getFileContentArrayBuffer(fileId) el día que
-  // se cablee mostrar el modelo real de un producto.
-  async uploadModel(projectId: number, file: File): Promise<{ path: string; format: 'glb' | 'gltf' }> {
-    const format = file.name.toLowerCase().endsWith('.gltf') ? 'gltf' : 'glb';
+  // Hoja de vida del producto (Fase 9) — solo lectura, no depende de las fechas para el stock actual.
+  async getProductHistory(projectId: number, productId: number, filters: { binId?: number; from?: string; to?: string } = {}): Promise<ProductHistoryResponse> {
+    const params = new URLSearchParams();
+    if (filters.binId) params.set('bin_id', String(filters.binId));
+    if (filters.from) params.set('from', filters.from);
+    if (filters.to) params.set('to', filters.to);
+    const qs = params.toString();
+    return api.get(`/api/projects/${projectId}/products/${productId}/history${qs ? `?${qs}` : ''}`);
+  },
+
+  // Sube un .glb/.gltf NUEVO a la biblioteca personal del usuario (sin proyecto, ver
+  // model-3d-asset.service.ts del backend) — todavía no queda asignado a ningún producto.
+  async uploadModel3DAsset(file: File): Promise<Model3DAsset> {
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('file_type', 'other');
-    const saved = await api.postFormData(`/api/projects/${projectId}/files`, formData);
-    return { path: `/api/files/${saved.file_id}/content`, format };
+    return api.postFormData('/api/model-3d-assets', formData);
+  },
+
+  // Catálogo de modelos visibles desde este proyecto (míos + del sistema + ya usados acá) — para
+  // reusar uno ya subido en vez de volver a subir el archivo.
+  async listModel3DAssets(projectId: number): Promise<Model3DAsset[]> {
+    return api.get(`/api/projects/${projectId}/model-3d-assets`);
+  },
+
+  // Asigna un model_3d_asset_id YA existente a un producto, o null para sacarlo — nunca crea un
+  // asset nuevo acá (eso es uploadModel3DAsset, un paso aparte).
+  async assignProductModel3D(projectId: number, productId: number, model3dAssetId: number | null): Promise<Product> {
+    const row = await api.put(`/api/projects/${projectId}/products/${productId}/model-3d`, { model_3d_asset_id: model3dAssetId });
+    return normalizeProduct(row);
+  },
+
+  async getModel3DAssetContentArrayBuffer(projectId: number, assetId: number): Promise<ArrayBuffer> {
+    const blob = await api.getBlob(`/api/projects/${projectId}/model-3d-assets/${assetId}/content`);
+    return blob.arrayBuffer();
   },
 };

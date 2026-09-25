@@ -3,11 +3,12 @@
 export type ProjectScope = 'mine' | 'owner' | 'member';
 
 export interface CoverImage {
-  file_id: string | null;
   name: string;
   mime_type: string;
   url: string;
 }
+
+export type ModuleCode = 'metrados' | 'almacen';
 
 
 export interface ProjectSpecialtySummary {
@@ -68,6 +69,7 @@ export interface ProjectFile {
   is_current?: boolean | null;
   specialty_code?: string | null;
   specialty_name?: string | null;
+  module_code?: ModuleCode;
 }
 
 export interface IFCFile {
@@ -88,3 +90,15 @@ export interface NewProjectData {
 }
 
 export type TabType = 'inicio' | 'archivos' | 'colaboradores' | 'visor3d' | 'modulos' | 'almacen';
+
+// Conteos de contenido de Almacén de un proyecto (para vaciarlo antes de eliminarlo).
+export interface AlmacenSummary {
+  warehouses: number;
+  racks: number;
+  bins: number;
+  products: number;
+  goods_receipts: number;
+  goods_issues: number;
+  inventory_movements: number;
+  is_empty: boolean;
+}

@@ -5,7 +5,7 @@ import {
   ArrowUpDown, Check, FolderOpen, AlertCircle, RefreshCw,
   Image as ImageIcon, File as FileIcon, LayoutGrid, ZoomIn, Upload,
 } from 'lucide-react';
-import { ProjectFile } from '../../types/project.types';
+import { ModuleCode, ProjectFile } from '../../types/project.types';
 import { projectService } from '../../services/project.service';
 
 type SortKey = 'name' | 'date' | 'size';
@@ -131,6 +131,7 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [pendingUploadFile, setPendingUploadFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // IDs de miniaturas que fallaron al cargar (token vencido, red, etc.)
   // -> mostramos el ícono genérico en su lugar.
@@ -232,14 +233,22 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
     }
   };
 
-  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // El backend exige saber a qué módulo pertenece cada archivo — como esta pestaña es genérica
+  // (no vive dentro de Metrados ni de Almacén), se pregunta antes de subir en vez de asumirlo.
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // permite volver a elegir el mismo archivo después
     if (!file) return;
+    setPendingUploadFile(file);
+  };
 
+  const confirmUpload = async (moduleCode: ModuleCode) => {
+    const file = pendingUploadFile;
+    if (!file) return;
+    setPendingUploadFile(null);
     setUploading(true);
     try {
-      await projectService.uploadFile(projectId, file);
+      await projectService.uploadFile(projectId, file, moduleCode);
       await loadFiles();
     } catch (err: any) {
       alert(err.message || 'No se pudo subir el archivo.');
@@ -628,6 +637,36 @@ const ArchivosTab: React.FC<ArchivosTabProps> = ({ projectId, currentUserId, isP
                 </div>
               </>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {pendingUploadFile && createPortal(
+        <div className="fixed inset-0 z-[10450] bg-black/50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-xl w-80 p-5 shadow-2xl">
+            <h4 className="text-sm font-bold text-gray-800 mb-1">¿A qué módulo pertenece?</h4>
+            <p className="text-xs text-gray-500 mb-4 truncate">{pendingUploadFile.name}</p>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => confirmUpload('metrados')}
+                className="w-full text-left px-3 py-2 rounded-lg border border-gray-200 hover:border-[#0056b3] hover:bg-blue-50/40 text-sm font-medium text-gray-700 transition-colors"
+              >
+                Metrados
+              </button>
+              <button
+                onClick={() => confirmUpload('almacen')}
+                className="w-full text-left px-3 py-2 rounded-lg border border-gray-200 hover:border-[#0056b3] hover:bg-blue-50/40 text-sm font-medium text-gray-700 transition-colors"
+              >
+                Almacén
+              </button>
+            </div>
+            <button
+              onClick={() => setPendingUploadFile(null)}
+              className="w-full mt-3 text-xs font-semibold text-gray-500 hover:text-gray-700"
+            >
+              Cancelar
+            </button>
           </div>
         </div>,
         document.body

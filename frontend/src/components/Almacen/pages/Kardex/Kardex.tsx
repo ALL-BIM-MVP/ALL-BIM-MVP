@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { productService } from '../../../../services/almacen/product.service';
 import { inventoryMovementService } from '../../../../services/almacen/inventoryMovement.service';
 import { InventoryMovement, Product } from '../../../../types/almacen.types';
+import { trimNumeric } from '../../../../utils/numberFormat';
 
 interface KardexProps {
   projectId: number;
@@ -108,16 +109,17 @@ const Kardex: React.FC<KardexProps> = ({ projectId }) => {
             )}
             {movements.map((m) => (
               <tr key={m.inventory_movement_id} className="border-b border-gray-50">
-                <td className="py-2 text-gray-500">{new Date(m.created_at).toLocaleString()}</td>
+                {/* Texto tal cual (AAAA-MM-DD) — new Date() corre un día en zonas al oeste de UTC. */}
+                <td className="py-2 text-gray-500">{m.movement_date}</td>
                 <td className="py-2 text-gray-800">{getProductLabel(m.product_id)}</td>
                 <td className="py-2">
                   <span className={`text-xs font-medium rounded-full px-2 py-0.5 ${m.type === 'entrada' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-500'}`}>
                     {m.type}
                   </span>
                 </td>
-                <td className="py-2 text-gray-700">{m.quantity}</td>
+                <td className="py-2 text-gray-700">{trimNumeric(m.quantity)}</td>
                 <td className="py-2 text-gray-500 font-mono text-xs">#{m.bin_id}</td>
-                <td className="py-2 font-semibold text-gray-800">{m.resulting_balance}</td>
+                <td className="py-2 font-semibold text-gray-800">{trimNumeric(m.resulting_balance)}</td>
                 <td className="py-2 text-gray-500">{m.reference_document_type} #{m.reference_document_id}</td>
               </tr>
             ))}

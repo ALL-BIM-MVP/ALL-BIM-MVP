@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { Project } from '../../types/project.types';
+import { TriangleAlert } from 'lucide-react';
+import { AlmacenSummary, Project } from '../../types/project.types';
 import { resolveMediaUrl } from '../../utils/media';
 import { projectService } from '../../services/project.service';
 
@@ -29,7 +30,10 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [checkingAlmacen, setCheckingAlmacen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  // No-null: hay que vaciar Almacén antes de eliminar el proyecto — se pide confirmación aparte.
+  const [almacenSummary, setAlmacenSummary] = useState<AlmacenSummary | null>(null);
   
   const [localCoverImage, setLocalCoverImage] = useState(project?.cover_image ?? null);
 
@@ -38,6 +42,7 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
     setLocalCoverImage(project?.cover_image ?? null);
     setUploadError(null);
     setDeleteError(null);
+    setAlmacenSummary(null);
   }, [project?.project_id]);
 
   if (!isOpen || !project) return null;
@@ -83,12 +88,44 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
     }
   };
 
-  const handleDeleteProject = async () => {
+  // Punto de entrada del botón "Eliminar proyecto": primero revisa si Almacén tiene algo que vaciar.
+  const handleDeleteClick = async () => {
+    setDeleteError(null);
+    setCheckingAlmacen(true);
+    try {
+      const summary = await projectService.getAlmacenSummary(project.project_id);
+      if (summary.is_empty) await confirmAndDeleteProject();
+      else setAlmacenSummary(summary);
+    } catch (err: any) {
+      setDeleteError(err.message || 'No se pudo verificar el contenido de Almacén.');
+    } finally {
+      setCheckingAlmacen(false);
+    }
+  };
+
+  // Camino simple: sin datos de Almacén, un solo confirm de siempre.
+  const confirmAndDeleteProject = async () => {
     const confirmed = window.confirm(
       `¿Seguro que querés eliminar "${project.name}"? Esta acción no se puede deshacer: se borran también sus archivos, colaboradores e invitaciones.`
     );
     if (!confirmed) return;
+    await deleteProjectNow();
+  };
 
+  // Camino con datos de Almacén: el panel de abajo ya es la confirmación, sin doble aviso.
+  const handleEmptyAndDelete = async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await projectService.emptyAlmacenContent(project.project_id);
+      await deleteProjectNow();
+    } catch (err: any) {
+      setDeleteError(err.message || 'No se pudo eliminar el proyecto.');
+      setDeleting(false);
+    }
+  };
+
+  const deleteProjectNow = async () => {
     setDeleting(true);
     setDeleteError(null);
     try {
@@ -116,6 +153,48 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
           </button>
         </div>
 
+        {almacenSummary ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-red-600">
+              <TriangleAlert size={18} />
+              <h4 className="text-sm font-bold">Este proyecto tiene datos de Almacén BIM</h4>
+            </div>
+            <p className="text-xs text-gray-500">Se van a borrar junto con el proyecto, de forma irreversible:</p>
+            <ul className="text-sm text-gray-800 bg-red-50 border border-red-100 rounded-lg divide-y divide-red-100">
+              {[
+                { label: 'Almacén(es)', value: almacenSummary.warehouses },
+                { label: 'Estante(s)', value: almacenSummary.racks },
+                { label: 'Casilla(s)', value: almacenSummary.bins },
+                { label: 'Producto(s)', value: almacenSummary.products },
+                { label: 'Ingreso(s)', value: almacenSummary.goods_receipts },
+                { label: 'Vale(s) de salida', value: almacenSummary.goods_issues },
+                { label: 'Movimiento(s) de Kardex', value: almacenSummary.inventory_movements },
+              ].filter((item) => item.value > 0).map((item) => (
+                <li key={item.label} className="flex items-center justify-between px-3 py-1.5">
+                  <span>{item.label}</span>
+                  <span className="font-semibold">{item.value}</span>
+                </li>
+              ))}
+            </ul>
+            {deleteError && <p className="text-[11px] text-red-600">{deleteError}</p>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => setAlmacenSummary(null)}
+                disabled={deleting}
+                className="flex-1 border border-gray-200 text-gray-600 text-xs font-semibold py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleEmptyAndDelete}
+                disabled={deleting}
+                className="flex-1 bg-red-600 text-white text-xs font-semibold py-2 rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {deleting ? 'Eliminando...' : 'Vaciar y eliminar definitivamente'}
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="space-y-3">
           {/* Portada */}
           <div>
@@ -198,17 +277,18 @@ const ProjectDetailsModal: React.FC<ProjectDetailsModalProps> = ({
 
           <div className="pt-3 mt-1 border-t border-gray-200">
             <button
-              onClick={handleDeleteProject}
-              disabled={deleting}
+              onClick={handleDeleteClick}
+              disabled={deleting || checkingAlmacen}
               className="w-full text-center text-red-600 hover:bg-red-50 border border-red-200 text-xs font-semibold py-2 rounded-lg transition-colors disabled:opacity-50"
             >
-              {deleting ? 'Eliminando...' : 'Eliminar proyecto'}
+              {checkingAlmacen ? 'Verificando...' : deleting ? 'Eliminando...' : 'Eliminar proyecto'}
             </button>
             {deleteError && (
               <p className="text-[11px] text-red-600 mt-1 text-center">{deleteError}</p>
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );

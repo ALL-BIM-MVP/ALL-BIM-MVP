@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { SimpleOrbitCamera } from './CityScene';
 import { CUBE_SIZE } from './warehouseMapping';
 import { loadObjectModel, loadObjectModelFromArrayBuffer } from './objectModels';
-import { getFileContentArrayBuffer } from '../../../services/ifcfiles.service';
+import { productService } from '../../../services/almacen/product.service';
 import { Bin } from '../../../types/almacen.types';
 
 export interface GridPoint {
@@ -24,7 +24,7 @@ export interface WarehouseInteriorCallbacks {
   onFrame?: () => void;
 }
 
-const LEVEL_HEIGHT = 1.1;
+const LEVEL_HEIGHT = 0.85;
 const RACK_BEAM_COLOR = '#f2660a';
 const FLOOR_MARGIN = 1.5; // metros de piso decorativo alrededor de la grilla ubicable
 
@@ -39,8 +39,8 @@ function normalizeRect(c1: GridPoint, c2: GridPoint) {
 type Rect = ReturnType<typeof normalizeRect>;
 
 /** Dos rectángulos necesitan al menos 1 cubo entero vacío entre sí — ni pegados, ni superpuestos. */
-function rectsHaveClearance(a: Rect, b: Rect): boolean {
-  return a.maxX + 1 <= b.minX || b.maxX + 1 <= a.minX || a.maxZ + 1 <= b.minZ || b.maxZ + 1 <= a.minZ;
+function rectsHaveClearance(a: Rect, b: Rect, buffer = 1): boolean {
+  return a.maxX + buffer <= b.minX || b.maxX + buffer <= a.minX || a.maxZ + buffer <= b.minZ || b.maxZ + buffer <= a.minZ;
 }
 
 let concreteTextureCache: THREE.CanvasTexture | null = null;
@@ -84,7 +84,7 @@ function getConcreteTexture(): THREE.CanvasTexture {
   }
 
   const flowAngle = -0.55;
-  for (let i = 0; i < 26; i++) {
+  for (let i = 0; i < 18; i++) {
     const cx = Math.random() * size;
     const cy = Math.random() * size;
     const angle = flowAngle + (Math.random() - 0.5) * 0.9;
@@ -93,8 +93,8 @@ function getConcreteTexture(): THREE.CanvasTexture {
     const y0 = cy - Math.sin(angle) * len * 0.5;
     const x1 = cx + Math.cos(angle) * len * 0.5;
     const y1 = cy + Math.sin(angle) * len * 0.5;
-    drawMarbleVein(ctx, x0, y0, x1, y1, 1 + Math.random() * 2.2, 0.16 + Math.random() * 0.22);
-    const branches = Math.random() < 0.7 ? 1 + Math.floor(Math.random() * 2) : 0;
+    drawMarbleVein(ctx, x0, y0, x1, y1, 0.7 + Math.random() * 1.2, 0.08 + Math.random() * 0.12);
+    const branches = Math.random() < 0.45 ? 1 : 0;
     for (let b = 0; b < branches; b++) {
       const t = 0.2 + Math.random() * 0.6;
       const bx = x0 + (x1 - x0) * t;
@@ -164,6 +164,7 @@ function buildRoom(scene: THREE.Scene, gridWidth: number, gridDepth: number) {
   const gridGeom = new THREE.BufferGeometry().setFromPoints(points);
   const gridLines = new THREE.LineSegments(gridGeom, new THREE.LineBasicMaterial({ color: '#b9c3cc', transparent: true, opacity: 0.5 }));
   scene.add(gridLines);
+
 }
 
 function disposeObject3D(obj: THREE.Object3D) {
@@ -199,19 +200,38 @@ function addDirectionMarker(group: THREE.Group, direction: 0 | 1, worldWidth: nu
   group.add(marker);
 }
 
-/** Cartel con el nombre, dibujado en un canvas y montado sobre la viga naranja del nivel más alto — se puede reemplazar en caliente al renombrar. */
-function buildNameplate(name: string, plateWidth: number, plateHeight: number): THREE.Mesh {
+// Estantes por defecto de un almacén nuevo (ver CiudadModal.tsx, createDefaultRacks) — el nombre
+// exacto de la disciplina dispara el bloque de cabecera; cualquier otro nombre usa el cartel simple
+// de siempre. No hay columna de "categoría" en el backend: el nombre ES el dato, a propósito, para
+// no agregar un concepto nuevo por un cartel. Un color distinto por categoría, pero apagado/oscuro
+// (no primario vivo) — letra blanca en las 3.
+const CATEGORY_NAMEPLATE_STYLES: Record<string, { bg: string; fg: string }> = {
+  'arquitectura': { bg: '#166534', fg: '#ffffff' },
+  'estructura': { bg: '#991b1b', fg: '#ffffff' },
+  'mecánica': { bg: '#1e3a8a', fg: '#ffffff' },
+};
+
+/** Cartel con el nombre — se puede reemplazar en caliente al renombrar. Un estante de disciplina
+ * (ver arriba) es un BLOQUE sólido apoyado justo encima de la viga del nivel más alto, tocándola
+ * (parte de la estructura, no un cartel flotando adelante); cualquier otro nombre usa el cartel
+ * simple de siempre, la placa plana transparente sobre la viga. */
+function buildNameplate(name: string, plateWidth: number, plateHeight: number, plateDepth: number): THREE.Mesh {
+  const categoryStyle = CATEGORY_NAMEPLATE_STYLES[name.trim().toLowerCase()] ?? null;
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = Math.max(1, Math.round(1024 * (plateHeight / plateWidth)));
   const ctx = canvas.getContext('2d')!;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#2a1400';
+  if (categoryStyle) {
+    ctx.fillStyle = categoryStyle.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+  }
+  ctx.fillStyle = categoryStyle ? categoryStyle.fg : '#2a1400';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  let fontSize = canvas.height * 0.6;
+  let fontSize = canvas.height * (categoryStyle ? 0.68 : 0.6);
   ctx.font = `bold ${fontSize}px sans-serif`;
-  while (ctx.measureText(name).width > canvas.width * 0.92 && fontSize > 10) {
+  while (ctx.measureText(name).width > canvas.width * 0.88 && fontSize > 10) {
     fontSize -= 4;
     ctx.font = `bold ${fontSize}px sans-serif`;
   }
@@ -219,6 +239,21 @@ function buildNameplate(name: string, plateWidth: number, plateHeight: number): 
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
+
+  if (categoryStyle) {
+    // Caras del costado/arriba/abajo/atrás lisas del mismo color — solo la de adelante lleva el
+    // texto. Orden de THREE.BoxGeometry: [+x, -x, +y, -y, +z, -z]; el frente del rack es +z.
+    const sideMat = new THREE.MeshStandardMaterial({ color: categoryStyle.bg, roughness: 0.45 });
+    const frontMat = new THREE.MeshBasicMaterial({ map: texture });
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(plateWidth, plateHeight, plateDepth),
+      [sideMat, sideMat, sideMat, sideMat, frontMat, sideMat]
+    );
+    mesh.castShadow = true;
+    mesh.name = 'nameplate';
+    return mesh;
+  }
+
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(plateWidth, plateHeight),
     new THREE.MeshBasicMaterial({ map: texture, transparent: true })
@@ -227,12 +262,65 @@ function buildNameplate(name: string, plateWidth: number, plateHeight: number): 
   return mesh;
 }
 
-/** Rack real: parantes (uno por límite de bahía, con arriostre diagonal en las 4 esquinas), vigas y tablero por nivel. */
-function buildRackMesh(widthCubes: number, depthCubes: number, levels: number): { group: THREE.Group; labelAnchor: THREE.Object3D; worldWidth: number; worldDepth: number; height: number } {
+// Profundidad visual (adelante-atrás) de un estante respecto de su celda de grilla — solo dibujo,
+// la grilla y lo guardado siguen usando la celda entera.
+const RACK_DEPTH_FACTOR = 0.6;
+const PALLET_DEPTH_FACTOR = 0.75;
+const PALLET_HEIGHT = 0.16;
+
+/** Una "Tarima" es un estante de 1 nivel que se dibuja como tarima de madera en el piso. No hay
+ * columna de tipo en el backend: el nombre ES el dato (mismo criterio que los carteles de categoría). */
+export function isPalletName(name: string): boolean {
+  return name.trim().toLowerCase().startsWith('tarima');
+}
+
+interface RackMesh { group: THREE.Group; labelAnchor: THREE.Object3D; worldWidth: number; worldDepth: number; height: number; baseY: number }
+
+/** Tarima de madera: listones arriba y tres travesaños abajo. Se dibuja con la cara superior en el
+ * mismo plano que un nivel 1 de estante (LEVEL_HEIGHT) y baseY baja todo el grupo para que apoye en el
+ * piso — así las casillas y los objetos se posicionan igual que en cualquier estante. */
+function buildPalletMesh(widthCubes: number, depthCubes: number): RackMesh {
   const group = new THREE.Group();
-  // Sin achicar: el mueble llena la celda entera, calza justo con las líneas de la grilla del piso.
   const worldWidth = widthCubes * CUBE_SIZE;
-  const worldDepth = depthCubes * CUBE_SIZE;
+  const worldDepth = depthCubes * CUBE_SIZE * PALLET_DEPTH_FACTOR;
+  const wood = new THREE.MeshStandardMaterial({ color: '#d9b982', roughness: 0.85 });
+  const topY = LEVEL_HEIGHT;
+  const boardT = 0.025;
+  const stringerH = PALLET_HEIGHT - boardT;
+
+  const boards = 7;
+  const pitch = worldDepth / boards;
+  for (let i = 0; i < boards; i++) {
+    const board = new THREE.Mesh(new THREE.BoxGeometry(worldWidth, boardT, pitch * 0.72), wood);
+    board.position.set(0, topY - boardT / 2, -worldDepth / 2 + pitch * (i + 0.5));
+    board.castShadow = true;
+    board.receiveShadow = true;
+    group.add(board);
+  }
+  const stringerW = 0.12;
+  [-1, 0, 1].forEach((k) => {
+    const x = k === 0 ? 0 : k * (worldWidth / 2 - stringerW / 2);
+    const stringer = new THREE.Mesh(new THREE.BoxGeometry(stringerW, stringerH, worldDepth * 0.94), wood);
+    stringer.position.set(x, topY - boardT - stringerH / 2, 0);
+    stringer.castShadow = true;
+    group.add(stringer);
+  });
+
+  const labelAnchor = new THREE.Object3D();
+  labelAnchor.position.set(0, topY + 0.3, 0);
+  group.add(labelAnchor);
+  return { group, labelAnchor, worldWidth, worldDepth, height: LEVEL_HEIGHT, baseY: -(LEVEL_HEIGHT - PALLET_HEIGHT) };
+}
+
+/** Rack real: parantes (uno por límite de bahía, con arriostre diagonal en las 4 esquinas), vigas y tablero por nivel. */
+function buildRackMesh(widthCubes: number, depthCubes: number, levels: number, isPallet = false): RackMesh {
+  if (isPallet) return buildPalletMesh(widthCubes, depthCubes);
+  const group = new THREE.Group();
+  // El ancho llena la celda entera, calza con las líneas de la grilla del piso. La profundidad
+  // (distancia entre la viga de adelante y la de atrás) se angosta a propósito — se veía como un
+  // tablón demasiado hondo para lo que en general se guarda ahí.
+  const worldWidth = widthCubes * CUBE_SIZE;
+  const worldDepth = depthCubes * CUBE_SIZE * RACK_DEPTH_FACTOR;
   const height = levels * LEVEL_HEIGHT;
   const postSize = 0.06;
   const beamThickness = 0.07;
@@ -322,11 +410,12 @@ function buildRackMesh(widthCubes: number, depthCubes: number, levels: number): 
   labelAnchor.position.set(0, height + 0.3, 0);
   group.add(labelAnchor);
 
-  return { group, labelAnchor, worldWidth, worldDepth, height };
+  return { group, labelAnchor, worldWidth, worldDepth, height, baseY: 0 };
 }
 
 interface BayEntry {
   id: string;
+  isPallet: boolean;
   corner1: GridPoint;
   corner2: GridPoint;
   levels: number;
@@ -375,6 +464,7 @@ export class WarehouseInteriorScene {
   private draftGroup: THREE.Group | null = null;
   private draftLabelAnchor: THREE.Object3D | null = null;
   private draftLevels = 1;
+  private draftIsPallet = false;
   private draftDirection: 0 | 1 = 0;
   private draftWorldWidth = 0;
   private draftWorldDepth = 0;
@@ -524,12 +614,13 @@ export class WarehouseInteriorScene {
     // Eje fijo, igual que el backend: X siempre ancho (bahías), Z siempre profundidad — nunca se reordena ni se rota.
     const widthCubes = r.maxX - r.minX;
     const depthCubes = r.maxZ - r.minZ;
-    const { group, labelAnchor, worldWidth, worldDepth, height } = buildRackMesh(widthCubes, depthCubes, levels);
-    group.position.set(this.gridToWorldX((r.minX + r.maxX) / 2), 0, this.gridToWorldZ((r.minZ + r.maxZ) / 2));
-    addDirectionMarker(group, direction, worldWidth, worldDepth);
+    const isPallet = isPalletName(name);
+    const { group, labelAnchor, worldWidth, worldDepth, height, baseY } = buildRackMesh(widthCubes, depthCubes, isPallet ? 1 : levels, isPallet);
+    group.position.set(this.gridToWorldX((r.minX + r.maxX) / 2), baseY, this.gridToWorldZ((r.minZ + r.maxZ) / 2));
+    if (!isPallet) addDirectionMarker(group, direction, worldWidth, worldDepth);
     group.userData.bayId = id;
     this.baysGroup.add(group);
-    this.bays.set(id, { id, corner1, corner2, levels, direction, group, labelAnchor, worldWidth, worldDepth, height });
+    this.bays.set(id, { id, isPallet, corner1, corner2, levels, direction, group, labelAnchor, worldWidth, worldDepth, height });
     this.setBayName(id, name);
   }
 
@@ -542,10 +633,19 @@ export class WarehouseInteriorScene {
       entry.group.remove(old);
       disposeObject3D(old);
     }
-    const plateWidth = Math.min(entry.worldWidth * 0.85, 2.4);
-    const plateHeight = plateWidth / 4;
-    const plate = buildNameplate(name, plateWidth, plateHeight);
-    plate.position.set(0, entry.height - plateHeight / 2 - 0.08, entry.worldDepth / 2 + 0.005);
+    if (isPalletName(name)) return; // la tarima no lleva cartel: es baja y va en grupo bajo su cabecera
+    const isCategory = CATEGORY_NAMEPLATE_STYLES[name.trim().toLowerCase()] != null;
+    const plateWidth = isCategory ? Math.min(entry.worldWidth * 0.95, 3.2) : Math.min(entry.worldWidth * 0.85, 2.4);
+    const plateHeight = isCategory ? plateWidth / 4.5 : plateWidth / 4;
+    const plateDepth = isCategory ? 0.2 : 0.12;
+    const plate = buildNameplate(name, plateWidth, plateHeight, plateDepth);
+    if (isCategory) {
+      // Apoyado justo encima de la viga del último nivel, tocándola — parte del estante, no un
+      // cartel flotando adelante con hueco de por medio.
+      plate.position.set(0, entry.height + plateHeight / 2, entry.worldDepth / 2 - plateDepth / 2);
+    } else {
+      plate.position.set(0, entry.height - plateHeight / 2 - 0.08, entry.worldDepth / 2 + 0.005);
+    }
     entry.group.add(plate);
   }
 
@@ -593,7 +693,6 @@ export class WarehouseInteriorScene {
     const depthCubes = rect.maxZ - rect.minZ;
     const bayCount = Math.max(1, Math.round(entry.worldWidth / CUBE_SIZE));
     const cellW = entry.worldWidth / bayCount;
-    const fitSize = Math.min(cellW, LEVEL_HEIGHT) * GENERIC_OBJECT_FIT.scale;
     const rowDepth = entry.worldDepth / depthCubes;
 
     for (const bin of bins) {
@@ -601,7 +700,7 @@ export class WarehouseInteriorScene {
       if (!content) continue;
 
       let model: THREE.Object3D | null = null;
-      if (content.model_3d_path) model = await loadProductModel(content.model_3d_path).catch(() => null);
+      if (content.model_3d_url) model = await loadProductModel(content.model_3d_url).catch(() => null);
       if (!model) model = await loadObjectModel('bulto').catch(() => null);
       if (!model) continue;
       // El estante se pudo haber quitado (o recargado, ver el `current` de arriba) mientras esto cargaba.
@@ -610,7 +709,7 @@ export class WarehouseInteriorScene {
         continue;
       }
 
-      model.scale.setScalar(fitSize);
+      model.scale.setScalar(fitScaleForCell(model, cellW, rowDepth, LEVEL_HEIGHT));
       model.rotation.y = GENERIC_OBJECT_FIT.rotationY;
       const x = -entry.worldWidth / 2 + cellW * (bin.bay + 0.5);
       const y = LEVEL_HEIGHT * bin.level;
@@ -622,8 +721,9 @@ export class WarehouseInteriorScene {
   }
 
   /** Arranca el modo "dibujar rack nuevo": primer click fija una esquina, el segundo la opuesta. */
-  startPlacingBay() {
+  startPlacingBay(isPallet = false) {
     this.cancelPlacingBay();
+    this.draftIsPallet = isPallet;
     this.placingActive = true;
   }
 
@@ -688,9 +788,9 @@ export class WarehouseInteriorScene {
     // Eje fijo, igual que el backend: X siempre ancho (bahías), Z siempre profundidad — nunca se reordena ni se rota.
     const widthCubes = r.maxX - r.minX;
     const depthCubes = r.maxZ - r.minZ;
-    const { group, labelAnchor, worldWidth, worldDepth, height } = buildRackMesh(widthCubes, depthCubes, this.draftLevels);
-    group.position.set(this.gridToWorldX((r.minX + r.maxX) / 2), 0, this.gridToWorldZ((r.minZ + r.maxZ) / 2));
-    addDirectionMarker(group, this.draftDirection, worldWidth, worldDepth);
+    const { group, labelAnchor, worldWidth, worldDepth, height, baseY } = buildRackMesh(widthCubes, depthCubes, this.draftIsPallet ? 1 : this.draftLevels, this.draftIsPallet);
+    group.position.set(this.gridToWorldX((r.minX + r.maxX) / 2), baseY, this.gridToWorldZ((r.minZ + r.maxZ) / 2));
+    if (!this.draftIsPallet) addDirectionMarker(group, this.draftDirection, worldWidth, worldDepth);
     setGroupOpacity(group, 0.6);
     this.scene.add(group);
     this.draftGroup = group;
@@ -711,6 +811,12 @@ export class WarehouseInteriorScene {
     this.rebuildDraft();
   }
 
+  /** Tipo elegido en el panel: tarima (1 nivel, en el piso) o estante común. */
+  updateDraftType(isPallet: boolean) {
+    this.draftIsPallet = isPallet;
+    this.rebuildDraft();
+  }
+
   /** Confirma el draft actual — lo vuelve un rack real (local) y devuelve sus datos para guardarlo contra el backend. */
   confirmDraft(name: string): { id: string; corner1: GridPoint; corner2: GridPoint; levels: number; direction: 0 | 1 } | null {
     if (!this.draftFootprint || !this.draftGroup || !this.draftLabelAnchor) return null;
@@ -721,9 +827,10 @@ export class WarehouseInteriorScene {
     this.baysGroup.add(this.draftGroup);
     const entry: BayEntry = {
       id,
+      isPallet: this.draftIsPallet,
       corner1: this.draftFootprint.corner1,
       corner2: this.draftFootprint.corner2,
-      levels: this.draftLevels,
+      levels: this.draftIsPallet ? 1 : this.draftLevels,
       direction: this.draftDirection,
       group: this.draftGroup,
       labelAnchor: this.draftLabelAnchor,
@@ -841,20 +948,36 @@ export class WarehouseInteriorScene {
   }
 }
 
-/** Ajuste de encaje del modelo genérico puesto en una casilla — se usa cuando el producto no tiene su propio modelo 3D. */
-const GENERIC_OBJECT_FIT = { rotationY: 0, scale: 0.9 };
+/** Rotación de encaje del modelo puesto en una casilla (genérico o el propio del producto) — el
+ * tamaño lo resuelve fitScaleForCell, por modelo, según su bounding box real. */
+const GENERIC_OBJECT_FIT = { rotationY: 0 };
+
+// Escala uniforme que hace que el modelo YA CARGADO ocupe lo más posible del hueco real de la
+// casilla (ancho de bahía × profundidad de fila × alto de nivel) sin salirse de ninguno de los
+// tres. Reemplaza escalar solo por la dimensión más grande del modelo normalizado (loadObjectModel/
+// loadProductModel dejan esa dimensión en 1): un modelo más ancho que alto quedaba con la altura
+// real muy por debajo del nivel disponible y se veía chico contra la estantería, aunque su ancho
+// estuviera bien — hallado al ver un modelo subido (una casilla) y hasta el genérico "bulto".
+function fitScaleForCell(model: THREE.Object3D, cellW: number, rowDepth: number, levelHeight: number): number {
+  const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+  const byWidth = size.x > 1e-6 ? (cellW * 0.92) / size.x : Infinity;
+  const byDepth = size.z > 1e-6 ? (rowDepth * 0.92) / size.z : Infinity;
+  const byHeight = size.y > 1e-6 ? (levelHeight * 0.95) / size.y : Infinity;
+  return Math.min(byWidth, byDepth, byHeight);
+}
 
 const productModelCache = new Map<string, Promise<THREE.Object3D>>();
 
-/** Modelo real de un producto (subido al catálogo) — solo sabe abrir rutas con nuestra propia convención
- * (/api/files/:id/content); cualquier otra cosa la rechaza, para que el que llama caiga al genérico. */
-function loadProductModel(path: string): Promise<THREE.Object3D> {
-  let promise = productModelCache.get(path);
+/** Modelo real de un producto (asignado desde su biblioteca de modelos 3D) — solo sabe abrir URLs
+ * con la convención de model_3d_url (/projects/:id/model-3d-assets/:id/content); cualquier otra
+ * cosa la rechaza, para que el que llama caiga al genérico. */
+function loadProductModel(url: string): Promise<THREE.Object3D> {
+  let promise = productModelCache.get(url);
   if (!promise) {
-    const match = path.match(/\/api\/files\/(\d+)\/content/);
+    const match = url.match(/\/projects\/(\d+)\/model-3d-assets\/(\d+)\/content/);
     if (!match) return Promise.reject(new Error('Ruta de modelo no reconocida'));
-    promise = getFileContentArrayBuffer(match[1]).then((buffer) => loadObjectModelFromArrayBuffer(buffer));
-    productModelCache.set(path, promise);
+    promise = productService.getModel3DAssetContentArrayBuffer(Number(match[1]), Number(match[2])).then((buffer) => loadObjectModelFromArrayBuffer(buffer));
+    productModelCache.set(url, promise);
   }
   return promise.then((base) => base.clone(true));
 }
@@ -969,22 +1092,25 @@ export class BayPreviewScene {
   }
 
   /** Rearma el rack mostrado — se llama al entrar a un estante puntual, con sus dimensiones reales. */
-  update(width: number, depth: number, levels: number) {
+  update(width: number, depth: number, levels: number, isPallet = false) {
     if (this.bayGroup) {
       this.scene.remove(this.bayGroup);
       disposeObject3D(this.bayGroup);
     }
     this.clearSelection();
     this.stockObjects = new Map(); // ya se disponen solos al disponer el bayGroup viejo, arriba
-    const { group, height } = buildRackMesh(width, depth, levels);
+    const levelsShown = isPallet ? 1 : levels;
+    const { group, height, worldDepth, baseY } = buildRackMesh(width, depth, levelsShown, isPallet);
+    group.position.y = baseY;
     this.bayGroup = group;
     this.scene.add(group);
     this.currentWidth = width * CUBE_SIZE;
-    this.currentDepth = depth * CUBE_SIZE;
+    // La profundidad visual (más angosta que la celda), no la de la grilla: de ahí salen las posiciones de las casillas.
+    this.currentDepth = worldDepth;
     this.currentDepthCubes = depth;
-    this.currentLevels = levels;
+    this.currentLevels = levelsShown;
 
-    this.orbitCam.target.set(0, height / 2, 0);
+    this.orbitCam.target.set(0, height / 2 + baseY, 0);
     this.orbitCam.setRadius(Math.max(this.currentWidth, height) * 1.7);
   }
 
@@ -1018,14 +1144,14 @@ export class BayPreviewScene {
 
     const bayCount = Math.max(1, Math.round(this.currentWidth / CUBE_SIZE));
     const cellW = this.currentWidth / bayCount;
-    const fitSize = Math.min(cellW, LEVEL_HEIGHT) * GENERIC_OBJECT_FIT.scale;
+    const rowDepth = this.currentDepth / this.currentDepthCubes;
 
     for (const bin of bins) {
       const content = bin.contents?.[0];
       if (!content) continue;
 
       let model: THREE.Object3D | null = null;
-      if (content.model_3d_path) model = await loadProductModel(content.model_3d_path).catch(() => null);
+      if (content.model_3d_url) model = await loadProductModel(content.model_3d_url).catch(() => null);
       if (!model) model = await loadObjectModel('bulto').catch(() => null);
       // La selección puede haber cambiado (o el estante recargado) mientras esto cargaba.
       if (!model) continue;
@@ -1034,7 +1160,7 @@ export class BayPreviewScene {
         continue;
       }
 
-      model.scale.setScalar(fitSize);
+      model.scale.setScalar(fitScaleForCell(model, cellW, rowDepth, LEVEL_HEIGHT));
       const pos = this.binWorldPos(bin);
       model.position.set(pos.x, pos.y, pos.z);
       model.userData.binId = bin.bin_id; // para poder resolver el click exacto sobre el objeto real, ver resolveBinAtPointer
@@ -1184,7 +1310,7 @@ export class BayPreviewScene {
     if (!this.bayGroup) return;
     const bayCount = Math.max(1, Math.round(this.currentWidth / CUBE_SIZE));
     const cellW = this.currentWidth / bayCount;
-    const fitSize = Math.min(cellW, LEVEL_HEIGHT) * GENERIC_OBJECT_FIT.scale;
+    const rowDepth = this.currentDepth / this.currentDepthCubes;
     const requestId = ++this.objectRequestSeq;
 
     let model: THREE.Object3D | null = null;
@@ -1192,6 +1318,7 @@ export class BayPreviewScene {
     if (!model) model = await loadObjectModel('bulto').catch(() => null);
     if (!model || requestId !== this.objectRequestSeq || !this.bayGroup) return;
 
+    const fitSize = fitScaleForCell(model, cellW, rowDepth, LEVEL_HEIGHT);
     this.objectBaseFit = fitSize;
     this.objectBaseRotation = GENERIC_OBJECT_FIT.rotationY;
     model.scale.setScalar(fitSize);
