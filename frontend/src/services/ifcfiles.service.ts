@@ -208,6 +208,7 @@ export const uploadIfcFileOnly = async (
   const formData = new FormData();
   formData.append('file', file);
   formData.append('file_type', 'ifc');
+  formData.append('module_code', 'metrados');
   const response = await api.postFormData(`/api/projects/${projectId}/files`, formData);
   return response;
 };

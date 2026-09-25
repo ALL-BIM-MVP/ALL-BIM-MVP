@@ -495,7 +495,7 @@ const IFCViewer = forwardRef<IFCViewerHandle, IFCViewerProps>(({ fileBuffer, fra
     setSaveScreenshotError(null);
     try {
       const file = new File([pendingScreenshot.blob], `captura-visor-${Date.now()}.png`, { type: 'image/png' });
-      await projectService.uploadFile(projectId, file);
+      await projectService.uploadFile(projectId, file, 'metrados');
       discardScreenshot();
       onFileUploaded?.();
     } catch (err: any) {

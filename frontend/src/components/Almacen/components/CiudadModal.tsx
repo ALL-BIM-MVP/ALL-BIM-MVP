@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Building2, ChevronRight, Move, Pencil, Plus, RotateCw, Search, Tractor, Trash2, Warehouse, X } from 'lucide-react';
 import { CityScene, DEFAULT_WAREHOUSE_SIZE, Footprint, WAREHOUSE_SIZES, WarehouseSizeKey } from '../utils/CityScene';
-import { BayPreviewScene, GridPoint, WarehouseInteriorScene } from '../utils/WarehouseInteriorScene';
+import { BayPreviewScene, GridPoint, isPalletName, WarehouseInteriorScene } from '../utils/WarehouseInteriorScene';
 import { CUBE_SIZE, cubesToMeters, DEFAULT_GRID, directionToRotation, footprintCorners, footprintFromCorners, rotationToDirection } from '../utils/warehouseMapping';
 import { Bin, Rack, Warehouse as WarehouseData, WarehouseInput, WarehouseStyle } from '../../../types/almacen.types';
 import { warehouseStyleService } from '../../../services/almacen/warehouseStyle.service';
@@ -83,6 +83,7 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
   const [placingRack, setPlacingRack] = useState(false);
   const [draftFootprint, setDraftFootprint] = useState<{ corner1: GridPoint; corner2: GridPoint } | null>(null);
   const [draftLevels, setDraftLevels] = useState(1);
+  const [draftIsPallet, setDraftIsPallet] = useState(false);
   const [draftDirection, setDraftDirection] = useState<0 | 1>(0);
 
   const [viewingBayId, setViewingBayId] = useState<string | null>(null);
@@ -131,7 +132,7 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
   useEffect(() => {
     const scene = previewSceneRef.current;
     if (!scene || !rackDetail) return;
-    scene.update(rackDetail.width, rackDetail.depth, rackDetail.levels);
+    scene.update(rackDetail.width, rackDetail.depth, rackDetail.levels, isPalletName(rackDetail.name));
     scene.setBins(rackDetail.bins ?? [], binFace);
     scene.renderStock(rackDetail.bins ?? []);
   }, [rackDetail, binFace]);
@@ -174,6 +175,37 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
     ...footprintCorners(transform.x, transform.z, transform.rotationY, info.footprint),
   });
 
+  // Estantes con los que nace todo almacén nuevo — contra la pared del fondo, en 3 tercios del
+  // ancho de la grilla por defecto (28 cubos). El nombre exacto ("Arquitectura"/"Estructura"/
+  // "Mecánica") es lo que le pone el cartel de color en WarehouseInteriorScene.buildNameplate; no
+  // hay columna de categoría en el backend, así que si el usuario los renombra pierden el color.
+  const DEFAULT_RACK_CATEGORIES: Array<{ name: string; gx1: number; gx2: number }> = [
+    { name: 'Arquitectura', gx1: 1, gx2: 9 },
+    { name: 'Estructura', gx1: 10, gx2: 18 },
+    { name: 'Mecánica', gx1: 19, gx2: 27 },
+  ];
+
+  // Se llama justo después de crear el almacén — no bloquea si algún estante falla (por ejemplo,
+  // si alguna vez la grilla por defecto cambiara de tamaño): el usuario igual puede agregarlos a mano.
+  const createDefaultRacks = async (warehouseId: number, styleId: number) => {
+    const levels = Math.min(3, getStyle(styleId)?.max_level ?? 3);
+    const rack = (name: string, lv: number, gx1: number, gx2: number, gz1: number, gz2: number) => rackService.createRack(projectId, warehouseId, {
+      name,
+      levels: lv,
+      direction: 0,
+      corner1_x: cubesToMeters(gx1),
+      corner1_z: cubesToMeters(gz1),
+      corner2_x: cubesToMeters(gx2),
+      corner2_z: cubesToMeters(gz2),
+    });
+    // Por categoría: el estante con la cabecera de color contra la pared del fondo, y delante 3
+    // tarimas en fila (2 cubos de ancho, 1 de separación) — ver isPalletName en WarehouseInteriorScene.
+    await Promise.allSettled(DEFAULT_RACK_CATEGORIES.flatMap((cat) => [
+      rack(cat.name, levels, cat.gx1, cat.gx2, 1, 2),
+      ...[0, 1, 2].map((i) => rack(`Tarima ${cat.name} ${i + 1}`, 1, cat.gx1 + i * 3, cat.gx1 + i * 3 + 2, 4, 5)),
+    ]));
+  };
+
   // Guarda posición/rotación/nombre actuales de un almacén YA creado contra el backend (PUT, reemplaza todo el registro).
   const persistHouseTransform = async (id: string) => {
     const numericId = Number(id);
@@ -195,6 +227,7 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
     const info = housesRef.current[tempId] ?? { styleId, nombre: getStyle(styleId)?.name ?? 'Almacén', footprint: WAREHOUSE_SIZES[placingSizeRef.current] };
     try {
       const created = await warehouseService.createWarehouse(projectId, buildWarehouseInput(info, transform));
+      await createDefaultRacks(created.warehouse_id, info.styleId);
       const realId = String(created.warehouse_id);
       sceneRef.current?.remapHouseId(tempId, realId);
       setHouses((prev) => {
@@ -340,13 +373,15 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
     setDraftFootprint(null);
   };
 
-  const startPlacingRack = () => {
+  // El tipo se elige ANTES de dibujar: las tarimas pueden ir pegadas y esa regla se valida al marcar las esquinas.
+  const startPlacingRack = (isPallet = false) => {
     setSelectedBayId(null);
     setPlacingRack(true);
     setDraftFootprint(null);
     setDraftLevels(1);
     setDraftDirection(0);
-    interiorSceneRef.current?.startPlacingBay();
+    setDraftIsPallet(isPallet);
+    interiorSceneRef.current?.startPlacingBay(isPallet);
   };
 
   const cancelPlacingRack = () => {
@@ -366,9 +401,16 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
     interiorSceneRef.current?.updateDraftDirection(direction);
   };
 
+  const changeDraftType = (isPallet: boolean) => {
+    setDraftIsPallet(isPallet);
+    interiorSceneRef.current?.updateDraftType(isPallet);
+  };
+
   const confirmNewRack = async () => {
     if (!draftFootprint || !interiorWarehouse || !projectId) return;
-    const tempName = `Estante ${Object.keys(racksRef.current).length + 1}`;
+    const kind = draftIsPallet ? 'Tarima' : 'Estante';
+    const sameKindCount = Object.values(racksRef.current).filter((r) => isPalletName(r.name) === draftIsPallet).length;
+    const tempName = `${kind} ${sameKindCount + 1}`;
     const draft = interiorSceneRef.current?.confirmDraft(tempName);
     if (!draft) return;
     setPlacingRack(false);
@@ -818,18 +860,32 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
             ) : view === 'interior' && placingRack && draftFootprint ? (
               <>
                 <p className="text-sm font-semibold text-gray-800 mb-1">Configurar estante</p>
-                <p className="text-xs text-gray-400 mb-3">Esquinas ya elegidas — definí niveles y qué lado queda accesible.</p>
-                <label className="block mb-3">
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wide">Niveles (máx. {maxLevel})</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={maxLevel}
-                    value={draftLevels}
-                    onChange={(e) => changeDraftLevels(parseInt(e.target.value, 10) || 1)}
-                    className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-                  />
-                </label>
+                <p className="text-xs text-gray-400 mb-3">Esquinas ya elegidas — definí el tipo, los niveles y qué lado queda accesible.</p>
+                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Tipo</span>
+                <div className="grid grid-cols-2 gap-2 mt-1 mb-3">
+                  {([false, true] as const).map((pallet) => (
+                    <button
+                      key={String(pallet)}
+                      onClick={() => changeDraftType(pallet)}
+                      className={`border rounded-lg py-2 text-sm font-medium transition-colors ${draftIsPallet === pallet ? 'border-[#0056b3] bg-blue-50 text-[#0056b3]' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      {pallet ? 'Tarima' : 'Estante'}
+                    </button>
+                  ))}
+                </div>
+                {!draftIsPallet && (
+                  <label className="block mb-3">
+                    <span className="text-[11px] text-gray-400 uppercase tracking-wide">Niveles (máx. {maxLevel})</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={maxLevel}
+                      value={draftLevels}
+                      onChange={(e) => changeDraftLevels(parseInt(e.target.value, 10) || 1)}
+                      className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
+                    />
+                  </label>
+                )}
                 <span className="text-[11px] text-gray-400 uppercase tracking-wide">Cara accesible</span>
                 <div className="grid grid-cols-2 gap-2 mt-1 mb-4">
                   <button
@@ -872,12 +928,20 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
               <>
                 <p className="text-sm font-semibold text-gray-800">{houses[interiorHouseId]?.nombre}</p>
                 <p className="text-xs text-gray-400 mt-1 mb-3">Clickeá un estante para entrar o quitarlo.</p>
-                <button
-                  onClick={startPlacingRack}
-                  className="w-full flex items-center justify-center gap-1.5 border border-dashed border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-600 hover:border-[#0056b3] hover:bg-blue-50/40 transition-colors mb-3"
-                >
-                  <Plus size={14} /> Nuevo estante
-                </button>
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <button
+                    onClick={() => startPlacingRack(false)}
+                    className="flex items-center justify-center gap-1.5 border border-dashed border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-600 hover:border-[#0056b3] hover:bg-blue-50/40 transition-colors"
+                  >
+                    <Plus size={14} /> Nuevo estante
+                  </button>
+                  <button
+                    onClick={() => startPlacingRack(true)}
+                    className="flex items-center justify-center gap-1.5 border border-dashed border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-600 hover:border-[#0056b3] hover:bg-blue-50/40 transition-colors"
+                  >
+                    <Plus size={14} /> Nueva tarima
+                  </button>
+                </div>
                 <div className="space-y-2">
                   {(interiorSceneRef.current?.getBayIds() ?? []).map((id) => {
                     const info = racks[id];

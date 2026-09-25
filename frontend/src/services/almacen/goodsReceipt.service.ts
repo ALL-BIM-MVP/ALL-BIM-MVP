@@ -1,44 +1,43 @@
 import { api } from '../api';
-import { GoodsReceipt, GoodsReceiptInput } from '../../types/almacen.types';
-
-// Mismo problema de siempre: total_quantity/quantity son NUMERIC Y todos los
-// *_id de acá son BIGINT — los dos tipos vuelven como string desde Postgres.
-function normalizeGoodsReceipt(g: any): GoodsReceipt {
-  return {
-    ...g,
-    goods_receipt_id: Number(g.goods_receipt_id),
-    items: g.items?.map((it: any) => ({
-      ...it,
-      goods_receipt_item_id: Number(it.goods_receipt_item_id),
-      goods_receipt_id: Number(it.goods_receipt_id),
-      product_id: Number(it.product_id),
-      total_quantity: Number(it.total_quantity),
-      locations: it.locations?.map((l: any) => ({
-        ...l,
-        goods_receipt_item_location_id: Number(l.goods_receipt_item_location_id),
-        goods_receipt_item_id: Number(l.goods_receipt_item_id),
-        bin_id: Number(l.bin_id),
-        quantity: Number(l.quantity),
-      })),
-    })),
-  };
-}
+import {
+  GoodsReceipt, GoodsReceiptCreateInput, GoodsReceiptEntryType, GoodsReceiptLinkOrderInput,
+  GoodsReceiptListItem, GoodsReceiptPatchInput,
+} from '../../types/almacen.types';
 
 export const goodsReceiptService = {
-  async getGoodsReceipts(projectId: number): Promise<GoodsReceipt[]> {
-    const rows = await api.get(`/api/projects/${projectId}/goods-receipts`);
-    return (rows as any[]).map(normalizeGoodsReceipt);
+  async getGoodsReceipts(projectId: number, filters: { supplierId?: number; purchaseOrderId?: string; entryType?: GoodsReceiptEntryType; search?: string } = {}): Promise<GoodsReceiptListItem[]> {
+    const params = new URLSearchParams();
+    if (filters.supplierId) params.set('supplier_id', String(filters.supplierId));
+    if (filters.purchaseOrderId) params.set('purchase_order_id', filters.purchaseOrderId);
+    if (filters.entryType) params.set('entry_type', filters.entryType);
+    if (filters.search?.trim()) params.set('search', filters.search.trim());
+    const qs = params.toString();
+    return api.get(`/api/projects/${projectId}/goods-receipts${qs ? `?${qs}` : ''}`);
   },
 
-  // Trae items + reparto por bin — el listado no.
-  async getGoodsReceiptById(projectId: number, goodsReceiptId: number): Promise<GoodsReceipt> {
-    const row = await api.get(`/api/projects/${projectId}/goods-receipts/${goodsReceiptId}`);
-    return normalizeGoodsReceipt(row);
+  // Trae items + reparto por bin + archivo — el listado no.
+  async getGoodsReceiptById(projectId: number, goodsReceiptId: string): Promise<GoodsReceipt> {
+    return api.get(`/api/projects/${projectId}/goods-receipts/${goodsReceiptId}`);
   },
 
-  // Sin PUT/DELETE — movimiento inmutable, se crea completo de una sola vez.
-  async createGoodsReceipt(projectId: number, data: GoodsReceiptInput): Promise<GoodsReceipt> {
-    const row = await api.post(`/api/projects/${projectId}/goods-receipts`, data);
-    return normalizeGoodsReceipt(row);
+  // Transacción única: cabecera + líneas + repartos + stock + Kardex de una. Sin DELETE — un
+  // error de cantidades/casillas se corrige con un ajuste (Fase 10), nunca reescribiendo este.
+  async createGoodsReceipt(projectId: number, data: GoodsReceiptCreateInput): Promise<GoodsReceipt> {
+    return api.post(`/api/projects/${projectId}/goods-receipts`, data);
+  },
+
+  // Corrige SOLO datos administrativos de la guía (serie/número/fecha) — nunca cantidades, productos ni casillas.
+  async patchGoodsReceipt(projectId: number, goodsReceiptId: string, data: GoodsReceiptPatchInput): Promise<GoodsReceipt> {
+    return api.patch(`/api/projects/${projectId}/goods-receipts/${goodsReceiptId}`, data);
+  },
+
+  // Vincula o reemplaza la orden de compra de un ingreso ya registrado — no toca el stock. Una
+  // entrada rápida pasa a normal.
+  async linkPurchaseOrder(projectId: number, goodsReceiptId: string, data: GoodsReceiptLinkOrderInput): Promise<GoodsReceipt> {
+    return api.put(`/api/projects/${projectId}/goods-receipts/${goodsReceiptId}/purchase-order`, data);
+  },
+
+  async setFile(projectId: number, goodsReceiptId: string, fileId: string | null): Promise<GoodsReceipt> {
+    return api.put(`/api/projects/${projectId}/goods-receipts/${goodsReceiptId}/file`, { file_id: fileId });
   },
 };

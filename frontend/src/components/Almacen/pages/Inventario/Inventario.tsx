@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { categoryService } from '../../../../services/almacen/category.service';
 import { productService } from '../../../../services/almacen/product.service';
-import { Category, Model3DFormat, Product } from '../../../../types/almacen.types';
+import { Category, Model3DAsset, Product, ProductHistoryResponse } from '../../../../types/almacen.types';
 import ModelPreviewModal from '../../components/ModelPreviewModal';
+import { trimNumeric } from '../../../../utils/numberFormat';
 
 const Field: React.FC<{
   label: string; value?: string; onChange?: (v: string) => void; type?: string; className?: string; placeholder?: string;
@@ -24,8 +25,6 @@ interface InventarioProps {
   projectId: number;
 }
 
-type EditModelChoice = 'keep' | 'remove' | 'upload';
-
 const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -34,27 +33,27 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
 
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [detailProduct, setDetailProduct] = useState<Product | null>(null);
-  const [previewFileId, setPreviewFileId] = useState<number | null>(null);
+  const [previewAssetId, setPreviewAssetId] = useState<number | null>(null);
+
+  const [history, setHistory] = useState<ProductHistoryResponse | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyFrom, setHistoryFrom] = useState('');
+  const [historyTo, setHistoryTo] = useState('');
 
   const [editName, setEditName] = useState('');
   const [editUnit, setEditUnit] = useState('');
-  const [editModelChoice, setEditModelChoice] = useState<EditModelChoice>('keep');
-  const [editModelPath, setEditModelPath] = useState('');
-  const [editModelFormat, setEditModelFormat] = useState<Model3DFormat>('glb');
-  const [editModelFileName, setEditModelFileName] = useState('');
-  const [uploadingEditModel, setUploadingEditModel] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Modelo 3D del producto en detalle — se asigna con endpoints propios, no forma parte de "Editar".
+  const [modelAssets, setModelAssets] = useState<Model3DAsset[]>([]);
+  const [pickedAssetId, setPickedAssetId] = useState<number | ''>('');
+  const [assigningModel, setAssigningModel] = useState(false);
 
   const [formCategoryId, setFormCategoryId] = useState<number | ''>('');
   const [formCode, setFormCode] = useState('');
   const [formBaseCode, setFormBaseCode] = useState('');
   const [formName, setFormName] = useState('');
   const [formUnit, setFormUnit] = useState('');
-  const [assignModel, setAssignModel] = useState(false);
-  const [formModelPath, setFormModelPath] = useState('');
-  const [formModelFormat, setFormModelFormat] = useState<Model3DFormat>('glb');
-  const [modelFileName, setModelFileName] = useState('');
-  const [uploadingModel, setUploadingModel] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const getCategory = (id: number | undefined) => categories.find((c) => c.category_id === id);
@@ -96,32 +95,14 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
     setFormBaseCode('');
     setFormName('');
     setFormUnit('');
-    setAssignModel(false);
-    setFormModelPath('');
-    setFormModelFormat('glb');
-    setModelFileName('');
   };
 
   const formCategory = getCategory(formCategoryId === '' ? undefined : formCategoryId);
 
-  const handleModelFile = async (file: File | null) => {
-    if (!file) return;
-    setUploadingModel(true);
-    try {
-      const { path, format } = await productService.uploadModel(projectId, file);
-      setFormModelPath(path);
-      setFormModelFormat(format);
-      setModelFileName(file.name);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo subir el modelo 3D.');
-    } finally {
-      setUploadingModel(false);
-    }
-  };
-
+  // Un producto siempre nace sin modelo 3D — se asigna después, desde su detalle (ver
+  // assignProductModel3D en product.service.ts y el panel "Modelo 3D" más abajo).
   const createProduct = async () => {
     if (!formCategoryId || !formCategory || !formName.trim() || !formUnit.trim()) return;
-    if (assignModel && !formModelPath.trim()) return;
     setSaving(true);
     try {
       await productService.createProduct(projectId, {
@@ -130,9 +111,6 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
         base_product_code: formCategory.type === 'relacional' ? formBaseCode.trim() : undefined,
         name: formName.trim(),
         unit: formUnit.trim(),
-        model_3d_path: assignModel ? formModelPath.trim() : undefined,
-        model_3d_format: assignModel ? formModelFormat : undefined,
-        model_3d_source: assignModel ? 'subido' : undefined,
       });
       resetForm();
       loadProducts(filterCategoryId === '' ? undefined : filterCategoryId);
@@ -150,59 +128,89 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
         setDetailProduct(p);
         setEditName(p.name);
         setEditUnit(p.unit);
-        setEditModelChoice('keep');
-        setEditModelPath('');
-        setEditModelFormat('glb');
-        setEditModelFileName('');
+        setPickedAssetId('');
+        setHistoryFrom('');
+        setHistoryTo('');
         setView('detail');
+        loadHistory(id);
       })
       .catch((err) => window.alert(err instanceof Error ? err.message : 'No se pudo abrir el producto.'));
+    productService.listModel3DAssets(projectId).then(setModelAssets).catch(() => setModelAssets([]));
+  };
+
+  const loadHistory = (productId: number, filters: { from?: string; to?: string } = {}) => {
+    setLoadingHistory(true);
+    productService
+      .getProductHistory(projectId, productId, filters)
+      .then(setHistory)
+      .catch(() => setHistory(null))
+      .finally(() => setLoadingHistory(false));
   };
 
   const backToList = () => {
     setView('list');
     setDetailProduct(null);
+    setHistory(null);
     loadProducts(filterCategoryId === '' ? undefined : filterCategoryId);
-  };
-
-  const handleEditModelFile = async (file: File | null) => {
-    if (!file) return;
-    setUploadingEditModel(true);
-    try {
-      const { path, format } = await productService.uploadModel(projectId, file);
-      setEditModelPath(path);
-      setEditModelFormat(format);
-      setEditModelFileName(file.name);
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo subir el modelo 3D.');
-    } finally {
-      setUploadingEditModel(false);
-    }
   };
 
   const saveEdit = async () => {
     if (!detailProduct || !editName.trim() || !editUnit.trim()) return;
-    if (editModelChoice === 'upload' && !editModelPath.trim()) {
-      window.alert('Subí el archivo del modelo antes de guardar.');
-      return;
-    }
     setSavingEdit(true);
     try {
       const updated = await productService.updateProduct(projectId, detailProduct.product_id, {
         name: editName.trim(),
         unit: editUnit.trim(),
-        model_3d_path: editModelChoice === 'remove' ? null : editModelChoice === 'upload' ? editModelPath : detailProduct.model_3d_path,
-        model_3d_format: editModelChoice === 'remove' ? null : editModelChoice === 'upload' ? editModelFormat : detailProduct.model_3d_format,
-        model_3d_source: editModelChoice === 'remove' ? null : editModelChoice === 'upload' ? 'subido' : detailProduct.model_3d_source,
       });
       setDetailProduct((prev) => (prev ? { ...prev, ...updated } : updated));
-      setEditModelChoice('keep');
-      setEditModelPath('');
-      setEditModelFileName('');
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'No se pudo guardar el producto.');
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  // Subir un archivo NUEVO y asignarlo son dos pasos del backend (ver product.service.ts) — acá se
+  // encadenan en una sola acción para no exigirle al usuario un "Guardar" aparte.
+  const uploadAndAssignModel = async (file: File | null) => {
+    if (!file || !detailProduct) return;
+    setAssigningModel(true);
+    try {
+      const asset = await productService.uploadModel3DAsset(file);
+      const updated = await productService.assignProductModel3D(projectId, detailProduct.product_id, asset.model_3d_asset_id);
+      setDetailProduct((prev) => (prev ? { ...prev, ...updated } : updated));
+      setModelAssets((prev) => [asset, ...prev]);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo asignar el modelo 3D.');
+    } finally {
+      setAssigningModel(false);
+    }
+  };
+
+  const assignExistingModel = async () => {
+    if (!detailProduct || !pickedAssetId) return;
+    setAssigningModel(true);
+    try {
+      const updated = await productService.assignProductModel3D(projectId, detailProduct.product_id, Number(pickedAssetId));
+      setDetailProduct((prev) => (prev ? { ...prev, ...updated } : updated));
+      setPickedAssetId('');
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo asignar el modelo 3D.');
+    } finally {
+      setAssigningModel(false);
+    }
+  };
+
+  const removeModel = async () => {
+    if (!detailProduct) return;
+    setAssigningModel(true);
+    try {
+      const updated = await productService.assignProductModel3D(projectId, detailProduct.product_id, null);
+      setDetailProduct((prev) => (prev ? { ...prev, ...updated } : updated));
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo quitar el modelo 3D.');
+    } finally {
+      setAssigningModel(false);
     }
   };
 
@@ -219,8 +227,7 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
 
   if (view === 'detail' && detailProduct) {
     const category = getCategory(detailProduct.category_id);
-    const fileIdMatch = detailProduct.model_3d_path?.match(/\/api\/files\/(\d+)\/content/);
-    const previewableFileId = fileIdMatch ? parseInt(fileIdMatch[1], 10) : null;
+    const availableAssets = modelAssets.filter((a) => a.model_3d_asset_id !== detailProduct.model_3d_asset_id);
 
     return (
       <div className="h-full overflow-y-auto p-6 @container">
@@ -266,28 +273,169 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
                 <p className="text-sm text-gray-400 italic">Sin relacionados.</p>
               )}
             </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+              <p className="text-sm font-semibold text-gray-700 mb-1">Historial</p>
+              <p className="text-xs text-gray-400 mb-3">
+                No maneja lotes: no se sabe qué unidades salieron de qué ingreso puntual — solo el recorrido de compras y los movimientos de stock.
+              </p>
+
+              <div className="flex items-end gap-2 mb-4">
+                <Field label="Desde" type="date" value={historyFrom} onChange={setHistoryFrom} />
+                <Field label="Hasta" type="date" value={historyTo} onChange={setHistoryTo} />
+                <button
+                  onClick={() => loadHistory(detailProduct.product_id, { from: historyFrom || undefined, to: historyTo || undefined })}
+                  className="border border-gray-200 rounded-lg px-4 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
+                >
+                  Filtrar
+                </button>
+              </div>
+
+              {loadingHistory && <p className="text-sm text-gray-400">Cargando...</p>}
+
+              {history && (
+                <>
+                  <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div className="bg-gray-50 rounded-lg px-2 py-2 text-center">
+                      <p className="text-sm font-bold text-green-600">+{trimNumeric(history.totals.entered)}</p>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">Entrado</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg px-2 py-2 text-center">
+                      <p className="text-sm font-bold text-red-500">-{trimNumeric(history.totals.exited)}</p>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">Salido</p>
+                    </div>
+                    <div className="bg-gray-50 rounded-lg px-2 py-2 text-center">
+                      <p className="text-sm font-bold text-gray-800">{trimNumeric(history.totals.net)}</p>
+                      <p className="text-[10px] text-gray-400 uppercase tracking-wide">Neto</p>
+                    </div>
+                  </div>
+
+                  {history.stock.by_bin.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-1.5">Stock por casilla (actual)</p>
+                      {history.stock.by_bin.map((b) => (
+                        <div key={b.bin_id} className="flex items-center justify-between text-sm text-gray-600 py-0.5">
+                          <span>{b.label}</span>
+                          <span className="font-semibold text-gray-800">{trimNumeric(b.quantity)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-1.5">Línea de tiempo</p>
+                  {history.items.length === 0 && <p className="text-sm text-gray-300 italic">Sin movimientos en este rango.</p>}
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {history.items.map((item, i) => {
+                      const documents = item.type === 'entrada'
+                        ? [...item.documents.requisitions, ...item.documents.quotations, ...item.documents.purchase_orders, ...item.documents.invoices]
+                        : [];
+                      return (
+                        <div key={i} className="border-b border-gray-50 pb-2 last:border-0">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-xs font-semibold ${item.type === 'entrada' ? 'text-green-600' : 'text-red-500'}`}>
+                              {item.type === 'entrada' ? (item.status === 'en_curso' ? 'Entrada (en curso)' : 'Entrada') : 'Salida'}
+                              {item.voided && <span className="text-gray-400 font-normal"> · anulado</span>}
+                            </span>
+                            <span className="text-xs text-gray-400">{item.date}</span>
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {item.label}
+                            {item.quantity_effective !== null && ` · ${trimNumeric(item.quantity_effective)}`}
+                          </p>
+                          {item.type === 'entrada' && item.receipt?.supplier && (
+                            <p className="text-xs text-gray-400">{item.receipt.supplier.name}</p>
+                          )}
+                          {item.type === 'salida' && (
+                            <p className="text-xs text-gray-400">
+                              Destino: {[item.issue.destination_sector, item.issue.destination_level, item.issue.destination_block].filter(Boolean).join(' / ')} · Retiró: {item.issue.recipient_name}
+                            </p>
+                          )}
+                          {documents.length > 0 && (
+                            <p className="text-xs text-gray-400">{documents.map((d) => d.label).join(' → ')}</p>
+                          )}
+                          {item.locations.map((loc) => (
+                            <p key={loc.bin_id} className="text-xs text-gray-400">
+                              {loc.label} · {trimNumeric(loc.quantity)}{loc.balance_after !== null && ` · saldo ${trimNumeric(loc.balance_after)}`}
+                            </p>
+                          ))}
+                          {item.adjustments.map((adj) => (
+                            <p key={adj.inventory_adjustment_id} className="text-xs text-amber-600">
+                              {adj.kind === 'anulacion' ? 'Anulación' : 'Corrección'}: {adj.reason}
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div className="w-full @xl:w-96 flex-shrink-0 space-y-4">
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
               <p className="text-sm font-semibold text-gray-700 mb-2">Modelo 3D</p>
-              {detailProduct.model_3d_path ? (
+              {detailProduct.model_3d_asset_id !== null ? (
                 <>
                   <p className="text-sm text-gray-600 break-words">
-                    Asignado ({detailProduct.model_3d_source ?? '—'}) — <span className="font-mono text-xs">{detailProduct.model_3d_path}</span>
+                    {detailProduct.model_3d_name} ({detailProduct.model_3d_format})
                   </p>
-                  {previewableFileId && (
+                  <div className="flex gap-2 mt-2">
                     <button
-                      onClick={() => setPreviewFileId(previewableFileId)}
-                      className="mt-2 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                      onClick={() => setPreviewAssetId(detailProduct.model_3d_asset_id)}
+                      className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
                     >
                       Ver modelo 3D
                     </button>
-                  )}
+                    <button
+                      onClick={removeModel}
+                      disabled={assigningModel}
+                      className="border border-red-200 text-red-500 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Quitar
+                    </button>
+                  </div>
                 </>
               ) : (
-                <p className="text-sm text-gray-400 italic">Sin modelo 3D asignado.</p>
+                <p className="text-sm text-gray-400 italic mb-2">Sin modelo 3D asignado.</p>
               )}
+
+              <div className="mt-3 pt-3 border-t border-gray-100">
+                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Subir un archivo nuevo (.glb / .gltf)</span>
+                <input
+                  type="file"
+                  accept=".glb,.gltf"
+                  onChange={(e) => uploadAndAssignModel(e.target.files?.[0] ?? null)}
+                  disabled={assigningModel}
+                  className="block w-full mt-1 text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-[#0056b3] hover:file:bg-blue-100"
+                />
+              </div>
+
+              {availableAssets.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <span className="text-[11px] text-gray-400 uppercase tracking-wide">O reusar uno ya subido</span>
+                  <div className="flex gap-2 mt-1">
+                    <select
+                      value={pickedAssetId}
+                      onChange={(e) => setPickedAssetId(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                      className="flex-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
+                    >
+                      <option value="">Elegir...</option>
+                      {availableAssets.map((a) => (
+                        <option key={a.model_3d_asset_id} value={a.model_3d_asset_id}>{a.name} ({a.format})</option>
+                      ))}
+                    </select>
+                    <button
+                      onClick={assignExistingModel}
+                      disabled={!pickedAssetId || assigningModel}
+                      className="bg-[#0056b3] text-white rounded-lg px-4 py-1.5 text-sm font-semibold hover:bg-[#004494] disabled:opacity-50"
+                    >
+                      Asignar
+                    </button>
+                  </div>
+                </div>
+              )}
+              {assigningModel && <p className="text-xs text-gray-400 mt-2">Guardando...</p>}
             </div>
 
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
@@ -296,35 +444,9 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
                 <Field label="Nombre" value={editName} onChange={setEditName} />
                 <Field label="Unidad" value={editUnit} onChange={setEditUnit} />
               </div>
-              <label className="block mb-2">
-                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Modelo 3D (opcional)</span>
-                <select
-                  value={editModelChoice}
-                  onChange={(e) => setEditModelChoice(e.target.value as EditModelChoice)}
-                  className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-                >
-                  <option value="keep">Mantener el actual</option>
-                  <option value="remove">Quitar modelo</option>
-                  <option value="upload">Subir nuevo archivo</option>
-                </select>
-              </label>
-              {editModelChoice === 'upload' && (
-                <div className="mb-3">
-                  <input
-                    type="file"
-                    accept=".glb,.gltf"
-                    onChange={(e) => handleEditModelFile(e.target.files?.[0] ?? null)}
-                    className="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-[#0056b3] hover:file:bg-blue-100"
-                  />
-                  {uploadingEditModel && <p className="text-xs text-gray-400 mt-1">Subiendo...</p>}
-                  {!uploadingEditModel && editModelFileName && (
-                    <p className="text-xs text-[#0056b3] mt-1">{editModelFileName} ({editModelFormat}) — listo.</p>
-                  )}
-                </div>
-              )}
               <button
                 onClick={saveEdit}
-                disabled={savingEdit || uploadingEditModel}
+                disabled={savingEdit}
                 className="w-full bg-[#0056b3] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50"
               >
                 {savingEdit ? 'Guardando...' : 'Guardar cambios'}
@@ -333,7 +455,9 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
           </div>
         </div>
 
-        {previewFileId !== null && <ModelPreviewModal fileId={previewFileId} onClose={() => setPreviewFileId(null)} />}
+        {previewAssetId !== null && (
+          <ModelPreviewModal projectId={projectId} assetId={previewAssetId} onClose={() => setPreviewAssetId(null)} />
+        )}
       </div>
     );
   }
@@ -429,29 +553,11 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
           <p className="text-[11px] text-gray-400 mb-3">El código final se arma solo: {formCategory.prefix}-código.</p>
         )}
 
-        <label className="flex items-center gap-2 text-sm text-gray-600 mb-3">
-          <input type="checkbox" checked={assignModel} onChange={(e) => setAssignModel(e.target.checked)} className="accent-[#0056b3]" />
-          Asignar modelo 3D
-        </label>
-        {assignModel && (
-          <div className="mb-3">
-            <span className="text-[11px] text-gray-400 uppercase tracking-wide">Archivo del modelo (.glb / .gltf)</span>
-            <input
-              type="file"
-              accept=".glb,.gltf"
-              onChange={(e) => handleModelFile(e.target.files?.[0] ?? null)}
-              className="block w-full mt-1 text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-[#0056b3] hover:file:bg-blue-100"
-            />
-            {uploadingModel && <p className="text-xs text-gray-400 mt-1">Subiendo...</p>}
-            {!uploadingModel && modelFileName && (
-              <p className="text-xs text-[#0056b3] mt-1">{modelFileName} ({formModelFormat}) — listo.</p>
-            )}
-          </div>
-        )}
+        <p className="text-xs text-gray-400 mb-3">El modelo 3D se asigna después de crear el producto, desde su detalle.</p>
 
         <button
           onClick={createProduct}
-          disabled={saving || uploadingModel}
+          disabled={saving}
           className="flex items-center gap-1.5 bg-[#0056b3] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50"
         >
           <Plus size={15} /> Crear producto

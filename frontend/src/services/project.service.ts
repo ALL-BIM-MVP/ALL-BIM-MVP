@@ -1,5 +1,5 @@
 import { api, BASE_URL } from './api';
-import { Project, NewProjectData, ProjectScope, ProjectFile } from '../types/project.types';
+import { Project, NewProjectData, ProjectScope, ProjectFile, AlmacenSummary, ModuleCode } from '../types/project.types';
 
 export const projectService = {
   async getProjects(scope: ProjectScope = 'mine'): Promise<Project[]> {
@@ -35,6 +35,16 @@ export const projectService = {
 
   async deleteProject(id: number): Promise<void> {
     await api.delete(`/api/projects/${id}`);
+  },
+
+  // Conteos de Almacén del proyecto — hay que vaciarlo antes de poder eliminarlo.
+  async getAlmacenSummary(projectId: number): Promise<AlmacenSummary> {
+    return api.get(`/api/projects/${projectId}/almacen/summary`);
+  },
+
+  // Borra todo el contenido de Almacén del proyecto. Irreversible.
+  async emptyAlmacenContent(projectId: number): Promise<Omit<AlmacenSummary, 'is_empty'>> {
+    return api.delete(`/api/projects/${projectId}/almacen/content`);
   },
 
   async uploadIFC(projectId: number, file: File): Promise<Project> {
@@ -73,9 +83,12 @@ export const projectService = {
   // Fase 3: onlyCurrent=true reduce los IFC de la lista a solo la
   // versión vigente de cada documento (sin el param, se sigue viendo
   // TODO el historial — comportamiento de siempre, no rompe nada).
-  async getProjectFiles(projectId: number, onlyCurrent?: boolean): Promise<ProjectFile[]> {
-    const qs = onlyCurrent ? '?only_current=true' : '';
-    const response = await api.get(`/api/projects/${projectId}/files${qs}`);
+  async getProjectFiles(projectId: number, onlyCurrent?: boolean, moduleCode?: ModuleCode): Promise<ProjectFile[]> {
+    const params = new URLSearchParams();
+    if (onlyCurrent) params.set('only_current', 'true');
+    if (moduleCode) params.set('module_code', moduleCode);
+    const qs = params.toString();
+    const response = await api.get(`/api/projects/${projectId}/files${qs ? `?${qs}` : ''}`);
     return response;
   },
 
@@ -83,9 +96,11 @@ export const projectService = {
     await api.delete(`/api/projects/${projectId}/files/${fileId}`);
   },
 
-  async uploadFile(projectId: number, file: File): Promise<ProjectFile> {
+  // module_code es obligatorio para el backend: dice a qué módulo pertenece este archivo.
+  async uploadFile(projectId: number, file: File, moduleCode: ModuleCode): Promise<ProjectFile> {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('module_code', moduleCode);
     const response = await api.postFormData(`/api/projects/${projectId}/files`, formData);
     return response;
   },
