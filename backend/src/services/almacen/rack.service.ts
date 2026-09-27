@@ -16,19 +16,9 @@ import { insertBinsForRack, listBinsForRack } from "./bin.service.js";
 import type { WarehouseIdParam } from "../../schemas/almacen/warehouse.schema.js";
 import type { CreateRackBody, RackIdParam, UpdateRackBody } from "../../schemas/almacen/rack.schema.js";
 import type { WarehouseRow } from "../../models/almacen/warehouse.models.js";
-import type { RackFull, RackRow, RackWithBins } from "../../models/almacen/rack.models.js";
+import type { RackRow, RackWithBins } from "../../models/almacen/rack.models.js";
 
 const UNIQUE_VIOLATION = "23505";
-
-// Metros por cubo — MISMO valor que usa el prototipo
-// (prueba-BIM/ALMACEN-BIM/index.html y modulo.html, `var CUBE_SIZE`).
-// Si el día de mañana el frontend real cambia este número, este
-// archivo tiene que cambiar junto (no hay una fuente única compartida
-// todavía).
-const CUBE_SIZE = 1.3;
-const EPS = 1e-6;
-
-const isCloseToInteger = (n: number): boolean => Math.abs(n - Math.round(n)) < EPS;
 
 interface RackGeometry {
     bx: number;
@@ -37,14 +27,16 @@ interface RackGeometry {
     depth: number;
 }
 
-// Traduce las 2 esquinas reales (metros, locales al warehouse) a
-// índices de grilla — mismo criterio que `warehouses`: sin bx/bz ni
-// width/depth como columnas, se derivan siempre de acá (ver diseño
-// 1.3). Tira INVALID_CORNERS si algo no cae justo en la grilla de
-// cubos, y INVALID_DEPTH si la profundidad resultante no es 1 o 2 —
-// nunca deja pasar un rack geométricamente imposible.
+// Valida que las 2 esquinas (índices ENTEROS de grilla, locales al warehouse) sean
+// consistentes con `bays`/`depth` (datos propios, ver database/schema.sql) y devuelve
+// la posición de anclaje (bx, bz) — nunca convierte nada a metros ni depende de ningún
+// tamaño de cubo: el backend no necesita saber qué tan grande es un estante real, solo
+// dónde va y cuántas bahías/niveles/profundidad tiene. `bays` SIEMPRE corre a lo largo
+// de X y `depth` a lo largo de Z (un rack no rota dentro de su warehouse — mismo
+// criterio que ya usaba el diseño anterior). Tira INVALID_CORNERS si las esquinas
+// coinciden en algún eje, o si su diferencia no coincide EXACTO con `bays`/`depth`.
 const resolveRackGeometry = (
-    corner1_x: number, corner1_z: number, corner2_x: number, corner2_z: number
+    corner1_x: number, corner1_z: number, corner2_x: number, corner2_z: number, bays: number, depth: number
 ): RackGeometry => {
     const minX = Math.min(corner1_x, corner2_x);
     const maxX = Math.max(corner1_x, corner2_x);
@@ -52,20 +44,9 @@ const resolveRackGeometry = (
     const maxZ = Math.max(corner1_z, corner2_z);
 
     if (minX === maxX || minZ === maxZ) throw new AppError(RACK_ERRORS.INVALID_CORNERS);
+    if (maxX - minX !== bays || maxZ - minZ !== depth) throw new AppError(RACK_ERRORS.INVALID_CORNERS);
 
-    const bxRaw = minX / CUBE_SIZE;
-    const bzRaw = minZ / CUBE_SIZE;
-    const widthRaw = (maxX - minX) / CUBE_SIZE;
-    const depthRaw = (maxZ - minZ) / CUBE_SIZE;
-
-    if (![bxRaw, bzRaw, widthRaw, depthRaw].every(isCloseToInteger)) {
-        throw new AppError(RACK_ERRORS.INVALID_CORNERS);
-    }
-
-    const depth = Math.round(depthRaw);
-    if (depth !== 1 && depth !== 2) throw new AppError(RACK_ERRORS.INVALID_DEPTH);
-
-    return { bx: Math.round(bxRaw), bz: Math.round(bzRaw), width: Math.round(widthRaw), depth };
+    return { bx: minX, bz: minZ, width: bays, depth };
 };
 
 export const getRackRowOrThrow = async (
@@ -80,11 +61,6 @@ export const getRackRowOrThrow = async (
     return rack;
 };
 
-const toRackFull = (row: RackRow): RackFull => {
-    const geom = resolveRackGeometry(row.corner1_x, row.corner1_z, row.corner2_x, row.corner2_z);
-    return { ...row, width: geom.width, depth: geom.depth };
-};
-
 // 1 cubo de pasillo obligatorio contra CUALQUIER otro rack activo del
 // mismo warehouse — mismo algoritmo que ya usa el prototipo
 // (prueba-BIM/ALMACEN-BIM/index.html, validarColocacionEstante): se
@@ -93,15 +69,15 @@ const toRackFull = (row: RackRow): RackFull => {
 const assertClearance = async (
     client: PoolClient, warehouseId: number, candidate: RackGeometry
 ): Promise<void> => {
-    const { rows } = await client.query<Pick<RackRow, "corner1_x" | "corner1_z" | "corner2_x" | "corner2_z">>(
-        `SELECT corner1_x, corner1_z, corner2_x, corner2_z FROM racks
+    const { rows } = await client.query<Pick<RackRow, "corner1_x" | "corner1_z" | "corner2_x" | "corner2_z" | "bays" | "depth">>(
+        `SELECT corner1_x, corner1_z, corner2_x, corner2_z, bays, depth FROM racks
         WHERE warehouse_id = $1 AND deleted_at IS NULL`,
         [warehouseId]
     );
 
     const buffer = 1;
     for (const row of rows) {
-        const g = resolveRackGeometry(row.corner1_x, row.corner1_z, row.corner2_x, row.corner2_z);
+        const g = resolveRackGeometry(row.corner1_x, row.corner1_z, row.corner2_x, row.corner2_z, row.bays, row.depth);
         const overlapX = candidate.bx < g.bx + g.width + buffer && candidate.bx + candidate.width + buffer > g.bx;
         const overlapZ = candidate.bz < g.bz + g.depth + buffer && candidate.bz + candidate.depth + buffer > g.bz;
         if (overlapX && overlapZ) throw new AppError(RACK_ERRORS.NO_CLEARANCE);
@@ -110,7 +86,7 @@ const assertClearance = async (
 
 export const listRacksService = async (
     user: DecodedToken, { projectId, warehouseId }: WarehouseIdParam
-): Promise<RackFull[]> => {
+): Promise<RackRow[]> => {
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "view");
     await getWarehouseRowOrThrow(projectId, warehouseId);
 
@@ -118,7 +94,7 @@ export const listRacksService = async (
         `SELECT * FROM racks WHERE warehouse_id = $1 AND deleted_at IS NULL ORDER BY name`,
         [warehouseId]
     );
-    return rows.map(toRackFull);
+    return rows;
 };
 
 export const getRackByIdService = async (
@@ -129,7 +105,7 @@ export const getRackByIdService = async (
     const rack = await getRackRowOrThrow(pool, warehouseId, rackId);
 
     const bins = await listBinsForRack(rackId, projectId);
-    return { ...toRackFull(rack), bins };
+    return { ...rack, bins };
 };
 
 export const createRackService = async (
@@ -146,7 +122,7 @@ export const createRackService = async (
     const warehouse = warehouseResult.rows[0];
     if (!warehouse) throw new AppError(WAREHOUSE_ERRORS.WAREHOUSE_NOT_FOUND);
 
-    const geom = resolveRackGeometry(body.corner1_x, body.corner1_z, body.corner2_x, body.corner2_z);
+    const geom = resolveRackGeometry(body.corner1_x, body.corner1_z, body.corner2_x, body.corner2_z, body.bays, body.depth);
 
     if (geom.bx < 0 || geom.bz < 0 || geom.bx + geom.width > warehouse.grid_width || geom.bz + geom.depth > warehouse.grid_depth) {
         throw new AppError(RACK_ERRORS.OUT_OF_GRID);
@@ -180,17 +156,17 @@ export const createRackService = async (
 
         const inserted = await client.query<{ rack_id: number }>(
             `INSERT INTO racks
-                (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, levels, direction, created_by)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, bays, depth, levels, direction, created_by)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
             RETURNING rack_id`,
             [
                 warehouseId, body.name, body.corner1_x, body.corner1_z, body.corner2_x, body.corner2_z,
-                body.levels, body.direction, user.user_id,
+                body.bays, body.depth, body.levels, body.direction, user.user_id,
             ]
         );
         const rackId = inserted.rows[0]!.rack_id;
 
-        await insertBinsForRack(client, rackId, body.name, geom.width, body.levels, geom.depth);
+        await insertBinsForRack(client, rackId, body.name, body.bays, body.levels, body.depth);
 
         await client.query("COMMIT");
         return await getRackByIdService(user, { projectId, warehouseId, rackId });
@@ -211,7 +187,7 @@ export const createRackService = async (
 // de alcance de esta fase (ver schemas/almacen/rack.schema.ts).
 export const updateRackService = async (
     user: DecodedToken, { projectId, warehouseId, rackId }: RackIdParam, body: UpdateRackBody
-): Promise<RackFull> => {
+): Promise<RackRow> => {
     await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "process");
     await getWarehouseRowOrThrow(projectId, warehouseId);
 
@@ -224,7 +200,7 @@ export const updateRackService = async (
         );
         const rack = rows[0];
         if (!rack) throw new AppError(RACK_ERRORS.RACK_NOT_FOUND);
-        return toRackFull(rack);
+        return rack;
     } catch (error) {
         if (error instanceof AppError) throw error;
         const code = (error as { code?: string }).code;

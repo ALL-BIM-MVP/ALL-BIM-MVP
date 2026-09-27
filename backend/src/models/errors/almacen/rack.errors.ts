@@ -22,15 +22,7 @@ export const RACK_ERRORS = {
         statusCode: 400,
         response: {
             code: "RACK_INVALID_CORNERS",
-            message: "Las esquinas del estante tienen que caer justo sobre la grilla de cubos (múltiplos exactos del tamaño de cubo) y no pueden coincidir en X o en Z."
-        }
-    },
-
-    INVALID_DEPTH: {
-        statusCode: 400,
-        response: {
-            code: "RACK_INVALID_DEPTH",
-            message: "La profundidad de un estante (corner2_z - corner1_z, en cubos) tiene que ser exactamente 1 o 2."
+            message: "Las esquinas del estante no pueden coincidir en X o en Z, y su diferencia tiene que ser exactamente igual a bays (en X) y a depth (en Z)."
         }
     },
 

@@ -79,8 +79,11 @@ Authorization: Bearer {{accessToken}}
 ### =====================================================================
 ### 2. UBICACIONES: almacén → estante → casilla
 ### =====================================================================
-# Las medidas van en metros; 1 cubo = 1.3 m. El almacén es una grilla de
-# cubos; los estantes ocupan 1 o 2 cubos de profundidad.
+# El footprint del almacén (corner1/corner2) va en metros reales; su grilla interior
+# (grid_width/grid_depth) es aparte, en celdas. Los estantes ya NO usan metros: sus
+# corner1/corner2 son índices ENTEROS de esa grilla (posterior a la v1, 2026-09-26 —
+# antes se derivaban dividiendo por un tamaño de cubo fijo del sistema); bays/depth son
+# datos directos. Un estante ocupa 1 o 2 celdas de profundidad (depth).
 
 ### 2.1 Crear almacén (13 x 13 m = grilla de 10 x 10 cubos)
 # @name warehouse
@@ -124,7 +127,7 @@ Content-Type: application/json
   "grid_depth": 10
 }
 
-### 2.4 Crear estante: 2 cubos de ancho x 1 de fondo, 2 niveles. Genera sus casillas solo.
+### 2.4 Crear estante: 2 bahías x 1 de fondo, 2 niveles. Genera sus casillas solo.
 # direction: 0 o 1 (hacia dónde mira el estante)
 # @name rack
 POST {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks
@@ -133,8 +136,9 @@ Content-Type: application/json
 
 {
   "name": "Estante A",
+  "bays": 2, "depth": 1,
   "corner1_x": 0, "corner1_z": 0,
-  "corner2_x": 2.6, "corner2_z": 1.3,
+  "corner2_x": 2, "corner2_z": 1,
   "levels": 2,
   "direction": 0
 }
