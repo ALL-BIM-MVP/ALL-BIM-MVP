@@ -1282,6 +1282,16 @@ Content-Type: application/json
   ]
 }
 
+### 8B.2b Lo mismo que 8B.2, pero con el atajo de traspaso (2026-09-26, B11) — más simple que armar las 2 líneas
+POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}/transfer
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Diez bolsas se guardaron en la casilla equivocada",
+  "goods_receipt_item_id": {{receiptItemId}}, "from_bin_id": {{binId}}, "to_bin_id": {{binId2}}, "quantity": 10
+}
+
 ### 8B.3 Ver cómo queda el ingreso: lo registrado no cambia; lo efectivo sí
 GET {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{receiptId}}
 Authorization: Bearer {{accessToken}}
@@ -1310,6 +1320,9 @@ Authorization: Bearer {{accessToken}}
 
 ### 8B.6 ANULAR un ingreso registrado por error (revierte su stock y lo marca anulado)
 # Es el ingreso "normal" con la orden que se vinculó y corrigió en 7.4 a 7.6.
+# Decisión B13 (2026-09-26): si parte de lo que este ingreso puso en una casilla YA SALIÓ con un vale u
+# otro movimiento, esto se rechaza COMPLETO (no hay anulación parcial) con 409
+# INVENTORY_ADJUSTMENT_CANNOT_VOID_ALREADY_CONSUMED — corregir/anular primero lo que sacó ese material.
 POST {{baseUrl}}/projects/{{projectId}}/goods-receipts/{{pendingReceiptId}}/void
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json

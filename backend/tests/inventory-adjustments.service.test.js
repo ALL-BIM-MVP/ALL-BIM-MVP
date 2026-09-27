@@ -268,7 +268,8 @@ test("el stock nunca queda negativo: si el material ya salió, no se puede bajar
     assert.equal(await binStock(binA, productId), 10);
     const before = [await stockOf(productId), (await movementsOf(productId)).length];
     await assert.rejects(correct(S.rc1, [[item, binA, -30]]), codeOf("INSUFFICIENT_STOCK"), "bajar 30 en A dejaría la casilla en negativo");
-    await assert.rejects(voidReceipt(S.rc1), codeOf("INSUFFICIENT_STOCK"), "no se anula un ingreso cuyo material ya salió");
+    // Decisión B13 (2026-09-26): no se anula nada si parte ya salió — aviso explícito, no el genérico de arriba.
+    await assert.rejects(voidReceipt(S.rc1), codeOf("INVENTORY_ADJUSTMENT_CANNOT_VOID_ALREADY_CONSUMED"), "no se anula un ingreso cuyo material ya salió");
     assert.equal((await rcDetail(S.rc1)).voided, false);
     assert.deepEqual([await stockOf(productId), (await movementsOf(productId)).length], before, "sin cambios");
     await assertStockInvariant("con el material fuera");

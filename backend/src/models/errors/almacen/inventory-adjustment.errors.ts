@@ -46,4 +46,17 @@ export const INVENTORY_ADJUSTMENT_ERRORS = {
         }
     },
 
+    // Decisión B13 (2026-09-26, ver docs/almacen-ingreso-productos/09-roadmap-correcciones-2026-09-26.md):
+    // por lógica, no se anula nada si parte ya salió del almacén — sería registrar una inconsistencia
+    // entre lo guardado y lo físico. No hay anulación parcial: todo o nada, con este aviso explícito
+    // en vez del genérico INSUFFICIENT_STOCK (que está pensado para cuando se intenta SACAR más de lo
+    // que hay, no para esto).
+    CANNOT_VOID_ALREADY_CONSUMED: {
+        statusCode: 409,
+        response: {
+            code: "INVENTORY_ADJUSTMENT_CANNOT_VOID_ALREADY_CONSUMED",
+            message: "No se puede anular: parte de lo que este documento puso en una casilla ya salió del almacén con un movimiento posterior (un vale u otro ajuste). Corrige o anula primero esos movimientos antes de volver a intentarlo."
+        }
+    },
+
 } satisfies Record<string, ErrorFormat>;

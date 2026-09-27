@@ -20,7 +20,8 @@ import { applyStockMovement } from "./inventory-movement.service.js";
 import { ADJUSTMENT_DOCS } from "./adjustment-summary.service.js";
 import type { ProjectIdParam } from "../../schemas/projects.schema.js";
 import type {
-    AdjustmentIdParam, CorrectGoodsIssueBody, CorrectGoodsReceiptBody, ListAdjustmentsQuery, VoidDocumentBody,
+    AdjustmentIdParam, CorrectGoodsIssueBody, CorrectGoodsReceiptBody, ListAdjustmentsQuery,
+    TransferGoodsIssueBody, TransferGoodsReceiptBody, VoidDocumentBody,
 } from "../../schemas/almacen/inventory-adjustment.schema.js";
 import type { AdjustedDocumentType, AdjustmentKind, InventoryAdjustment, InventoryAdjustmentItem } from "../../models/almacen/inventory-adjustment.models.js";
 import { productSummarySql } from "../../utils/product-summary.js";
@@ -202,6 +203,36 @@ export const correctGoodsIssueService = (user: DecodedToken, { projectId }: Proj
     });
 
 // ---------------------------------------------------------------------------------------------
+// Traspaso entre casillas (B11) — una envoltura sobre `correct`: arma la corrección de 2 líneas
+// (−cantidad en origen, +cantidad en destino) por dentro, así se hereda gratis toda la validación
+// que ya tiene `correct` (línea del documento, casilla del proyecto, no dejar nada en negativo,
+// bloqueo contra ajustes simultáneos). Sigue guardándose como una `corrección` común: no es un
+// `kind` nuevo, solo una forma más simple de pedirla.
+// ---------------------------------------------------------------------------------------------
+const transfer = (
+    user: DecodedToken, projectId: number, type: AdjustedDocumentType, documentId: number,
+    body: { reason: string; adjustment_date?: string | undefined; itemId: number; from_bin_id: number; to_bin_id: number; quantity: number }
+) => correct(user, projectId, type, documentId, {
+    reason: body.reason, adjustment_date: body.adjustment_date,
+    items: [
+        { itemId: body.itemId, bin_id: body.from_bin_id, quantity_delta: -body.quantity },
+        { itemId: body.itemId, bin_id: body.to_bin_id, quantity_delta: body.quantity },
+    ],
+});
+
+export const transferGoodsReceiptService = (user: DecodedToken, { projectId }: ProjectIdParam, goodsReceiptId: number, body: TransferGoodsReceiptBody) =>
+    transfer(user, projectId, "goods_receipt", goodsReceiptId, {
+        reason: body.reason, adjustment_date: body.adjustment_date, itemId: body.goods_receipt_item_id,
+        from_bin_id: body.from_bin_id, to_bin_id: body.to_bin_id, quantity: body.quantity,
+    });
+
+export const transferGoodsIssueService = (user: DecodedToken, { projectId }: ProjectIdParam, goodsIssueId: number, body: TransferGoodsIssueBody) =>
+    transfer(user, projectId, "goods_issue", goodsIssueId, {
+        reason: body.reason, adjustment_date: body.adjustment_date, itemId: body.goods_issue_item_id,
+        from_bin_id: body.from_bin_id, to_bin_id: body.to_bin_id, quantity: body.quantity,
+    });
+
+// ---------------------------------------------------------------------------------------------
 // Anulación completa
 // ---------------------------------------------------------------------------------------------
 // Revierte TODO lo efectivo del documento (lo registrado más los ajustes previos, por línea y
@@ -233,6 +264,21 @@ const voidDocument = async (
             [documentId]
         );
         if (effective.rows.length === 0) throw new AppError(INVENTORY_ADJUSTMENT_ERRORS.NOTHING_TO_VOID);
+
+        // Decisión B13 (2026-09-26): si revertir dejaría alguna casilla en negativo — parte de lo que
+        // este documento registró ahí ya salió con un movimiento posterior (bin_contents es un pozo
+        // compartido por producto+casilla, no hay lotes por documento) — NO se anula nada, todo o nada.
+        // Se chequea ANTES de tocar nada, con un aviso explícito en vez de dejar que el genérico
+        // INSUFFICIENT_STOCK de applyStockMovement (pensado para cuando se intenta SACAR de más) aparezca
+        // a mitad de camino.
+        for (const r of effective.rows) {
+            const stock = await client.query<{ quantity: string }>(
+                `SELECT quantity FROM bin_contents WHERE bin_id = $1 AND product_id = $2`, [r.bin_id, r.product_id]
+            );
+            if (Number(stock.rows[0]?.quantity ?? 0) < Number(r.quantity)) {
+                throw new AppError(INVENTORY_ADJUSTMENT_ERRORS.CANNOT_VOID_ALREADY_CONSUMED);
+            }
+        }
 
         const lines: Line[] = effective.rows.map((r) => ({ itemId: r.item_id, productId: r.product_id, binId: r.bin_id, delta: -Number(r.quantity) }));
         const adjustmentId = await applyAdjustment(client, user.user_id, projectId, type, documentId, "anulacion", body.reason, body.adjustment_date, lines);
