@@ -170,6 +170,14 @@ Content-Type: application/json
 
 { "name": "A1 - herramientas" }
 
+### 2.7b Ajustar posición/rotación/escala de un contenido dentro de su casilla (2026-09-26)
+# Nunca cambia cuánto hay (eso es un ingreso/vale/ajuste). rotation_* en radianes. Todos opcionales, al menos uno.
+PATCH {{baseUrl}}/projects/{{projectId}}/warehouses/{{warehouseId}}/racks/{{rackId}}/bins/{{binId}}/contents/{{binContentId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "rotation_y": 1.5708, "scale": 0.9 }
+
 ### 2.8 Buscar una ubicación por texto (nombre de almacén, estante o casilla)
 GET {{baseUrl}}/projects/{{projectId}}/locations/search?q=herramientas
 Authorization: Bearer {{accessToken}}

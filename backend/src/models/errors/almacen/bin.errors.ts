@@ -10,4 +10,12 @@ export const BIN_ERRORS = {
         }
     },
 
+    CONTENT_NOT_FOUND: {
+        statusCode: 404,
+        response: {
+            code: "BIN_CONTENT_NOT_FOUND",
+            message: "El contenido indicado no existe o no está en esta casilla."
+        }
+    },
+
 } satisfies Record<string, ErrorFormat>;
