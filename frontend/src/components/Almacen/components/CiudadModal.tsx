@@ -2,12 +2,13 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Building2, ChevronRight, Move, Pencil, Plus, RotateCw, Search, Tractor, Trash2, Warehouse, X } from 'lucide-react';
 import { CityScene, DEFAULT_WAREHOUSE_SIZE, Footprint, WAREHOUSE_SIZES, WarehouseSizeKey } from '../utils/CityScene';
-import { BayPreviewScene, GridPoint, isPalletName, WarehouseInteriorScene } from '../utils/WarehouseInteriorScene';
+import { BayPreviewScene, GridPoint, isPalletName, MAX_STOCK_COPIES, WarehouseInteriorScene } from '../utils/WarehouseInteriorScene';
 import { CUBE_SIZE, cubesToMeters, DEFAULT_GRID, directionToRotation, footprintCorners, footprintFromCorners, rotationToDirection } from '../utils/warehouseMapping';
 import { Bin, Rack, Warehouse as WarehouseData, WarehouseInput, WarehouseStyle } from '../../../types/almacen.types';
 import { warehouseStyleService } from '../../../services/almacen/warehouseStyle.service';
 import { warehouseService } from '../../../services/almacen/warehouse.service';
 import { rackService } from '../../../services/almacen/rack.service';
+import BinTrace from './BinTrace';
 
 // Alto aprox. del chip de la etiqueta flotante (dos líneas): con -translate-y-full
 // nunca puede quedar más arriba de esto, o se mete visualmente en la franja del header.
@@ -806,6 +807,9 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
                           {selectedBin.contents[0].code} — {selectedBin.contents[0].name}
                         </p>
                         <p className="text-xs text-gray-500">Cantidad: {selectedBin.contents[0].quantity}</p>
+                        {selectedBin.contents[0].quantity > MAX_STOCK_COPIES && (
+                          <p className="text-[11px] text-gray-400">En pantalla se dibujan {MAX_STOCK_COPIES} unidades.</p>
+                        )}
                       </>
                     ) : (
                       <p className="text-sm text-gray-400 mt-0.5">Casilla vacía</p>
@@ -813,6 +817,10 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
                   </div>
                 ) : (
                   <p className="text-xs text-gray-400 mb-3">Clickeá una casilla para ver qué tiene guardado.</p>
+                )}
+
+                {selectedBin && interiorWarehouse && (
+                  <BinTrace projectId={projectId} warehouseId={interiorWarehouse.warehouse_id} rackId={Number(viewingBayId)} binId={selectedBin.bin_id} />
                 )}
 
                 <button

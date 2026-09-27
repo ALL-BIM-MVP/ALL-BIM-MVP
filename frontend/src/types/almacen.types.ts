@@ -181,6 +181,8 @@ export interface GoodsReceiptItemInput {
 }
 
 export interface GoodsReceiptCreateInput {
+  // Archivo ya subido (POST /files, módulo almacen) — el documento nace con él en la misma transacción. Ausente/null = sin archivo.
+  file_id?: number | null;
   supplier_id: number;
   entry_type: GoodsReceiptEntryType;
   // Solo con "normal" — "rapida" no puede citar ninguna (400 si se envía).
@@ -518,6 +520,8 @@ export interface PurchaseRequisitionUpdateInput {
 }
 
 export interface PurchaseRequisitionCreateInput extends PurchaseRequisitionUpdateInput {
+  // Archivo ya subido (POST /files, módulo almacen) — el documento nace con él en la misma transacción. Ausente/null = sin archivo.
+  file_id?: number | null;
   number: string;
   requisition_date: string;
   requester: string;
@@ -599,6 +603,8 @@ export interface QuotationItemInput {
 }
 
 export interface QuotationCreateInput {
+  // Archivo ya subido (POST /files, módulo almacen) — el documento nace con él en la misma transacción. Ausente/null = sin archivo.
+  file_id?: number | null;
   supplier_id: number;
   purchase_requisition_id: string;
   number: string;
@@ -698,6 +704,8 @@ export interface PurchaseOrderItemInput {
 // Origen opcional a nivel de cabecera: quotation_id (el requerimiento se deduce solo),
 // purchase_requisition_id solo, o ninguno de los dos (compra directa).
 export interface PurchaseOrderCreateInput {
+  // Archivo ya subido (POST /files, módulo almacen) — el documento nace con él en la misma transacción. Ausente/null = sin archivo.
+  file_id?: number | null;
   supplier_id: number;
   quotation_id?: string | null;
   purchase_requisition_id?: string | null;
@@ -793,6 +801,8 @@ export interface InvoiceItemInput {
 // Origen opcional: una sola orden (purchase_order_id) o ninguna (factura directa). Con orden,
 // el proveedor de la factura tiene que ser el de esa orden.
 export interface InvoiceCreateInput {
+  // Archivo ya subido (POST /files, módulo almacen) — el documento nace con él en la misma transacción. Ausente/null = sin archivo.
+  file_id?: number | null;
   supplier_id: number;
   purchase_order_id?: string | null;
   series: string; // 1-4 letras/números, el backend lo normaliza a mayúsculas
@@ -1125,4 +1135,78 @@ export interface EffectiveLocation {
   bin_id: string;
   label: string;
   quantity: string;
+}
+
+// ---------------------------------------------------------------------
+// Lectura de un documento con IA (POST /document-drafts) — devuelve un BORRADOR: no guarda nada.
+// `draft` tiene la forma del cuerpo de crear ese documento, con null donde el papel no trae el dato.
+// ---------------------------------------------------------------------
+
+export type DocumentDraftType = 'requisition' | 'quotation' | 'purchase-order' | 'invoice' | 'goods-receipt';
+
+export interface DraftWarning {
+  code: string;
+  field: string | null;
+  message: string;
+}
+
+export interface DraftProductCandidate {
+  product_id: string;
+  score: number;
+  product: EmbeddedProduct;
+}
+
+export interface DraftItemMatch {
+  index: number; // posición dentro de draft.items
+  read: { code: string | null; line_id: string | null; category: string | null; unit: string | null };
+  product_candidates: DraftProductCandidate[];
+  suggested_product_id: string | null; // null = que el usuario elija o cree uno
+  order_item_candidate: { purchase_order_item_id: string; description: string; score: number } | null;
+}
+
+export interface DocumentDraftResponse {
+  document_type: DocumentDraftType;
+  file_id: string;
+  engine: { provider: string; model: string };
+  detected_type: string;
+  draft: Record<string, any>;
+  supplier: {
+    match: { supplier_id: number; ruc: string; name: string } | null;
+    to_create: { ruc: string; name: string } | null;
+  };
+  purchase_order: { match: { purchase_order_id: string; number: string } | null; referenced: string | null };
+  items: DraftItemMatch[];
+  warnings: DraftWarning[];
+  read_notes: string[];
+}
+
+// ---------------------------------------------------------------------
+// Trazabilidad de una ubicación (estante o casilla): qué hay ahora y todos los movimientos físicos
+// (ingresos, vales y ajustes) de cualquier producto que pasó por ella. Solo lectura.
+export interface LocationMovement {
+  type: 'entrada' | 'salida';
+  date: string;
+  product: EmbeddedProduct;
+  bin: { bin_id: number | string; label: string };
+  quantity: string;
+  balance_after: string; // saldo TOTAL del producto justo después del movimiento
+  document: { type: 'goods_receipt' | 'goods_issue' | 'inventory_adjustment'; id: number | string; label: string };
+  reason: string | null;
+  adjusted_document: { type: 'goods_receipt' | 'goods_issue'; id: number | string; label: string } | null;
+  supplier: { supplier_id: number | string; ruc: string; name: string } | null;
+  entry_type: 'normal' | 'rapida' | null;
+  destination: string | null;
+  recipient_name: string | null;
+}
+
+export interface LocationHistoryResponse {
+  location: {
+    level: 'rack' | 'bin';
+    warehouse: { warehouse_id: number | string; name: string };
+    rack: { rack_id: number | string; name: string };
+    bin: { bin_id: number | string; label: string; name: string } | null;
+  };
+  contents: { product: EmbeddedProduct; quantity: string }[];
+  items: LocationMovement[];
+  truncated: boolean;
 }

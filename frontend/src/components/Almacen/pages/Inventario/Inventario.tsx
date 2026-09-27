@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import { categoryService } from '../../../../services/almacen/category.service';
 import { productService } from '../../../../services/almacen/product.service';
 import { Category, Model3DAsset, Product, ProductHistoryResponse } from '../../../../types/almacen.types';
+import CreateProductModal from '../../components/CreateProductModal';
 import ModelPreviewModal from '../../components/ModelPreviewModal';
 import { trimNumeric } from '../../../../utils/numberFormat';
 
@@ -49,12 +50,9 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
   const [pickedAssetId, setPickedAssetId] = useState<number | ''>('');
   const [assigningModel, setAssigningModel] = useState(false);
 
-  const [formCategoryId, setFormCategoryId] = useState<number | ''>('');
-  const [formCode, setFormCode] = useState('');
-  const [formBaseCode, setFormBaseCode] = useState('');
-  const [formName, setFormName] = useState('');
-  const [formUnit, setFormUnit] = useState('');
-  const [saving, setSaving] = useState(false);
+  const [creatingProduct, setCreatingProduct] = useState(false);
+
+  const [search, setSearch] = useState('');
 
   const getCategory = (id: number | undefined) => categories.find((c) => c.category_id === id);
 
@@ -72,11 +70,7 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
     if (!projectId) return;
     categoryService
       .getCategories(projectId)
-      .then((cats) => {
-        setCategories(cats);
-        const partida = cats.find((c) => c.type === 'fijo');
-        setFormCategoryId(partida?.category_id ?? cats[0]?.category_id ?? '');
-      })
+      .then(setCategories)
       .catch(() => setCategories([]));
     loadProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -88,36 +82,18 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterCategoryId]);
 
-  const resetForm = () => {
-    const partida = categories.find((c) => c.type === 'fijo');
-    setFormCategoryId(partida?.category_id ?? categories[0]?.category_id ?? '');
-    setFormCode('');
-    setFormBaseCode('');
-    setFormName('');
-    setFormUnit('');
-  };
+  const visibleProducts = products.filter((p) => {
+    const t = search.trim().toLowerCase();
+    return !t || p.name.toLowerCase().includes(t) || p.code.toLowerCase().includes(t) || String(p.product_id).includes(t.replace(/^0+/, '') || t);
+  });
 
-  const formCategory = getCategory(formCategoryId === '' ? undefined : formCategoryId);
-
-  // Un producto siempre nace sin modelo 3D — se asigna después, desde su detalle (ver
-  // assignProductModel3D en product.service.ts y el panel "Modelo 3D" más abajo).
-  const createProduct = async () => {
-    if (!formCategoryId || !formCategory || !formName.trim() || !formUnit.trim()) return;
-    setSaving(true);
+  const removeProduct = async (p: Product) => {
+    if (!window.confirm(`¿Dar de baja "${p.name}"? Solo se puede si no tiene stock ni movimientos.`)) return;
     try {
-      await productService.createProduct(projectId, {
-        category_id: formCategoryId,
-        code: formCategory.type === 'fijo' ? formCode.trim() : undefined,
-        base_product_code: formCategory.type === 'relacional' ? formBaseCode.trim() : undefined,
-        name: formName.trim(),
-        unit: formUnit.trim(),
-      });
-      resetForm();
+      await productService.deleteProduct(projectId, p.product_id);
       loadProducts(filterCategoryId === '' ? undefined : filterCategoryId);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo crear el producto.');
-    } finally {
-      setSaving(false);
+      window.alert(err instanceof Error ? err.message : 'No se pudo dar de baja el producto.');
     }
   };
 
@@ -464,20 +440,33 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
 
   return (
     <div className="h-full overflow-y-auto p-6 @container">
-      <h1 className="text-2xl font-bold text-gray-800 mb-4">Inventario</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold text-gray-800">Inventario</h1>
+        <button
+          onClick={() => setCreatingProduct(true)}
+          className="flex items-center gap-1.5 bg-[#0056b3] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#004494] transition-colors"
+        >
+          <Plus size={15} /> Crear producto
+        </button>
+      </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <p className="text-sm font-semibold text-gray-700">Productos</p>
-            <p className="text-xs text-gray-400">Catálogo</p>
-          </div>
-          <label className="block">
-            <span className="text-[11px] text-gray-400 uppercase tracking-wide">Filtrar por categoría</span>
+      <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-5 mb-4">
+        <div className="flex items-end gap-4 mb-4">
+          <label className="block flex-1">
+            <span className="text-[11px] text-gray-500 font-semibold">Buscar</span>
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Nombre, código o ID..."
+              className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
+            />
+          </label>
+          <label className="block w-44">
+            <span className="text-[11px] text-gray-500 font-semibold">Categoría</span>
             <select
               value={filterCategoryId}
               onChange={(e) => setFilterCategoryId(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-              className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
+              className="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
             >
               <option value="">Todas</option>
               {categories.map((c) => (
@@ -487,82 +476,77 @@ const Inventario: React.FC<InventarioProps> = ({ projectId }) => {
           </label>
         </div>
 
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-gray-400 text-left text-xs uppercase tracking-wide border-b border-gray-100">
-              <th className="py-2 font-medium">Código</th>
-              <th className="py-2 font-medium">Nombre</th>
-              <th className="py-2 font-medium">Unidad</th>
-              <th className="py-2 font-medium">Stock</th>
-              <th className="py-2 font-medium">Ubicación principal</th>
-            </tr>
-          </thead>
-          <tbody>
-            {!loading && products.length === 0 && (
-              <tr>
-                <td colSpan={5} className="py-6 text-center text-gray-300">Sin productos todavía</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-gray-400 text-left text-[11px] uppercase tracking-wide border-b border-gray-100">
+                <th className="py-2 px-2 font-semibold">ID</th>
+                <th className="py-2 px-2 font-semibold">Código</th>
+                <th className="py-2 px-2 font-semibold">Producto</th>
+                <th className="py-2 px-2 font-semibold">Unidad</th>
+                <th className="py-2 px-2 font-semibold text-right">Stock</th>
+                <th className="py-2 px-2 font-semibold">Ubicación principal</th>
+                <th className="py-2 px-2 font-semibold">3D</th>
+                <th className="py-2 px-2" />
               </tr>
-            )}
-            {products.map((p) => (
-              <tr key={p.product_id} onClick={() => openDetail(p.product_id)} className="border-b border-gray-50 cursor-pointer hover:bg-gray-50">
-                <td className="py-2 font-mono text-xs text-gray-700">{p.code}</td>
-                <td className="py-2 text-gray-800">{p.name}</td>
-                <td className="py-2 text-gray-500">{p.unit}</td>
-                <td className="py-2 text-gray-500">{p.total_stock}</td>
-                <td className="py-2 text-gray-500">{p.main_location ?? 'sin stock'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 max-w-4xl">
-        <p className="text-sm font-semibold text-gray-700 mb-3">Crear producto</p>
-
-        <div className="grid grid-cols-1 @sm:grid-cols-3 @lg:grid-cols-4 gap-3 mb-3">
-          <label className="block">
-            <span className="text-[11px] text-gray-400 uppercase tracking-wide">Categoría</span>
-            <select
-              value={formCategoryId}
-              onChange={(e) => setFormCategoryId(parseInt(e.target.value, 10))}
-              className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-            >
-              {categories.map((c) => (
-                <option key={c.category_id} value={c.category_id}>{c.name} ({c.type})</option>
+            </thead>
+            <tbody>
+              {!loading && visibleProducts.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-6 text-center text-gray-300">{products.length === 0 ? 'Sin productos todavía' : 'Ningún producto coincide con la búsqueda'}</td>
+                </tr>
+              )}
+              {visibleProducts.map((p) => (
+                <tr key={p.product_id} className="border-b border-gray-50 last:border-0">
+                  <td className="py-3 px-2 font-mono text-xs font-bold text-gray-800">{String(p.product_id).padStart(5, '0')}</td>
+                  <td className="py-3 px-2 text-gray-600">{p.code}</td>
+                  <td className="py-3 px-2">
+                    <span className="font-bold text-gray-800 mr-1.5">{p.name}</span>
+                    <span className="inline-block text-[11px] font-medium text-gray-500 bg-gray-100 border border-gray-200 rounded-full px-2 py-0.5">{getCategory(p.category_id)?.name ?? ''}</span>
+                  </td>
+                  <td className="py-3 px-2 text-gray-600">{p.unit}</td>
+                  <td className="py-3 px-2 text-right font-bold text-gray-800">{trimNumeric(p.total_stock)}</td>
+                  <td className="py-3 px-2 text-gray-600">{p.main_location ?? <span className="text-gray-300">sin stock</span>}</td>
+                  <td className="py-3 px-2">
+                    {p.model_3d_asset_id !== null ? (
+                      <span className="inline-block text-[11px] font-semibold text-purple-700 bg-purple-50 border border-purple-100 rounded-full px-2.5 py-0.5 whitespace-nowrap">modelo {p.model_3d_format}</span>
+                    ) : (
+                      <span className="inline-block text-[11px] font-medium text-gray-400 bg-gray-50 border border-gray-200 rounded-full px-2.5 py-0.5 whitespace-nowrap">sin modelo</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-2">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={() => openDetail(p.product_id)} className="bg-[#0056b3] text-white rounded-md px-3 py-1.5 text-xs font-semibold hover:bg-[#004494] whitespace-nowrap">Hoja de vida</button>
+                      <button onClick={() => openDetail(p.product_id)} className="border border-gray-200 text-gray-600 rounded-md px-3 py-1.5 text-xs font-medium hover:bg-gray-50">Editar</button>
+                      <button
+                        onClick={() => p.model_3d_asset_id !== null && setPreviewAssetId(p.model_3d_asset_id)}
+                        disabled={p.model_3d_asset_id === null}
+                        title={p.model_3d_asset_id === null ? 'Sin modelo 3D asignado' : 'Ver modelo 3D'}
+                        className="border border-gray-200 text-gray-600 rounded-md px-3 py-1.5 text-xs font-medium hover:bg-gray-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                      >
+                        3D
+                      </button>
+                      <button onClick={() => removeProduct(p)} className="border border-red-200 text-red-500 rounded-md px-3 py-1.5 text-xs font-medium hover:bg-red-50">Baja</button>
+                    </div>
+                  </td>
+                </tr>
               ))}
-            </select>
-          </label>
-          <Field label="Nombre" value={formName} onChange={setFormName} />
-          <Field label="Unidad" value={formUnit} onChange={setFormUnit} placeholder="m2, bls, und..." />
+            </tbody>
+          </table>
         </div>
-
-        {formCategory?.type === 'fijo' ? (
-          <Field label="Código (libre)" value={formCode} onChange={setFormCode} placeholder="ej. 01.02.03" className="mb-3" />
-        ) : (
-          <label className="block mb-1">
-            <span className="text-[11px] text-gray-400 uppercase tracking-wide">Código de la Partida relacionada</span>
-            <input
-              value={formBaseCode}
-              onChange={(e) => setFormBaseCode(e.target.value)}
-              placeholder="ej. 01.02.03"
-              className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-            />
-          </label>
-        )}
-        {formCategory?.type === 'relacional' && (
-          <p className="text-[11px] text-gray-400 mb-3">El código final se arma solo: {formCategory.prefix}-código.</p>
-        )}
-
-        <p className="text-xs text-gray-400 mb-3">El modelo 3D se asigna después de crear el producto, desde su detalle.</p>
-
-        <button
-          onClick={createProduct}
-          disabled={saving}
-          className="flex items-center gap-1.5 bg-[#0056b3] text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50"
-        >
-          <Plus size={15} /> Crear producto
-        </button>
       </div>
+
+      {previewAssetId !== null && (
+        <ModelPreviewModal projectId={projectId} assetId={previewAssetId} onClose={() => setPreviewAssetId(null)} />
+      )}
+
+      {creatingProduct && (
+        <CreateProductModal
+          projectId={projectId}
+          onClose={() => setCreatingProduct(false)}
+          onCreated={() => { setCreatingProduct(false); loadProducts(filterCategoryId === '' ? undefined : filterCategoryId); }}
+        />
+      )}
     </div>
   );
 };

@@ -17,6 +17,7 @@ function normalizeRack(r: any): Rack {
       ...b,
       bin_id: Number(b.bin_id),
       rack_id: Number(b.rack_id),
+      level: Number(b.level) + 1, // el backend cuenta niveles desde 0; la escena 3D y el tipo Bin, desde 1
       contents: b.contents?.map((c: any) => ({ ...c, product_id: Number(c.product_id), quantity: Number(c.quantity) })),
     })),
   };

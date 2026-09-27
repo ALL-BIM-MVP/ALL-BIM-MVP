@@ -1,32 +1,21 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react';
 import { quotationService } from '../../../../services/almacen/quotation.service';
 import { purchaseRequisitionService } from '../../../../services/almacen/purchaseRequisition.service';
-import { supplierService } from '../../../../services/almacen/supplier.service';
 import { projectService } from '../../../../services/project.service';
 import DocumentAlerts from '../../components/DocumentAlerts';
+import EditForm from '../../components/EditForm';
+import DocumentPanel from '../../components/DocumentPanel';
 import SearchCombobox from '../../components/SearchCombobox';
+import SupplierPicker from '../../components/SupplierPicker';
+import { useDocumentFile } from '../../components/useDocumentFile';
+import { DraftNotices, Field, FieldFlag, flagClass, sortWarnings } from '../../components/FormField';
 import {
   Currency, PurchaseRequisitionDetail, PurchaseRequisitionListItem, QuotationDetail,
   QuotationListItem, Supplier,
 } from '../../../../types/almacen.types';
 import { resolveMediaUrl } from '../../../../utils/media';
 import { trimNumeric } from '../../../../utils/numberFormat';
-
-const Field: React.FC<{
-  label: string; value?: string; onChange?: (v: string) => void; type?: string; className?: string; placeholder?: string;
-}> = ({ label, value, onChange, type = 'text', className, placeholder }) => (
-  <label className={`block ${className || ''}`}>
-    <span className="text-[11px] text-gray-400 uppercase tracking-wide">{label}</span>
-    <input
-      type={type}
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange?.(e.target.value)}
-      className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-    />
-  </label>
-);
 
 interface CotizacionesProps {
   projectId: number;
@@ -37,6 +26,7 @@ interface LineDraft {
   quantity: string;
   unitPrice: string;
   lineTotal: string;
+  ai?: boolean; // lo llenó la IA y no se tocó
 }
 
 const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
@@ -48,15 +38,8 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
   const [detail, setDetail] = useState<QuotationDetail | null>(null);
   const [uploadingFile, setUploadingFile] = useState(false);
 
-  const [createStep, setCreateStep] = useState<1 | 2>(1);
-  const [formRequisitionId, setFormRequisitionId] = useState('');
   const [selectedRequisition, setSelectedRequisition] = useState<PurchaseRequisitionListItem | null>(null);
-  const [formSupplierId, setFormSupplierId] = useState<number | ''>('');
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
-  const [showCreateSupplier, setShowCreateSupplier] = useState(false);
-  const [newSupplierRuc, setNewSupplierRuc] = useState('');
-  const [newSupplierName, setNewSupplierName] = useState('');
-  const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [formNumber, setFormNumber] = useState('');
   const [formDate, setFormDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [formCurrency, setFormCurrency] = useState<Currency>('PEN');
@@ -66,8 +49,14 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
   const [requisitionDetail, setRequisitionDetail] = useState<PurchaseRequisitionDetail | null>(null);
   const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
   const [saving, setSaving] = useState(false);
+  const [aiFields, setAiFields] = useState<Record<string, boolean>>({});
+  const [lineNote, setLineNote] = useState<string | null>(null);
+  const appliedLines = useRef('');
+  const doc = useDocumentFile(projectId, 'quotation');
 
   const [addingLine, setAddingLine] = useState(false);
+  const [editingHeader, setEditingHeader] = useState(false);
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [requisitionForLines, setRequisitionForLines] = useState<PurchaseRequisitionDetail | null>(null);
   const [newLineItemId, setNewLineItemId] = useState('');
   const [newLineQuantity, setNewLineQuantity] = useState('');
@@ -92,10 +81,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
   }, [projectId]);
 
   const resetCreateForm = () => {
-    setCreateStep(1);
-    setFormRequisitionId('');
     setSelectedRequisition(null);
-    setFormSupplierId('');
     setSelectedSupplier(null);
     setFormNumber('');
     setFormDate(new Date().toISOString().slice(0, 10));
@@ -105,39 +91,109 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
     setFormTotal('');
     setRequisitionDetail(null);
     setLineDrafts({});
+    setAiFields({});
+    setLineNote(null);
+    appliedLines.current = '';
+    doc.selectFile(null);
   };
 
-  const createSupplierInline = async () => {
-    if (!newSupplierRuc.trim() || !newSupplierName.trim()) return;
-    setCreatingSupplier(true);
-    try {
-      const created = await supplierService.createSupplier(projectId, { ruc: newSupplierRuc.trim(), name: newSupplierName.trim() });
-      setFormSupplierId(created.supplier_id);
-      setSelectedSupplier(created);
-      setShowCreateSupplier(false);
-      setNewSupplierRuc('');
-      setNewSupplierName('');
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo crear el proveedor.');
-    } finally {
-      setCreatingSupplier(false);
-    }
+  const editField = (field: string, setter: (v: string) => void) => (v: string) => {
+    setter(v);
+    setAiFields((prev) => ({ ...prev, [field]: false }));
   };
 
-  const goToLines = async () => {
-    if (!formRequisitionId || !formSupplierId || !formNumber.trim()) {
-      window.alert('Elegí requerimiento, proveedor y un número antes de continuar.');
+  // Elegir el requerimiento carga sus líneas (todas marcadas: una cotización puede cubrir solo algunas,
+  // se desmarcan las que no).
+  const pickRequisition = async (r: PurchaseRequisitionListItem | null) => {
+    setSelectedRequisition(r);
+    setLineNote(null);
+    appliedLines.current = '';
+    if (!r) {
+      setRequisitionDetail(null);
+      setLineDrafts({});
       return;
     }
     try {
-      const r = await purchaseRequisitionService.getRequisitionById(projectId, formRequisitionId);
-      setRequisitionDetail(r);
-      setLineDrafts({});
-      setCreateStep(2);
+      const full = await purchaseRequisitionService.getRequisitionById(projectId, r.purchase_requisition_id);
+      const drafts: Record<string, LineDraft> = {};
+      full.items.forEach((it) => {
+        drafts[it.purchase_requisition_item_id] = { checked: true, quantity: trimNumeric(it.quantity_requested), unitPrice: '', lineTotal: '' };
+      });
+      setLineDrafts(drafts);
+      setRequisitionDetail(full);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'No se pudo cargar el requerimiento.');
     }
   };
+
+  // Borrador leído: llena el encabezado y el proveedor. Lo que el papel no traía (null) no se toca.
+  // Nunca guarda nada — el usuario revisa y confirma con "Guardar".
+  useEffect(() => {
+    const result = doc.draft;
+    if (!result) return;
+    const d = result.draft;
+    const ai: Record<string, boolean> = {};
+    const fill = (field: string, value: unknown, setter: (v: string) => void) => {
+      if (value === null || value === undefined || value === '') return;
+      setter(String(value));
+      ai[field] = true;
+    };
+    fill('number', d.number, setFormNumber);
+    fill('quotation_date', d.quotation_date, setFormDate);
+    fill('valid_until', d.valid_until, setFormValidUntil);
+    fill('commercial_terms', d.commercial_terms, setFormTerms);
+    fill('total_amount', d.total_amount != null ? trimNumeric(d.total_amount) : null, setFormTotal);
+    if (d.currency === 'PEN' || d.currency === 'USD') { setFormCurrency(d.currency); ai.currency = true; }
+    if (result.supplier.match) { setSelectedSupplier(result.supplier.match as unknown as Supplier); ai.supplier_id = true; }
+    setAiFields(ai);
+    appliedLines.current = '';
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.draft]);
+
+  // Líneas: cada línea leída se empareja con la línea del requerimiento del MISMO producto (una cotización
+  // no cita una orden, así que el producto es el vínculo). Se aplica una sola vez por borrador+requerimiento,
+  // para no pisar lo que el usuario corrija después.
+  useEffect(() => {
+    const result = doc.draft;
+    if (!result || !requisitionDetail) return;
+    const key = `${result.file_id}:${requisitionDetail.purchase_requisition_id}`;
+    if (appliedLines.current === key) return;
+    appliedLines.current = key;
+    const readItems: any[] = result.draft.items ?? [];
+    const used = new Set<number>();
+    const next: Record<string, LineDraft> = {};
+    requisitionDetail.items.forEach((reqItem) => {
+      const idx = readItems.findIndex((it, i) => {
+        if (used.has(i)) return false;
+        const productId = it.product_id ?? result.items.find((m) => m.index === i)?.suggested_product_id ?? null;
+        return productId !== null && String(productId) === String(reqItem.product?.product_id);
+      });
+      if (idx === -1) {
+        next[reqItem.purchase_requisition_item_id] = { checked: false, quantity: trimNumeric(reqItem.quantity_requested), unitPrice: '', lineTotal: '' };
+        return;
+      }
+      used.add(idx);
+      const it = readItems[idx];
+      next[reqItem.purchase_requisition_item_id] = {
+        checked: true,
+        quantity: it.quantity_quoted != null ? trimNumeric(it.quantity_quoted) : '',
+        unitPrice: it.unit_price != null ? trimNumeric(it.unit_price) : '',
+        lineTotal: it.line_total != null ? trimNumeric(it.line_total) : '',
+        ai: true,
+      };
+    });
+    setLineDrafts(next);
+    const orphans = readItems.filter((_, i) => !used.has(i));
+    setLineNote(orphans.length > 0
+      ? `${orphans.length} línea(s) del documento no coinciden con ninguna línea del requerimiento elegido: ${orphans.map((o) => o.description).filter(Boolean).join('; ')}.`
+      : null);
+  }, [doc.draft, requisitionDetail]);
+
+  const warningsFor = (field: string) => doc.draft?.warnings.filter((w) => w.field === field) ?? [];
+  const flagFor = (field: string): FieldFlag => (aiFields[field] ? (warningsFor(field).length > 0 ? 'warn' : 'ai') : undefined);
+  const messageFor = (field: string) => (aiFields[field] ? warningsFor(field)[0]?.message : undefined);
+  const HEADER_FIELDS = ['number', 'quotation_date', 'valid_until', 'commercial_terms', 'total_amount', 'currency', 'supplier_id'];
+  const generalWarnings = sortWarnings((doc.draft?.warnings ?? []).filter((w) => !w.field || !HEADER_FIELDS.includes(w.field)));
 
   const recalcLineTotal = (quantity: string, unitPrice: string) => {
     const q = parseFloat(quantity);
@@ -153,14 +209,17 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
   const setLineField = (itemId: string, field: 'quantity' | 'unitPrice' | 'lineTotal', value: string) => {
     setLineDrafts((prev) => {
       const current = prev[itemId] ?? { checked: true, quantity: '', unitPrice: '', lineTotal: '' };
-      const next = { ...current, [field]: value };
+      const next = { ...current, [field]: value, ai: false };
       if (field !== 'lineTotal') next.lineTotal = recalcLineTotal(next.quantity, next.unitPrice) || next.lineTotal;
       return { ...prev, [itemId]: next };
     });
   };
 
   const createQuotation = async () => {
-    if (!requisitionDetail || !formSupplierId) return;
+    if (!selectedSupplier || !selectedRequisition || !requisitionDetail || !formNumber.trim()) {
+      window.alert('Elegí proveedor, requerimiento y un número antes de guardar.');
+      return;
+    }
     const items = Object.entries(lineDrafts)
       .filter(([, d]) => d.checked && parseFloat(d.quantity) > 0 && d.lineTotal.trim() !== '')
       .map(([itemId, d]) => {
@@ -179,9 +238,10 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
     }
     setSaving(true);
     try {
+      const fileId = await doc.ensureUploaded();
       await quotationService.createQuotation(projectId, {
-        supplier_id: Number(formSupplierId),
-        purchase_requisition_id: formRequisitionId,
+        supplier_id: Number(selectedSupplier.supplier_id),
+        purchase_requisition_id: selectedRequisition.purchase_requisition_id,
         number: formNumber.trim(),
         quotation_date: formDate,
         currency: formCurrency,
@@ -189,6 +249,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
         valid_until: formValidUntil || null,
         total_amount: formTotal.trim() ? parseFloat(formTotal) : null,
         items,
+        file_id: fileId,
       });
       setView('list');
       resetCreateForm();
@@ -211,6 +272,8 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
   };
 
   const backToList = () => {
+    setEditingHeader(false);
+    setEditingLineId(null);
     setView('list');
     setDetail(null);
     setAddingLine(false);
@@ -292,6 +355,20 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
     }
   };
 
+  const saveHeader = async (patch: Record<string, string | number | null>) => {
+    if (!detail) return;
+    const updated = await quotationService.updateQuotation(projectId, detail.quotation_id, patch as any);
+    setDetail(updated);
+    setEditingHeader(false);
+  };
+
+  const saveLine = async (patch: Record<string, string | number | null>) => {
+    if (!detail || !editingLineId) return;
+    const updated = await quotationService.updateItem(projectId, detail.quotation_id, editingLineId, patch as any);
+    setDetail(updated);
+    setEditingLineId(null);
+  };
+
   const removeLine = async (itemId: string) => {
     if (!detail) return;
     if (!window.confirm('¿Quitar esta línea?')) return;
@@ -304,6 +381,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
   };
 
   if (view === 'new') {
+    const locked = doc.reading || saving;
     return (
       <div className="h-full overflow-y-auto p-6 @container">
         <button onClick={() => { setView('list'); resetCreateForm(); }} className="inline-flex items-center gap-1.5 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 mb-3">
@@ -311,147 +389,107 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
         </button>
         <h1 className="text-2xl font-bold text-gray-800 mb-4">Nueva cotización</h1>
 
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
-          {createStep === 1 ? (
-            <>
-              <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3 mb-3">
-                <label className="block">
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wide">Requerimiento al que responde</span>
+        <div className="grid grid-cols-1 @4xl:grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start">
+          <div className={`space-y-4 ${locked ? 'pointer-events-none opacity-60' : ''}`}>
+            <DraftNotices warnings={generalWarnings} readNotes={doc.draft?.read_notes ?? []} />
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+              <div className="grid grid-cols-1 @sm:grid-cols-3 gap-3">
+                <div>
+                  <span className="text-[11px] text-gray-500 font-medium">Proveedor<span className="text-red-500"> *</span></span>
+                  <SupplierPicker
+                    projectId={projectId}
+                    selected={selectedSupplier}
+                    onSelect={(s) => { setSelectedSupplier(s); setAiFields((p) => ({ ...p, supplier_id: false })); }}
+                    flag={flagFor('supplier_id')}
+                    message={messageFor('supplier_id')}
+                    offer={doc.draft?.supplier.to_create ?? null}
+                  />
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500 font-medium">Requerimiento<span className="text-red-500"> *</span></span>
                   <SearchCombobox<PurchaseRequisitionListItem>
                     selected={selectedRequisition}
-                    onSelect={(r) => { setSelectedRequisition(r); setFormRequisitionId(r?.purchase_requisition_id ?? ''); }}
+                    onSelect={pickRequisition}
                     search={(term) => purchaseRequisitionService.getRequisitions(projectId, term || undefined)}
                     getId={(r) => r.purchase_requisition_id}
                     getLabel={(r) => `${r.number} — ${r.requester}`}
-                    placeholder="Buscar por número o solicitante..."
+                    placeholder="Buscar por número o solicitante…"
                   />
-                </label>
+                  {!selectedRequisition && (
+                    <p className="mt-1.5 inline-block text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5">Sin vincular: busca y elige un registro de la lista.</p>
+                  )}
+                </div>
+                <Field label="Número" required value={formNumber} onChange={editField('number', setFormNumber)} placeholder="COT-2026-001" flag={flagFor('number')} message={messageFor('number')} />
+                <Field label="Fecha" required type="date" value={formDate} onChange={editField('quotation_date', setFormDate)} flag={flagFor('quotation_date')} message={messageFor('quotation_date')} />
                 <label className="block">
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wide">Proveedor</span>
-                  <SearchCombobox<Supplier>
-                    selected={selectedSupplier}
-                    onSelect={(s) => { setSelectedSupplier(s); setFormSupplierId(s?.supplier_id ?? ''); }}
-                    search={(term) => supplierService.getSuppliers(projectId, term || undefined)}
-                    getId={(s) => s.supplier_id}
-                    getLabel={(s) => s.name}
-                    getSubLabel={(s) => s.ruc}
-                    placeholder="Buscar por nombre o RUC..."
-                    footer={(
-                      <button
-                        type="button"
-                        onClick={() => { setShowCreateSupplier(true); setNewSupplierRuc(''); setNewSupplierName(''); }}
-                        className="text-xs font-medium text-[#0056b3] hover:underline"
-                      >
-                        + Crear proveedor
-                      </button>
-                    )}
-                  />
-                </label>
-              </div>
-              <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3 mb-3">
-                <Field label="Número" value={formNumber} onChange={setFormNumber} placeholder="ej. COT-001" />
-                <Field label="Fecha" type="date" value={formDate} onChange={setFormDate} />
-                <label className="block">
-                  <span className="text-[11px] text-gray-400 uppercase tracking-wide">Moneda</span>
+                  <span className="text-[11px] text-gray-500 font-medium">Moneda<span className="text-red-500"> *</span></span>
                   <select
                     value={formCurrency}
-                    onChange={(e) => setFormCurrency(e.target.value as Currency)}
-                    className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
+                    onChange={(e) => { setFormCurrency(e.target.value as Currency); setAiFields((p) => ({ ...p, currency: false })); }}
+                    className={`w-full mt-1 px-2.5 py-1.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3] ${flagClass(flagFor('currency'))}`}
                   >
-                    <option value="PEN">PEN</option>
-                    <option value="USD">USD</option>
+                    <option value="PEN">Soles (PEN)</option>
+                    <option value="USD">Dólares (USD)</option>
                   </select>
                 </label>
-                <Field label="Válida hasta (opcional)" type="date" value={formValidUntil} onChange={setFormValidUntil} />
-              </div>
-              <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3 mb-5">
-                <Field label="Condiciones (opcional)" value={formTerms} onChange={setFormTerms} />
-                <Field label="Total del documento (opcional)" type="number" value={formTotal} onChange={setFormTotal} />
-              </div>
-
-              <div className="flex justify-end">
-                <button onClick={goToLines} className="px-8 bg-[#0056b3] text-white rounded-lg py-2.5 font-semibold hover:bg-[#004494] transition-colors">
-                  Continuar
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">Líneas del requerimiento {requisitionDetail?.number}</p>
-              <div className="grid grid-cols-1 @lg:grid-cols-2 gap-2 mb-5">
-                {requisitionDetail?.items.map((it) => (
-                  <div key={it.purchase_requisition_item_id} className="border border-gray-200 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-3 mb-2">
-                      <input
-                        type="checkbox"
-                        checked={lineDrafts[it.purchase_requisition_item_id]?.checked ?? false}
-                        onChange={(e) => toggleLine(it.purchase_requisition_item_id, e.target.checked)}
-                        className="accent-[#0056b3]"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-gray-800 truncate">
-                          {it.product ? `${it.product.code} — ${it.product.name}` : it.description}
-                        </p>
-                        <p className="text-xs text-gray-400">Solicitado: {trimNumeric(it.quantity_requested)} {it.product?.unit ?? ''}</p>
-                      </div>
-                    </div>
-                    {lineDrafts[it.purchase_requisition_item_id]?.checked && (
-                      <div className="grid grid-cols-3 gap-2 pl-7">
-                        <input
-                          type="number"
-                          placeholder="Cantidad"
-                          value={lineDrafts[it.purchase_requisition_item_id]?.quantity ?? ''}
-                          onChange={(e) => setLineField(it.purchase_requisition_item_id, 'quantity', e.target.value)}
-                          className="px-2 py-1 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Precio unit."
-                          value={lineDrafts[it.purchase_requisition_item_id]?.unitPrice ?? ''}
-                          onChange={(e) => setLineField(it.purchase_requisition_item_id, 'unitPrice', e.target.value)}
-                          className="px-2 py-1 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Total línea"
-                          value={lineDrafts[it.purchase_requisition_item_id]?.lineTotal ?? ''}
-                          onChange={(e) => setLineField(it.purchase_requisition_item_id, 'lineTotal', e.target.value)}
-                          className="px-2 py-1 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-                        />
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setCreateStep(1)} className="border border-gray-200 rounded-lg px-6 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50">
-                  ← Volver
-                </button>
-                <button onClick={createQuotation} disabled={saving} className="px-8 bg-[#0056b3] text-white rounded-lg py-2.5 font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50">
-                  {saving ? 'Creando...' : 'Crear cotización'}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {showCreateSupplier && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6">
-            <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
-              <h3 className="text-lg font-bold text-gray-800 mb-4">Nuevo proveedor</h3>
-              <Field label="RUC (11 dígitos)" value={newSupplierRuc} onChange={setNewSupplierRuc} placeholder="20456789123" className="mb-3" />
-              <Field label="Nombre" value={newSupplierName} onChange={setNewSupplierName} placeholder="ej. Ferretería XYZ" className="mb-4" />
-              <div className="flex gap-2">
-                <button onClick={() => setShowCreateSupplier(false)} className="flex-1 border border-gray-200 text-gray-600 text-sm font-semibold py-2 rounded-lg hover:bg-gray-50">
-                  Cancelar
-                </button>
-                <button onClick={createSupplierInline} disabled={creatingSupplier} className="flex-1 bg-[#0056b3] text-white text-sm font-semibold py-2 rounded-lg hover:bg-[#004494] disabled:opacity-50">
-                  {creatingSupplier ? 'Creando...' : 'Crear proveedor'}
-                </button>
+                <Field label="Válida hasta" type="date" value={formValidUntil} onChange={editField('valid_until', setFormValidUntil)} flag={flagFor('valid_until')} message={messageFor('valid_until')} />
+                <Field label="Total declarado" type="number" value={formTotal} onChange={editField('total_amount', setFormTotal)} flag={flagFor('total_amount')} message={messageFor('total_amount')} />
+                <Field label="Condiciones" value={formTerms} onChange={editField('commercial_terms', setFormTerms)} className="@sm:col-span-2" flag={flagFor('commercial_terms')} message={messageFor('commercial_terms')} />
               </div>
             </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+              <div className="px-5 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-800">Líneas</p>
+              </div>
+              <div className="p-4 space-y-3">
+                {lineNote && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{lineNote}</p>}
+                {!requisitionDetail ? (
+                  <div className="border border-dashed border-gray-300 rounded-lg py-8 text-center text-sm text-gray-400">Elige el origen para cargar sus líneas.</div>
+                ) : (
+                  requisitionDetail.items.map((it) => {
+                    const d = lineDrafts[it.purchase_requisition_item_id];
+                    return (
+                      <div key={it.purchase_requisition_item_id} className={`border rounded-lg p-3 ${d?.ai ? 'border-violet-300 bg-violet-50/40' : 'border-gray-200 bg-gray-50/40'}`}>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="checkbox"
+                            checked={d?.checked ?? false}
+                            onChange={(e) => toggleLine(it.purchase_requisition_item_id, e.target.checked)}
+                            className="accent-[#0056b3]"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-gray-800 truncate">{it.product ? `${it.product.code} — ${it.product.name}` : it.description}</p>
+                            <p className="text-xs text-gray-400">Solicitado: {trimNumeric(it.quantity_requested)} {it.product?.unit ?? ''}</p>
+                          </div>
+                        </div>
+                        {d?.checked && (
+                          <div className="grid grid-cols-1 @sm:grid-cols-3 gap-3 mt-3 pl-7">
+                            <Field label="Cantidad cotizada" type="number" value={d.quantity} onChange={(v) => setLineField(it.purchase_requisition_item_id, 'quantity', v)} />
+                            <Field label="Precio unit." type="number" value={d.unitPrice} onChange={(v) => setLineField(it.purchase_requisition_item_id, 'unitPrice', v)} />
+                            <Field label="Total línea" type="number" value={d.lineTotal} onChange={(v) => setLineField(it.purchase_requisition_item_id, 'lineTotal', v)} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setView('list'); resetCreateForm(); }} className="border border-gray-200 rounded-lg px-5 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+                Cancelar
+              </button>
+              <button onClick={createQuotation} disabled={saving} className="px-6 bg-[#0056b3] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50">
+                {saving ? 'Guardando...' : 'Guardar cotización'}
+              </button>
+            </div>
           </div>
-        )}
+
+          <DocumentPanel doc={doc} disabled={saving} onRead={() => { doc.read(); }} />
+        </div>
       </div>
     );
   }
@@ -473,9 +511,14 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
               {detail.commercial_terms && <p className="text-sm text-gray-600 mt-2">{detail.commercial_terms}</p>}
               {detail.valid_until && <p className="text-xs text-gray-400 mt-1">Válida hasta {detail.valid_until}</p>}
             </div>
-            <button onClick={removeQuotation} className="flex-shrink-0 border border-red-200 text-red-500 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50">
+            <div className="flex gap-2 flex-shrink-0">
+              <button onClick={() => setEditingHeader((v) => !v)} className="border border-gray-200 text-gray-600 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
+                Editar
+              </button>
+              <button onClick={removeQuotation} className="border border-red-200 text-red-500 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50">
               Eliminar cotización
             </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3 mt-4">
@@ -492,6 +535,25 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
             <p className="text-xs text-amber-600 mt-2">⚠ El total del documento no coincide con la suma de las líneas.</p>
           )}
         </div>
+
+        {editingHeader && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-4">
+            <EditForm
+              title="Editar cotización"
+              fields={[
+              { key: 'number', label: 'Número' },
+              { key: 'quotation_date', label: 'Fecha', type: 'date' },
+              { key: 'currency', label: 'Moneda', type: 'select', options: [['PEN', 'Soles (PEN)'], ['USD', 'Dólares (USD)']] },
+              { key: 'valid_until', label: 'Válida hasta', type: 'date', nullable: true },
+              { key: 'total_amount', label: 'Total declarado', type: 'number', nullable: true },
+              { key: 'commercial_terms', label: 'Condiciones', nullable: true, span: 3 },
+            ]}
+              initial={{ number: detail.number, quotation_date: detail.quotation_date, currency: detail.currency, valid_until: detail.valid_until, total_amount: detail.total_amount, commercial_terms: detail.commercial_terms }}
+              onSave={saveHeader}
+              onCancel={() => setEditingHeader(false)}
+            />
+          </div>
+        )}
 
         <DocumentAlerts alerts={detail.alerts} />
 
@@ -563,6 +625,9 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
                     </div>
                   </td>
                   <td className="py-2 text-right">
+                    <button onClick={() => setEditingLineId(item.quotation_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar línea">
+                      <Pencil size={14} />
+                    </button>
                     <button onClick={() => removeLine(item.quotation_item_id)} className="text-gray-300 hover:text-red-500">
                       <Trash2 size={14} />
                     </button>
@@ -571,6 +636,28 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
               ))}
             </tbody>
           </table>
+
+          {editingLineId && (() => {
+            const editingLine = detail.items.find((x) => x.quotation_item_id === editingLineId);
+            return editingLine ? (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <EditForm
+                  key={editingLineId}
+                  title="Editar línea"
+                  fields={[
+                    { key: 'description', label: 'Descripción', span: 3 },
+                    { key: 'quantity_quoted', label: 'Cantidad cotizada', type: 'number' },
+                    { key: 'unit_price', label: 'Precio unit.', type: 'number', nullable: true },
+                    { key: 'line_total', label: 'Total línea', type: 'number' },
+                    { key: 'notes', label: 'Observaciones', nullable: true, span: 3 },
+                  ]}
+                  initial={{ description: editingLine.description, quantity_quoted: editingLine.quantity_quoted, unit_price: editingLine.unit_price, line_total: editingLine.line_total, notes: editingLine.notes }}
+                  onSave={saveLine}
+                  onCancel={() => setEditingLineId(null)}
+                />
+              </div>
+            ) : null;
+          })()}
 
           {addingLine && (
             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 @sm:grid-cols-4 gap-3">
