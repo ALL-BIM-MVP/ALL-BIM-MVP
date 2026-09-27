@@ -806,11 +806,20 @@ CREATE UNIQUE INDEX idx_un_warehouses_name_active ON warehouses (project_id, nam
 -- idx_projects_owner_id/idx_files_project_id de más arriba.
 CREATE INDEX idx_warehouses_project_id ON warehouses (project_id);
 
--- Mismo criterio que `warehouses`: sin índices de grilla (bay/level)
--- ni ancho/profundidad como columnas — se derivan de las 2 esquinas
--- (LOCALES al warehouse, no coordenadas absolutas). `levels` sí es
--- columna propia porque, a diferencia del footprint, no nace de 2
--- puntos: un rack crece niveles hacia arriba desde el piso.
+-- El rack vive DENTRO de la grilla interior del warehouse (bay/level, nunca metros —
+-- a diferencia de warehouses.corner1/corner2, que sí son un footprint real, ver esa
+-- tabla). `bays` (cuántas bahías tiene, a lo largo del eje X local) y `depth` (cuántas
+-- casillas de profundidad, a lo largo del eje Z local: 1 = una cara, 2 = doble cara)
+-- son datos PROPIOS, tan directos como `levels` — nadie los deriva dividiendo nada por
+-- ninguna constante de la aplicación (eso es justo lo que se sacó de acá: un estante
+-- real no viene en múltiplos de un "cubo" fijo del sistema, viene en el tamaño que el
+-- fabricante o el frontend decidan, y esa forma no es asunto de este backend).
+-- `corner1_x/z` y `corner2_x/z` (índices ENTEROS de la grilla, LOCALES al warehouse, no
+-- coordenadas absolutas ni metros) le dicen a quien lee dónde arranca el estante y,
+-- junto con `bays`/`depth`, hacia qué esquina llega — se validan en la aplicación (no
+-- acá) contra `bays`/`depth`: la diferencia en X tiene que ser exactamente `bays` y la
+-- diferencia en Z exactamente `depth` (con enteros esto es una resta exacta, sin
+-- ninguna tolerancia de coma flotante que hiciera falta antes).
 CREATE TABLE racks (
     rack_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- RESTRICT: no se puede borrar de motor un warehouse que todavía
@@ -818,11 +827,15 @@ CREATE TABLE racks (
     -- racks primero, de abajo hacia arriba.
     warehouse_id INT NOT NULL REFERENCES warehouses(warehouse_id) ON DELETE RESTRICT,
     name VARCHAR(100) NOT NULL CHECK (LENGTH(TRIM(name)) > 0),
-    corner1_x NUMERIC(18,6) NOT NULL,
-    corner1_z NUMERIC(18,6) NOT NULL,
-    corner2_x NUMERIC(18,6) NOT NULL,
-    corner2_z NUMERIC(18,6) NOT NULL,
+    corner1_x INT NOT NULL,
+    corner1_z INT NOT NULL,
+    corner2_x INT NOT NULL,
+    corner2_z INT NOT NULL,
     CHECK (corner1_x <> corner2_x AND corner1_z <> corner2_z),
+    bays INT NOT NULL CHECK (bays > 0),
+    -- 1 (una cara) o 2 (doble cara) — nunca más: con 3+ la fila del medio queda sin
+    -- cara accesible.
+    depth INT NOT NULL CHECK (depth IN (1, 2)),
     levels INT NOT NULL CHECK (levels > 0),
     -- Cuál de las 2 caras (mismo dominio 0/1 que bins.face más abajo)
     -- es la accesible/abierta — sirve para el día que se diseñe un
@@ -844,13 +857,6 @@ CREATE UNIQUE INDEX idx_un_racks_name_active ON racks (warehouse_id, name) WHERE
 -- un warehouse en el visor.
 CREATE INDEX idx_racks_warehouse_id ON racks (warehouse_id);
 
--- Ancho (bahías) y profundidad de `racks` NO son columnas — se derivan
--- de sus esquinas (`|corner2_x-corner1_x| / CUBE_SIZE`, etc, ver
--- diseño 1.3). Que el resultado dé un entero exacto y que profundidad
--- sea 1 o 2 (nunca más — con 3+ la fila del medio queda sin cara
--- accesible) es una validación de la aplicación al crear el rack, no
--- un CHECK de este archivo (CUBE_SIZE es una constante de la
--- aplicación, no un dato guardado acá).
 CREATE TABLE bins (
     bin_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     -- RESTRICT: no se puede borrar de motor un rack que todavía tiene

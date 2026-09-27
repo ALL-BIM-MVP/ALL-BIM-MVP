@@ -56,8 +56,8 @@ before(async () => {
         `INSERT INTO warehouses (project_id, warehouse_style_id, name, corner1_x, corner1_z, corner2_x, corner2_z, direction, area_m2, grid_width, grid_depth, created_by)
         VALUES ($1, $2, '[test] almacén', 0, 0, 10, 10, 'norte', 100, 5, 5, $3) RETURNING warehouse_id`, [projectId, styleId, OWNER_USER_ID]);
     const [{ rack_id: rackId }] = await q(
-        `INSERT INTO racks (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, levels, direction, created_by)
-        VALUES ($1, '[test] estante', 0, 0, 1.3, 1.3, 1, 0, $2) RETURNING rack_id`, [warehouseId, OWNER_USER_ID]);
+        `INSERT INTO racks (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, bays, depth, levels, direction, created_by)
+        VALUES ($1, '[test] estante', 0, 0, 1, 1, 1, 1, 1, 0, $2) RETURNING rack_id`, [warehouseId, OWNER_USER_ID]);
     binId = (await q(`INSERT INTO bins (rack_id, bay, level, face, location_label, name) VALUES ($1, 0, 0, 0, 'A1', 'A1') RETURNING bin_id`, [rackId]))[0].bin_id;
     productId = (await q(
         `INSERT INTO products (project_id, category_id, code, is_fixed, display_id, name, unit, created_by)

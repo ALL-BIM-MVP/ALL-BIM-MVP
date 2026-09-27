@@ -121,8 +121,8 @@ before(async () => {
         `INSERT INTO warehouses (project_id, warehouse_style_id, name, corner1_x, corner1_z, corner2_x, corner2_z, direction, area_m2, grid_width, grid_depth, created_by)
         VALUES ($1, $2, '[test] almacén', 0, 0, 10, 10, 'norte', 100, 5, 5, $3) RETURNING warehouse_id`, [projectId, styleId, OWNER_USER_ID]);
     const [{ rack_id: rackId }] = await q(
-        `INSERT INTO racks (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, levels, direction, created_by)
-        VALUES ($1, '[test] estante', 0, 0, 1.3, 1.3, 2, 0, $2) RETURNING rack_id`, [warehouseId, OWNER_USER_ID]);
+        `INSERT INTO racks (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, bays, depth, levels, direction, created_by)
+        VALUES ($1, '[test] estante', 0, 0, 1, 1, 1, 1, 2, 0, $2) RETURNING rack_id`, [warehouseId, OWNER_USER_ID]);
     binA = (await q(`INSERT INTO bins (rack_id, bay, level, face, location_label, name) VALUES ($1, 0, 0, 0, 'A1', 'A1') RETURNING bin_id`, [rackId]))[0].bin_id;
     binB = (await q(`INSERT INTO bins (rack_id, bay, level, face, location_label, name) VALUES ($1, 0, 1, 0, 'A2', 'A2') RETURNING bin_id`, [rackId]))[0].bin_id;
     productY = await mkProduct(projectId, "T-2");
@@ -268,7 +268,8 @@ test("el stock nunca queda negativo: si el material ya salió, no se puede bajar
     assert.equal(await binStock(binA, productId), 10);
     const before = [await stockOf(productId), (await movementsOf(productId)).length];
     await assert.rejects(correct(S.rc1, [[item, binA, -30]]), codeOf("INSUFFICIENT_STOCK"), "bajar 30 en A dejaría la casilla en negativo");
-    await assert.rejects(voidReceipt(S.rc1), codeOf("INSUFFICIENT_STOCK"), "no se anula un ingreso cuyo material ya salió");
+    // Decisión B13 (2026-09-26): no se anula nada si parte ya salió — aviso explícito, no el genérico de arriba.
+    await assert.rejects(voidReceipt(S.rc1), codeOf("INVENTORY_ADJUSTMENT_CANNOT_VOID_ALREADY_CONSUMED"), "no se anula un ingreso cuyo material ya salió");
     assert.equal((await rcDetail(S.rc1)).voided, false);
     assert.deepEqual([await stockOf(productId), (await movementsOf(productId)).length], before, "sin cambios");
     await assertStockInvariant("con el material fuera");

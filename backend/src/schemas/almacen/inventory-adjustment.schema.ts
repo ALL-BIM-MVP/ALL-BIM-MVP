@@ -43,6 +43,25 @@ export const CorrectGoodsIssueBodySchema = z.object({
 }).refine(noDuplicateLines("goods_issue_item_id"), DUPLICATE_MESSAGE);
 export type CorrectGoodsIssueBody = z.infer<typeof CorrectGoodsIssueBodySchema>;
 
+// Traspaso entre casillas (B11, 2026-09-26): una envoltura sobre una corrección de 2 líneas
+// (−cantidad en origen, +cantidad en destino) — más simple de pedir que armar esas 2 líneas a mano.
+// Por dentro sigue siendo una `corrección` común (mismo `kind`, misma tabla, mismas validaciones).
+const transferQuantitySchema = z.coerce.number().positive().refine((v) => v <= 999_999_999_999, "La cantidad es demasiado grande");
+const noSameBin = (b: { from_bin_id: number; to_bin_id: number }) => b.from_bin_id !== b.to_bin_id;
+const SAME_BIN_MESSAGE = { message: "La casilla de origen y la de destino no pueden ser la misma.", path: ["to_bin_id"] };
+
+export const TransferGoodsReceiptBodySchema = z.object({
+    ...BaseBody,
+    goods_receipt_item_id: idSchema, from_bin_id: idSchema, to_bin_id: idSchema, quantity: transferQuantitySchema,
+}).refine(noSameBin, SAME_BIN_MESSAGE);
+export type TransferGoodsReceiptBody = z.infer<typeof TransferGoodsReceiptBodySchema>;
+
+export const TransferGoodsIssueBodySchema = z.object({
+    ...BaseBody,
+    goods_issue_item_id: idSchema, from_bin_id: idSchema, to_bin_id: idSchema, quantity: transferQuantitySchema,
+}).refine(noSameBin, SAME_BIN_MESSAGE);
+export type TransferGoodsIssueBody = z.infer<typeof TransferGoodsIssueBodySchema>;
+
 // Anulación completa: solo motivo (y fecha opcional).
 export const VoidDocumentBodySchema = z.object(BaseBody);
 export type VoidDocumentBody = z.infer<typeof VoidDocumentBodySchema>;

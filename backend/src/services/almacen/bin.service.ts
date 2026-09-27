@@ -21,7 +21,8 @@ import type { DecodedToken } from "../../models/auth.models.js";
 import { assertModulePermission } from "../project-access.service.js";
 import { ALMACEN_MODULE_CODE, getWarehouseRowOrThrow } from "./warehouse.service.js";
 import { buildModel3DAssetUrl } from "../../models/almacen/model-3d-asset.models.js";
-import type { BinIdParam, UpdateBinBody } from "../../schemas/almacen/bin.schema.js";
+import { buildSet } from "../../utils/partial-update.js";
+import type { BinContentIdParam, BinIdParam, UpdateBinBody, UpdateBinContentPoseBody } from "../../schemas/almacen/bin.schema.js";
 import type { BinContentSummary, BinRow, BinWithContents } from "../../models/almacen/bin.models.js";
 
 // Bahía/nivel se muestran 1-based en `location_label` (más legible que
@@ -89,10 +90,14 @@ export const listBinsForRack = async (rackId: number, projectId: number): Promis
             COALESCE(
                 json_agg(
                     json_build_object(
+                        'bin_content_id', bc.bin_content_id::text,
                         'product_id', p.product_id::text, 'category_id', p.category_id, 'code', p.code, 'display_id', p.display_id,
                         'name', p.name, 'unit', p.unit,
                         'quantity', bc.quantity::numeric(18,6)::text,
-                        'model_3d_asset_id', p.model_3d_asset_id, 'model_3d_format', ma.format
+                        'model_3d_asset_id', p.model_3d_asset_id, 'model_3d_format', ma.format,
+                        'position_x', bc.position_x::numeric(18,6)::text, 'position_y', bc.position_y::numeric(18,6)::text, 'position_z', bc.position_z::numeric(18,6)::text,
+                        'rotation_x', bc.rotation_x::numeric(18,6)::text, 'rotation_y', bc.rotation_y::numeric(18,6)::text, 'rotation_z', bc.rotation_z::numeric(18,6)::text,
+                        'scale', bc.scale::numeric(18,6)::text
                     )
                 ) FILTER (WHERE bc.bin_content_id IS NOT NULL),
                 '[]'
@@ -139,6 +144,42 @@ export const updateBinService = async (
     const bin = rows[0];
     if (!bin) throw new AppError(BIN_ERRORS.BIN_NOT_FOUND);
     return bin;
+};
+
+const POSE_COLUMNS = ["position_x", "position_y", "position_z", "rotation_x", "rotation_y", "rotation_z", "scale"] as const;
+
+// Ajusta CÓMO SE VE un contenido dentro de su casilla (posición/rotación/escala) — nunca
+// cuánto hay: eso solo lo cambian ingreso/vale/ajuste (inventory-movement.service.ts).
+// Por eso va con el permiso "process" de siempre, no "configure": no es un dato de
+// inventario, no genera Kardex ni pasa por inventory_adjustments.
+export const updateBinContentPoseService = async (
+    user: DecodedToken, { projectId, warehouseId, rackId, binId, binContentId }: BinContentIdParam, body: UpdateBinContentPoseBody
+): Promise<Pick<BinContentSummary, "bin_content_id" | "position_x" | "position_y" | "position_z" | "rotation_x" | "rotation_y" | "rotation_z" | "scale">> => {
+    await assertModulePermission(projectId, user.user_id, ALMACEN_MODULE_CODE, "process");
+    await getWarehouseRowOrThrow(projectId, warehouseId);
+
+    const { rowCount: rackExists } = await pool.query(
+        `SELECT 1 FROM racks WHERE rack_id = $1 AND warehouse_id = $2 AND deleted_at IS NULL`,
+        [rackId, warehouseId]
+    );
+    if (rackExists === 0) throw new AppError(RACK_ERRORS.RACK_NOT_FOUND);
+
+    const { rowCount: binExists } = await pool.query(`SELECT 1 FROM bins WHERE bin_id = $1 AND rack_id = $2 AND deleted_at IS NULL`, [binId, rackId]);
+    if (binExists === 0) throw new AppError(BIN_ERRORS.BIN_NOT_FOUND);
+
+    const { set, values } = buildSet(POSE_COLUMNS, body, 3);
+    const { rows } = await pool.query<Pick<BinContentSummary, "bin_content_id" | "position_x" | "position_y" | "position_z" | "rotation_x" | "rotation_y" | "rotation_z" | "scale">>(
+        `UPDATE bin_contents SET ${set}, updated_at = NOW()
+        WHERE bin_content_id = $1 AND bin_id = $2
+        RETURNING bin_content_id::text,
+            position_x::numeric(18,6)::text, position_y::numeric(18,6)::text, position_z::numeric(18,6)::text,
+            rotation_x::numeric(18,6)::text, rotation_y::numeric(18,6)::text, rotation_z::numeric(18,6)::text,
+            scale::numeric(18,6)::text`,
+        [binContentId, binId, ...values]
+    );
+    const content = rows[0];
+    if (!content) throw new AppError(BIN_ERRORS.CONTENT_NOT_FOUND);
+    return content;
 };
 
 // Usado por goods-receipt.service.ts/goods-issue.service.ts para

@@ -8,11 +8,11 @@ import { GoodsReceiptIdParamSchema } from "../../schemas/almacen/goods-receipt.s
 import { GoodsIssueIdParamSchema } from "../../schemas/almacen/goods-issue.schema.js";
 import {
     AdjustmentIdParamSchema, CorrectGoodsIssueBodySchema, CorrectGoodsReceiptBodySchema, ListAdjustmentsQuerySchema,
-    VoidDocumentBodySchema,
+    TransferGoodsIssueBodySchema, TransferGoodsReceiptBodySchema, VoidDocumentBodySchema,
 } from "../../schemas/almacen/inventory-adjustment.schema.js";
 import {
     correctGoodsIssueService, correctGoodsReceiptService, getAdjustmentByIdService, listAdjustmentsService,
-    voidGoodsIssueService, voidGoodsReceiptService,
+    transferGoodsIssueService, transferGoodsReceiptService, voidGoodsIssueService, voidGoodsReceiptService,
 } from "../../services/almacen/inventory-adjustment.service.js";
 
 export const correctGoodsReceiptController = asyncHandler(async (req: Request, res: Response): Promise<void> => {
@@ -61,6 +61,32 @@ export const voidGoodsIssueController = asyncHandler(async (req: Request, res: R
     if (!body.success) throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
 
     res.status(201).json(await voidGoodsIssueService(req.user, { projectId: params.data.projectId }, params.data.goodsIssueId, body.data));
+});
+
+// Traspaso entre casillas (B11) — pide (línea, origen, destino, cantidad, motivo) en vez de la
+// forma cruda de una corrección de 2 líneas.
+export const transferGoodsReceiptController = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    if (!req.user) throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+
+    const params = GoodsReceiptIdParamSchema.safeParse(req.params);
+    if (!params.success) throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+
+    const body = TransferGoodsReceiptBodySchema.safeParse(req.body);
+    if (!body.success) throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
+
+    res.status(201).json(await transferGoodsReceiptService(req.user, { projectId: params.data.projectId }, params.data.goodsReceiptId, body.data));
+});
+
+export const transferGoodsIssueController = asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    if (!req.user) throw new AppError(AUTH_ERRORS.IDENTITY_NOT_VERIFIED);
+
+    const params = GoodsIssueIdParamSchema.safeParse(req.params);
+    if (!params.success) throw new AppError(COMMON_ERRORS.INVALID_ID_PARAM);
+
+    const body = TransferGoodsIssueBodySchema.safeParse(req.body);
+    if (!body.success) throw new AppError(COMMON_ERRORS.INVALID_REQUEST_DATA);
+
+    res.status(201).json(await transferGoodsIssueService(req.user, { projectId: params.data.projectId }, params.data.goodsIssueId, body.data));
 });
 
 export const listAdjustmentsController = asyncHandler(async (req: Request, res: Response): Promise<void> => {

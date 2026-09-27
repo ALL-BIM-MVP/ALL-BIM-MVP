@@ -59,8 +59,8 @@ const seedAlmacenData = async () => {
         [projectId, styleId, OWNER_USER_ID]
     );
     const [{ rack_id: rackId }] = await q(
-        `INSERT INTO racks (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, levels, direction, created_by)
-        VALUES ($1, '[test] estante', 0, 0, 1.3, 1.3, 1, 0, $2) RETURNING rack_id`,
+        `INSERT INTO racks (warehouse_id, name, corner1_x, corner1_z, corner2_x, corner2_z, bays, depth, levels, direction, created_by)
+        VALUES ($1, '[test] estante', 0, 0, 1, 1, 1, 1, 1, 0, $2) RETURNING rack_id`,
         [warehouseId, OWNER_USER_ID]
     );
     const bins = await q(
