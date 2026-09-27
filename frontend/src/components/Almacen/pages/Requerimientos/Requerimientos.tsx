@@ -1,25 +1,33 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, Pencil, Plus, Trash2, TriangleAlert, X } from 'lucide-react';
 import DocumentAlerts from '../../components/DocumentAlerts';
+import EditForm from '../../components/EditForm';
+import DocumentPanel from '../../components/DocumentPanel';
+import ProductPicker from '../../components/ProductPicker';
+import SearchCombobox from '../../components/SearchCombobox';
+import { useDocumentFile } from '../../components/useDocumentFile';
 import { purchaseRequisitionService } from '../../../../services/almacen/purchaseRequisition.service';
 import { productService } from '../../../../services/almacen/product.service';
 import { projectService } from '../../../../services/project.service';
-import { Product, PurchaseRequisitionDetail, PurchaseRequisitionListItem } from '../../../../types/almacen.types';
+import { DraftItemMatch, DraftProductCandidate, DraftWarning, Product, PurchaseRequisitionDetail, PurchaseRequisitionListItem } from '../../../../types/almacen.types';
 import { resolveMediaUrl } from '../../../../utils/media';
 import { trimNumeric } from '../../../../utils/numberFormat';
 
+// flag: "ai" = lo llenó la IA (a revisar); "warn" = lo llenó la IA y además tiene un aviso.
 const Field: React.FC<{
   label: string; value?: string; onChange?: (v: string) => void; type?: string; className?: string; placeholder?: string;
-}> = ({ label, value, onChange, type = 'text', className, placeholder }) => (
+  required?: boolean; flag?: 'ai' | 'warn'; message?: string;
+}> = ({ label, value, onChange, type = 'text', className, placeholder, required, flag, message }) => (
   <label className={`block ${className || ''}`}>
-    <span className="text-[11px] text-gray-400 uppercase tracking-wide">{label}</span>
+    <span className="text-[11px] text-gray-500 font-medium">{label}{required && <span className="text-red-500"> *</span>}</span>
     <input
       type={type}
       value={value}
       placeholder={placeholder}
       onChange={(e) => onChange?.(e.target.value)}
-      className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
+      className={`w-full mt-1 px-2.5 py-1.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3] ${flag === 'warn' ? 'border-amber-400 bg-amber-50' : flag === 'ai' ? 'border-violet-300 bg-violet-50' : 'border-gray-200'}`}
     />
+    {message && <span className="block text-[11px] text-amber-600 mt-0.5">{message}</span>}
   </label>
 );
 
@@ -27,10 +35,23 @@ interface RequerimientosProps {
   projectId: number;
 }
 
-interface LineDraft {
-  checked: boolean;
+interface ReqLine {
+  key: number;
+  product: Product | null;
+  description: string;
   quantity: string;
+  price: string;
+  candidates: DraftProductCandidate[]; // sugeridos por la IA cuando no hubo coincidencia clara
+  read?: DraftItemMatch['read'] | null; // lo que dijo el papel en esa línea (código, unidad)
+  ai: boolean;
 }
+
+let lineKey = 0;
+const emptyLine = (): ReqLine => ({ key: ++lineKey, product: null, description: '', quantity: '', price: '', candidates: [], ai: false });
+
+// Los avisos más graves primero: un "documento repetido" no puede quedar debajo de uno cosmético.
+const WARNING_ORDER = ['DUPLICATE_DOCUMENT', 'DETECTED_TYPE_MISMATCH', 'NO_ITEMS'];
+const warningRank = (w: DraftWarning) => { const i = WARNING_ORDER.indexOf(w.code); return i === -1 ? WARNING_ORDER.length : i; };
 
 const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
   const [requisitions, setRequisitions] = useState<PurchaseRequisitionListItem[]>([]);
@@ -46,10 +67,14 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
   const [formDate, setFormDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [formRequester, setFormRequester] = useState('');
   const [formNotes, setFormNotes] = useState('');
-  const [lineDrafts, setLineDrafts] = useState<Record<number, LineDraft>>({});
+  const [lines, setLines] = useState<ReqLine[]>(() => [emptyLine()]);
+  const [aiFields, setAiFields] = useState<Record<string, boolean>>({});
+  const doc = useDocumentFile(projectId, 'requisition');
   const [saving, setSaving] = useState(false);
 
   const [addingLine, setAddingLine] = useState(false);
+  const [editingHeader, setEditingHeader] = useState(false);
+  const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [newLineProductId, setNewLineProductId] = useState<number | ''>('');
   const [newLineDescription, setNewLineDescription] = useState('');
   const [newLineQuantity, setNewLineQuantity] = useState('');
@@ -86,40 +111,86 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
     setFormDate(new Date().toISOString().slice(0, 10));
     setFormRequester('');
     setFormNotes('');
-    setLineDrafts({});
+    setLines([emptyLine()]);
+    setAiFields({});
+    doc.selectFile(null);
   };
 
-  const toggleLine = (productId: number, checked: boolean) => {
-    setLineDrafts((prev) => ({ ...prev, [productId]: { checked, quantity: prev[productId]?.quantity ?? '' } }));
+  const editField = (field: string, setter: (v: string) => void) => (v: string) => {
+    setter(v);
+    setAiFields((prev) => ({ ...prev, [field]: false }));
   };
 
-  const setLineQuantity = (productId: number, quantity: string) => {
-    setLineDrafts((prev) => ({ ...prev, [productId]: { checked: prev[productId]?.checked ?? true, quantity } }));
+  // Cuando llega un borrador: llena el formulario y marca lo que puso la IA. Lo que el papel no traía
+  // (null) no se toca. Nunca guarda nada — el usuario revisa y confirma con "Guardar".
+  useEffect(() => {
+    const result = doc.draft;
+    if (!result) return;
+    const d = result.draft;
+    const ai: Record<string, boolean> = {};
+    const fill = (field: string, value: unknown, setter: (v: string) => void) => {
+      if (value === null || value === undefined || value === '') return;
+      setter(String(value));
+      ai[field] = true;
+    };
+    fill('number', d.number, setFormNumber);
+    fill('requisition_date', d.requisition_date, setFormDate);
+    fill('requester', d.requester, setFormRequester);
+    fill('notes', d.notes, setFormNotes);
+    const nextLines: ReqLine[] = (d.items ?? []).map((it: any, i: number) => {
+      const match = result.items.find((m) => m.index === i);
+      const productId = it.product_id ?? match?.suggested_product_id ?? null;
+      return {
+        key: ++lineKey,
+        product: productId !== null ? products.find((p) => String(p.product_id) === String(productId)) ?? null : null,
+        description: it.description ?? '',
+        quantity: it.quantity_requested != null ? trimNumeric(it.quantity_requested) : '',
+        price: it.estimated_unit_price != null ? trimNumeric(it.estimated_unit_price) : '',
+        candidates: match?.product_candidates ?? [],
+        read: match?.read ?? null,
+        ai: true,
+      };
+    });
+    setLines(nextLines.length > 0 ? nextLines : [emptyLine()]);
+    setAiFields(ai);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.draft]);
+
+  const warningsFor = (field: string) => doc.draft?.warnings.filter((w) => w.field === field) ?? [];
+  const flagFor = (field: string): 'ai' | 'warn' | undefined => (aiFields[field] ? (warningsFor(field).length > 0 ? 'warn' : 'ai') : undefined);
+  const messageFor = (field: string) => (aiFields[field] ? warningsFor(field)[0]?.message : undefined);
+  const HEADER_FIELDS = ['number', 'requisition_date', 'requester', 'notes'];
+  const generalWarnings = (doc.draft?.warnings ?? []).filter((w) => !w.field || !HEADER_FIELDS.includes(w.field)).sort((a, b) => warningRank(a) - warningRank(b));
+
+  const updateLine = (key: number, patch: Partial<ReqLine>) => setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch, ai: false } : l)));
+  const searchProducts = (term: string) => {
+    const t = term.trim().toLowerCase();
+    return Promise.resolve(products.filter((p) => !t || p.code.toLowerCase().includes(t) || p.name.toLowerCase().includes(t)).slice(0, 30));
   };
 
   const createRequisition = async () => {
-    const items = Object.entries(lineDrafts)
-      .filter(([, draft]) => draft.checked && parseFloat(draft.quantity) > 0)
-      .map(([productId, draft]) => {
-        const product = products.find((p) => p.product_id === Number(productId));
-        return {
-          product_id: Number(productId),
-          description: product?.name ?? '',
-          quantity_requested: parseFloat(draft.quantity),
-        };
-      });
+    const items = lines
+      .filter((l) => l.product && parseFloat(l.quantity) > 0)
+      .map((l) => ({
+        product_id: l.product!.product_id,
+        description: l.description.trim() || l.product!.name,
+        quantity_requested: parseFloat(l.quantity),
+        estimated_unit_price: l.price.trim() ? parseFloat(l.price) : null,
+      }));
     if (!formNumber.trim() || !formRequester.trim() || items.length === 0) {
-      window.alert('Completá número, solicitante y al menos una línea con cantidad.');
+      window.alert('Completá número, solicitante y al menos una línea con producto y cantidad.');
       return;
     }
     setSaving(true);
     try {
+      const fileId = await doc.ensureUploaded();
       await purchaseRequisitionService.createRequisition(projectId, {
         number: formNumber.trim(),
         requisition_date: formDate,
         requester: formRequester.trim(),
         notes: formNotes.trim() || null,
         items,
+        file_id: fileId,
       });
       setView('list');
       resetCreateForm();
@@ -142,6 +213,8 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
   };
 
   const backToList = () => {
+    setEditingHeader(false);
+    setEditingLineId(null);
     setView('list');
     setDetail(null);
     setAddingLine(false);
@@ -210,6 +283,20 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
     }
   };
 
+  const saveHeader = async (patch: Record<string, string | number | null>) => {
+    if (!detail) return;
+    const updated = await purchaseRequisitionService.updateRequisition(projectId, detail.purchase_requisition_id, patch as any);
+    setDetail(updated);
+    setEditingHeader(false);
+  };
+
+  const saveLine = async (patch: Record<string, string | number | null>) => {
+    if (!detail || !editingLineId) return;
+    const updated = await purchaseRequisitionService.updateItem(projectId, detail.purchase_requisition_id, editingLineId, patch as any);
+    setDetail(updated);
+    setEditingLineId(null);
+  };
+
   const removeLine = async (itemId: string) => {
     if (!detail) return;
     if (!window.confirm('¿Quitar esta línea?')) return;
@@ -222,6 +309,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
   };
 
   if (view === 'new') {
+    const locked = doc.reading || saving;
     return (
       <div className="h-full overflow-y-auto p-6 @container">
         <button onClick={() => { setView('list'); resetCreateForm(); }} className="inline-flex items-center gap-1.5 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 mb-3">
@@ -229,50 +317,77 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
         </button>
         <h1 className="text-2xl font-bold text-gray-800 mb-4">Nuevo requerimiento</h1>
 
-        <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
-          <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3 mb-3">
-            <Field label="Número" value={formNumber} onChange={setFormNumber} placeholder="ej. REQ-001" />
-            <Field label="Fecha" type="date" value={formDate} onChange={setFormDate} />
-          </div>
-          <Field label="Solicitante" value={formRequester} onChange={setFormRequester} placeholder="ej. Ing. Rojas — Obra" className="mb-3" />
-          <Field label="Observaciones" value={formNotes} onChange={setFormNotes} placeholder="ej. Segundo tramo de columnas" className="mb-3" />
-
-          <p className="text-[11px] text-gray-400 uppercase tracking-wide mb-2">Líneas</p>
-          <div className="space-y-2 mb-4 max-h-96 overflow-y-auto">
-            {products.map((p) => (
-              <div key={p.product_id} className="flex items-center gap-3 border border-gray-200 rounded-lg px-3 py-2">
-                <input
-                  type="checkbox"
-                  checked={lineDrafts[p.product_id]?.checked ?? false}
-                  onChange={(e) => toggleLine(p.product_id, e.target.checked)}
-                  className="accent-[#0056b3]"
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">{p.code} — {p.name}</p>
-                  <p className="text-xs text-gray-400">{p.unit}</p>
-                </div>
-                <input
-                  type="number"
-                  placeholder="Cantidad"
-                  value={lineDrafts[p.product_id]?.quantity ?? ''}
-                  onChange={(e) => setLineQuantity(p.product_id, e.target.value)}
-                  disabled={!lineDrafts[p.product_id]?.checked}
-                  className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3] disabled:bg-gray-50"
-                />
+        <div className="grid grid-cols-1 @4xl:grid-cols-[minmax(0,1fr)_26rem] gap-4 items-start">
+          <div className={`space-y-4 ${locked ? 'pointer-events-none opacity-60' : ''}`}>
+            {(generalWarnings.length > 0 || (doc.draft?.read_notes.length ?? 0) > 0) && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+                <p className="text-xs font-semibold text-amber-700 mb-1">Revisa esto antes de guardar</p>
+                <ul className="text-xs text-amber-700 list-disc pl-4 space-y-0.5">
+                  {generalWarnings.map((w, i) => <li key={`w${i}`}>{w.message}</li>)}
+                  {doc.draft?.read_notes.map((n, i) => <li key={`n${i}`}>{n}</li>)}
+                </ul>
               </div>
-            ))}
-            {products.length === 0 && <p className="text-sm text-gray-400 italic">No hay productos en el catálogo todavía.</p>}
+            )}
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+              <div className="grid grid-cols-1 @sm:grid-cols-3 gap-3">
+                <Field label="Número" required value={formNumber} onChange={editField('number', setFormNumber)} placeholder="REQ-001" flag={flagFor('number')} message={messageFor('number')} />
+                <Field label="Fecha" required type="date" value={formDate} onChange={editField('requisition_date', setFormDate)} flag={flagFor('requisition_date')} message={messageFor('requisition_date')} />
+                <Field label="Solicitante" required value={formRequester} onChange={editField('requester', setFormRequester)} placeholder="ej. Ing. Rojas — Obra" flag={flagFor('requester')} message={messageFor('requester')} />
+              </div>
+              <Field label="Observaciones" value={formNotes} onChange={editField('notes', setFormNotes)} placeholder="ej. Segundo tramo de columnas" className="mt-3" flag={flagFor('notes')} message={messageFor('notes')} />
+            </div>
+
+            <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
+              <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+                <p className="text-sm font-semibold text-gray-800">Líneas</p>
+                <button onClick={() => setLines((prev) => [...prev, emptyLine()])} className="text-xs font-medium border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50">
+                  + Línea con producto
+                </button>
+              </div>
+              <div className="p-4 space-y-3">
+                {lines.map((l) => (
+                  <div key={l.key} className={`border rounded-lg p-3 ${l.ai ? 'border-violet-300 bg-violet-50/40' : 'border-gray-200 bg-gray-50/40'}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="flex-1 min-w-0">
+                        <ProductPicker
+                          projectId={projectId}
+                          selected={l.product}
+                          onSelect={(p) => updateLine(l.key, { product: p })}
+                          products={products}
+                          candidates={l.candidates}
+                          prefill={{ name: l.description || undefined, unit: l.read?.unit ?? undefined, code: l.read?.code ?? undefined }}
+                          onCreated={(p) => setProducts((prev) => [...prev, p])}
+                        />
+                      </div>
+                      <button
+                        onClick={() => setLines((prev) => (prev.length > 1 ? prev.filter((x) => x.key !== l.key) : [emptyLine()]))}
+                        className="flex items-center gap-1 text-xs text-gray-500 hover:text-red-500 mt-2"
+                      >
+                        <X size={13} /> Quitar
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 @sm:grid-cols-[1fr_8rem_8rem] gap-3 mt-3">
+                      <Field label="Descripción" value={l.description} onChange={(v) => updateLine(l.key, { description: v })} placeholder={l.product?.name ?? 'Como dice el documento'} />
+                      <Field label={`Cantidad${l.product ? ` (${l.product.unit})` : ''}`} type="number" value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: v })} />
+                      <Field label="Precio estimado" type="number" value={l.price} onChange={(v) => updateLine(l.key, { price: v })} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setView('list'); resetCreateForm(); }} className="border border-gray-200 rounded-lg px-5 py-2.5 text-sm font-semibold text-gray-600 hover:bg-gray-50">
+                Cancelar
+              </button>
+              <button onClick={createRequisition} disabled={saving} className="px-6 bg-[#0056b3] text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50">
+                {saving ? 'Guardando...' : 'Guardar requerimiento'}
+              </button>
+            </div>
           </div>
 
-          <div className="flex justify-end">
-            <button
-              onClick={createRequisition}
-              disabled={saving}
-              className="px-8 bg-[#0056b3] text-white rounded-lg py-2.5 font-semibold hover:bg-[#004494] transition-colors disabled:opacity-50"
-            >
-              {saving ? 'Creando...' : 'Crear requerimiento'}
-            </button>
-          </div>
+          <DocumentPanel doc={doc} disabled={saving} onRead={() => { doc.read(); }} />
         </div>
       </div>
     );
@@ -292,9 +407,14 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
               <p className="text-sm text-gray-400 mt-0.5">{detail.requester} · {detail.requisition_date}</p>
               {detail.notes && <p className="text-sm text-gray-600 mt-2">{detail.notes}</p>}
             </div>
-            <button onClick={removeRequisition} className="flex-shrink-0 border border-red-200 text-red-500 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50">
+            <div className="flex gap-2 flex-shrink-0">
+              <button onClick={() => setEditingHeader((v) => !v)} className="border border-gray-200 text-gray-600 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-gray-50">
+                Editar
+              </button>
+              <button onClick={removeRequisition} className="border border-red-200 text-red-500 rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-red-50">
               Eliminar requerimiento
             </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 @sm:grid-cols-6 gap-2 mt-4">
@@ -313,6 +433,23 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
             ))}
           </div>
         </div>
+
+        {editingHeader && (
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5 mb-4">
+            <EditForm
+              title="Editar requerimiento"
+              fields={[
+              { key: 'number', label: 'Número' },
+              { key: 'requisition_date', label: 'Fecha', type: 'date' },
+              { key: 'requester', label: 'Solicitante' },
+              { key: 'notes', label: 'Observaciones', nullable: true, span: 3 },
+            ]}
+              initial={{ number: detail.number, requisition_date: detail.requisition_date, requester: detail.requester, notes: detail.notes }}
+              onSave={saveHeader}
+              onCancel={() => setEditingHeader(false)}
+            />
+          </div>
+        )}
 
         <DocumentAlerts alerts={detail.alerts} />
 
@@ -380,6 +517,9 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
                     </div>
                   </td>
                   <td className="py-2 text-right">
+                    <button onClick={() => setEditingLineId(item.purchase_requisition_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar línea">
+                      <Pencil size={14} />
+                    </button>
                     <button onClick={() => removeLine(item.purchase_requisition_item_id)} className="text-gray-300 hover:text-red-500">
                       <Trash2 size={14} />
                     </button>
@@ -388,6 +528,26 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
               ))}
             </tbody>
           </table>
+
+          {editingLineId && (() => {
+            const editingLine = detail.items.find((x) => x.purchase_requisition_item_id === editingLineId);
+            return editingLine ? (
+              <div className="mt-4 pt-4 border-t border-gray-100">
+                <EditForm
+                  key={editingLineId}
+                  title="Editar línea"
+                  fields={[
+                    { key: 'description', label: 'Descripción', span: 3 },
+                    { key: 'quantity_requested', label: 'Cantidad', type: 'number' },
+                    { key: 'estimated_unit_price', label: 'Precio estimado', type: 'number', nullable: true },
+                  ]}
+                  initial={{ description: editingLine.description, quantity_requested: editingLine.quantity_requested, estimated_unit_price: editingLine.estimated_unit_price }}
+                  onSave={saveLine}
+                  onCancel={() => setEditingLineId(null)}
+                />
+              </div>
+            ) : null;
+          })()}
 
           {addingLine && (
             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 @sm:grid-cols-4 gap-3">

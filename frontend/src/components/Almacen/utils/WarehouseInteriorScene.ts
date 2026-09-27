@@ -64,24 +64,13 @@ function getConcreteTexture(): THREE.CanvasTexture {
   if (concreteTextureCache) return concreteTextureCache;
   const size = 1024;
   const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
+  const RES = 2; // se dibuja igual pero con el doble de píxeles, para que las vetas y juntas salgan nítidas
+  canvas.width = size * RES;
+  canvas.height = size * RES;
   const ctx = canvas.getContext('2d')!;
+  ctx.scale(RES, RES);
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, size, size);
-
-  for (let i = 0; i < 10; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    const r = size * (0.2 + Math.random() * 0.3);
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
-    grad.addColorStop(0, 'rgba(210,212,214,0.08)');
-    grad.addColorStop(1, 'rgba(210,212,214,0)');
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
   const flowAngle = -0.55;
   for (let i = 0; i < 18; i++) {
@@ -105,22 +94,6 @@ function getConcreteTexture(): THREE.CanvasTexture {
     }
   }
 
-  const tilesPerSide = 6;
-  const tileSize = size / tilesPerSide;
-  ctx.strokeStyle = 'rgba(210,209,203,0.45)';
-  ctx.lineWidth = 3;
-  for (let i = 0; i <= tilesPerSide; i++) {
-    const p = i * tileSize;
-    ctx.beginPath();
-    ctx.moveTo(p, 0);
-    ctx.lineTo(p, size);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, p);
-    ctx.lineTo(size, p);
-    ctx.stroke();
-  }
-
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.RepeatWrapping;
@@ -136,6 +109,7 @@ function buildRoom(scene: THREE.Scene, gridWidth: number, gridDepth: number) {
 
   const texture = getConcreteTexture().clone();
   texture.needsUpdate = true;
+  texture.anisotropy = 16; // three lo limita a lo que soporte la GPU; evita que el piso se empaste de lejos
   const tileSpan = 6;
   const floorW = placeableW + FLOOR_MARGIN * 2;
   const floorD = placeableD + FLOOR_MARGIN * 2;
@@ -143,10 +117,10 @@ function buildRoom(scene: THREE.Scene, gridWidth: number, gridDepth: number) {
 
   const floor = new THREE.Mesh(
     new THREE.PlaneGeometry(floorW, floorD),
-    new THREE.MeshStandardMaterial({ map: texture, roughness: 0.95, metalness: 0 })
+    new THREE.MeshStandardMaterial({ map: texture, emissive: '#ffffff', emissiveMap: texture, emissiveIntensity: 0.1, roughness: 0.95, metalness: 0 })
   );
   floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
+  floor.receiveShadow = false;
   scene.add(floor);
 
   // Líneas de la grilla ubicable — cada línea es un cubo real de 1.3m.
@@ -966,6 +940,24 @@ function fitScaleForCell(model: THREE.Object3D, cellW: number, rowDepth: number,
   return Math.min(byWidth, byDepth, byHeight);
 }
 
+/** Máximo de copias que se dibujan en una casilla; con más unidades guardadas se dibuja este tope. */
+export const MAX_STOCK_COPIES = 24;
+
+/** Cómo acomodar `count` copias del modelo dentro de una casilla (columnas × fondo × pisos) para que
+ * quepan todas: elige la disposición que deja las copias más grandes. Con 1 sola es el ajuste de siempre. */
+function packCopies(model: THREE.Object3D, count: number, cellW: number, rowDepth: number, levelHeight: number) {
+  const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+  const fit = (n: number, room: number, len: number) => (len > 1e-6 ? room / n / len : Infinity);
+  let best = { nx: 1, nz: 1, ny: 1, scale: 0, copyH: 0 };
+  for (let ny = 1; ny <= 3; ny++) for (let nx = 1; nx <= 6; nx++) for (let nz = 1; nz <= 6; nz++) {
+    if (nx * nz * ny < count) continue;
+    const scale = Math.min(fit(nx, cellW * 0.92, size.x), fit(nz, rowDepth * 0.92, size.z), fit(ny, levelHeight * 0.95, size.y));
+    const better = scale > best.scale + 1e-9 || (Math.abs(scale - best.scale) <= 1e-9 && nx * nz * ny < best.nx * best.nz * best.ny);
+    if (better) best = { nx, nz, ny, scale, copyH: size.y * scale };
+  }
+  return best;
+}
+
 const productModelCache = new Map<string, Promise<THREE.Object3D>>();
 
 /** Modelo real de un producto (asignado desde su biblioteca de modelos 3D) — solo sabe abrir URLs
@@ -1110,8 +1102,11 @@ export class BayPreviewScene {
     this.currentDepthCubes = depth;
     this.currentLevels = levelsShown;
 
-    this.orbitCam.target.set(0, height / 2 + baseY, 0);
-    this.orbitCam.setRadius(Math.max(this.currentWidth, height) * 1.7);
+    // La tarima baja todo el grupo hasta el piso, pero lo que se mira es el objeto que va ENCIMA de ella:
+    // se encuadra el volumen tarima + un nivel, no la propia tabla.
+    const frameHeight = isPallet ? PALLET_HEIGHT + LEVEL_HEIGHT : height;
+    this.orbitCam.target.set(0, isPallet ? frameHeight / 2 : height / 2 + baseY, 0);
+    this.orbitCam.setRadius(Math.max(this.currentWidth, frameHeight) * (isPallet ? 2.1 : 1.7));
   }
 
   /** Casillas (bins) reales de este rack — bay 0-indexado, level 1-indexado, face 0/1. */
@@ -1160,12 +1155,25 @@ export class BayPreviewScene {
         continue;
       }
 
-      model.scale.setScalar(fitScaleForCell(model, cellW, rowDepth, LEVEL_HEIGHT));
+      // Una copia por unidad guardada (hasta MAX_STOCK_COPIES), repartidas dentro de la casilla.
+      const copies = Math.max(1, Math.min(MAX_STOCK_COPIES, Math.round(Number(content.quantity)) || 1));
+      const { nx, nz, ny, scale, copyH } = packCopies(model, copies, cellW, rowDepth, LEVEL_HEIGHT);
       const pos = this.binWorldPos(bin);
-      model.position.set(pos.x, pos.y, pos.z);
-      model.userData.binId = bin.bin_id; // para poder resolver el click exacto sobre el objeto real, ver resolveBinAtPointer
-      targetGroup.add(model);
-      this.stockObjects.set(bin.bin_id, model);
+      const stack = new THREE.Group();
+      stack.userData.binId = bin.bin_id; // para poder resolver el click exacto sobre el objeto real, ver resolveBinAtPointer
+      for (let n = 0; n < copies; n++) {
+        const i = n % nx, j = Math.floor(n / nx) % nz, k = Math.floor(n / (nx * nz));
+        const copy = n === 0 ? model : model.clone(true);
+        copy.scale.setScalar(scale);
+        copy.position.set(
+          pos.x - cellW / 2 + (i + 0.5) * (cellW / nx),
+          pos.y + (ny === 1 ? 0 : k * copyH),
+          pos.z - rowDepth / 2 + (j + 0.5) * (rowDepth / nz),
+        );
+        stack.add(copy);
+      }
+      targetGroup.add(stack);
+      this.stockObjects.set(bin.bin_id, stack);
     }
   }
 

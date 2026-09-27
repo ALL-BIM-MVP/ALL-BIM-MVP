@@ -10,12 +10,13 @@ interface SearchComboboxProps<T> {
   placeholder?: string;
   emptyMessage?: string;
   footer?: React.ReactNode;
+  inputClassName?: string; // borde/fondo del input (ej. marca de "lo llenó la IA")
 }
 
 /** Combo con búsqueda: escribís, filtra pegándole al backend (debounce de 300ms), elegís de la
  * lista. Mientras no se edita, muestra la etiqueta de lo ya elegido en vez de un id suelto. */
 function SearchCombobox<T>({
-  selected, onSelect, search, getId, getLabel, getSubLabel, placeholder, emptyMessage = 'Sin resultados.', footer,
+  selected, onSelect, search, getId, getLabel, getSubLabel, placeholder, emptyMessage = 'Sin resultados.', footer, inputClassName = 'border-gray-200',
 }: SearchComboboxProps<T>) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
@@ -50,7 +51,7 @@ function SearchCombobox<T>({
         onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => { setQuery(''); setOpen(true); }}
         placeholder={placeholder}
-        className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
+        className={`w-full mt-1 px-2.5 py-1.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3] ${inputClassName}`}
       />
       {open && (
         <div className="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">

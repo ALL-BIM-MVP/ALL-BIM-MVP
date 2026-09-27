@@ -1,13 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, MapPin, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowLeft, Plus, Trash2, MapPin, X } from 'lucide-react';
 import CiudadModal from '../../components/CiudadModal';
 import InlineModelPreview from '../../components/InlineModelPreview';
+import CreateProductModal from '../../components/CreateProductModal';
+import DocumentPanel from '../../components/DocumentPanel';
+import SupplierPicker from '../../components/SupplierPicker';
+import { useDocumentFile } from '../../components/useDocumentFile';
+import { DraftNotices, Field, FieldFlag, sortWarnings } from '../../components/FormField';
 import { productService } from '../../../../services/almacen/product.service';
 import { goodsReceiptService } from '../../../../services/almacen/goodsReceipt.service';
-import { supplierService } from '../../../../services/almacen/supplier.service';
 import { purchaseOrderService } from '../../../../services/almacen/purchaseOrder.service';
-import { projectService } from '../../../../services/project.service';
-import { GoodsReceipt, GoodsReceiptEntryType, Product, PurchaseOrderListItem, Supplier } from '../../../../types/almacen.types';
+import { DraftProductCandidate, GoodsReceipt, GoodsReceiptEntryType, Product, PurchaseOrderListItem, Supplier } from '../../../../types/almacen.types';
 import { trimNumeric } from '../../../../utils/numberFormat';
 
 interface ItemLocation { binId: number; label: string; quantity: string; }
@@ -22,24 +25,11 @@ interface ItemRow {
   cantidad: string;
   quantityPerNote: string;
   locations: ItemLocation[];
+  candidates?: DraftProductCandidate[]; // sugeridos por la IA cuando no hubo coincidencia clara
+  ai?: boolean; // lo llenó la IA y no se tocó
 }
 
 const emptyItem = (): ItemRow => ({ purchaseOrderItemId: null, productId: '', productLabel: '', unit: '', cantidad: '', quantityPerNote: '', locations: [] });
-
-const Field: React.FC<{
-  label: string; value?: string; onChange?: (v: string) => void; type?: string; className?: string; placeholder?: string;
-}> = ({ label, value, onChange, type = 'text', className, placeholder }) => (
-  <label className={`block ${className || ''}`}>
-    <span className="text-[11px] text-gray-400 uppercase tracking-wide">{label}</span>
-    <input
-      type={type}
-      value={value}
-      placeholder={placeholder}
-      onChange={(e) => onChange?.(e.target.value)}
-      className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-    />
-  </label>
-);
 
 interface NuevoIngresoProps {
   projectId: number;
@@ -49,7 +39,6 @@ interface NuevoIngresoProps {
 
 const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCancel }) => {
   const [products, setProducts] = useState<Product[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [orders, setOrders] = useState<PurchaseOrderListItem[]>([]);
 
   const [entryType, setEntryType] = useState<GoodsReceiptEntryType>('rapida');
@@ -61,14 +50,19 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
   const [receivedDate, setReceivedDate] = useState('');
   const [items, setItems] = useState<ItemRow[]>([emptyItem()]);
   const [ciudadItemIndex, setCiudadItemIndex] = useState<number | null>(null);
-  const [scanFile, setScanFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
+  const [creatingProductFor, setCreatingProductFor] = useState<number | null>(null);
+  const [aiFields, setAiFields] = useState<Record<string, boolean>>({});
+  const [lineNote, setLineNote] = useState<string | null>(null);
+  const pendingOrder = useRef<string | null>(null);
+  const appliedLines = useRef('');
+  const doc = useDocumentFile(projectId, 'goods-receipt');
 
   // Siempre trae catálogo/proveedores frescos al entrar — nunca cachea entre visitas.
   useEffect(() => {
     if (!projectId) return;
     productService.getProducts(projectId).then(setProducts).catch(() => setProducts([]));
-    supplierService.getSuppliers(projectId).then(setSuppliers).catch(() => setSuppliers([]));
   }, [projectId]);
 
   // El proveedor de la orden tiene que ser el mismo que el del ingreso — solo se listan sus órdenes.
@@ -76,8 +70,28 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
     setPurchaseOrderId('');
     setOrders([]);
     if (!supplierId) return;
-    purchaseOrderService.getOrders(projectId, { supplierId: Number(supplierId) }).then(setOrders).catch(() => setOrders([]));
+    purchaseOrderService.getOrders(projectId, { supplierId: Number(supplierId) })
+      .then((list) => {
+        setOrders(list);
+        if (pendingOrder.current) {
+          const id = pendingOrder.current;
+          pendingOrder.current = null;
+          pickOrder(id);
+        }
+      })
+      .catch(() => setOrders([]));
   }, [supplierId, projectId]);
+
+  const chooseSupplier = (supplier: Supplier | null) => {
+    setSelectedSupplier(supplier);
+    setSupplierId(supplier ? Number(supplier.supplier_id) : '');
+    setAiFields((prev) => ({ ...prev, supplier_id: false }));
+  };
+
+  const editField = (field: string, setter: (v: string) => void) => (v: string) => {
+    setter(v);
+    setAiFields((prev) => ({ ...prev, [field]: false }));
+  };
 
   const isFromOrder = entryType === 'normal' && purchaseOrderId !== '';
 
@@ -85,6 +99,8 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
   // el usuario ajusta la cantidad recibida (puede ser parcial) antes de repartir en casillas.
   const pickOrder = async (id: string) => {
     setPurchaseOrderId(id);
+    setLineNote(null);
+    appliedLines.current = '';
     if (!id) {
       setItems([emptyItem()]);
       return;
@@ -124,6 +140,97 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
   const sumLocations = (item: ItemRow) => item.locations.reduce((s, l) => s + (parseFloat(l.quantity) || 0), 0);
   const getProduct = (id: number | '') => products.find((p) => p.product_id === id);
 
+  // Borrador leído de la guía: llena la cabecera y el proveedor; si cita una orden que existe, la elige y carga
+  // sus líneas. En la guía NO salen lo recibido ni las casillas (eso lo pone el usuario): solo lo que dice el
+  // papel ("Según guía"). Lo que no trae (null) no se toca. Nunca guarda nada.
+  useEffect(() => {
+    const result = doc.draft;
+    if (!result) return;
+    const d = result.draft;
+    const ai: Record<string, boolean> = {};
+    const fill = (field: string, value: unknown, setter: (v: string) => void) => {
+      if (value === null || value === undefined || value === '') return;
+      setter(String(value));
+      ai[field] = true;
+    };
+    fill('delivery_note_series', d.delivery_note_series, setDeliveryNoteSeries);
+    fill('delivery_note_number', d.delivery_note_number, setDeliveryNoteNumber);
+    fill('delivery_note_date', d.delivery_note_date, setDeliveryNoteDate);
+    if (result.supplier.match) ai.supplier_id = true;
+    setAiFields(ai);
+    appliedLines.current = '';
+    setLineNote(null);
+
+    const orderMatch = result.purchase_order.match;
+    if (orderMatch) {
+      setEntryType('normal');
+      purchaseOrderService.getOrderById(projectId, orderMatch.purchase_order_id).then((order) => {
+        if (Number(supplierId) === Number(order.supplier.supplier_id)) {
+          pickOrder(orderMatch.purchase_order_id);
+        } else {
+          pendingOrder.current = orderMatch.purchase_order_id;
+          setSelectedSupplier(order.supplier as unknown as Supplier);
+          setSupplierId(Number(order.supplier.supplier_id));
+        }
+      }).catch(() => {});
+      return;
+    }
+    if (result.supplier.match) {
+      setSelectedSupplier(result.supplier.match as unknown as Supplier);
+      setSupplierId(Number(result.supplier.match.supplier_id));
+    }
+    if (!isFromOrder) {
+      const next: ItemRow[] = (d.items ?? []).map((it: any, i: number) => {
+        const match = result.items.find((m) => m.index === i);
+        const productId = it.product_id ?? match?.suggested_product_id ?? null;
+        return {
+          ...emptyItem(),
+          productId: productId !== null && products.some((p) => String(p.product_id) === String(productId)) ? Number(productId) : '',
+          quantityPerNote: it.quantity_per_delivery_note != null ? trimNumeric(it.quantity_per_delivery_note) : '',
+          candidates: match?.product_candidates ?? [],
+          ai: true,
+        };
+      });
+      if (next.length > 0) setItems(next);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc.draft]);
+
+  // Con orden: cada línea leída se empareja con la línea de la orden que ya calculó el servidor
+  // (order_item_candidate); si no hubo, con la del MISMO producto. Una sola vez por borrador+orden.
+  useEffect(() => {
+    const result = doc.draft;
+    if (!result || !isFromOrder || items.some((it) => it.purchaseOrderItemId === null)) return;
+    const key = `${result.file_id}:${purchaseOrderId}`;
+    if (appliedLines.current === key) return;
+    appliedLines.current = key;
+    const readItems: any[] = result.draft.items ?? [];
+    const used = new Set<number>();
+    setItems((prev) => prev.map((row) => {
+      const idx = readItems.findIndex((it, i) => {
+        if (used.has(i)) return false;
+        const cited = it.purchase_order_item_id ?? result.items.find((m) => m.index === i)?.order_item_candidate?.purchase_order_item_id ?? null;
+        if (cited !== null) return String(cited) === row.purchaseOrderItemId;
+        const productId = it.product_id ?? result.items.find((m) => m.index === i)?.suggested_product_id ?? null;
+        return productId !== null && row.productId !== '' && String(productId) === String(row.productId);
+      });
+      if (idx === -1) return row;
+      used.add(idx);
+      const q = readItems[idx].quantity_per_delivery_note;
+      return { ...row, quantityPerNote: q != null ? trimNumeric(q) : row.quantityPerNote, ai: q != null };
+    }));
+    const orphans = readItems.filter((_, i) => !used.has(i));
+    setLineNote(orphans.length > 0
+      ? `${orphans.length} línea(s) de la guía no coinciden con ninguna línea de la orden elegida: ${orphans.map((o) => o.description).filter(Boolean).join('; ')}.`
+      : null);
+  }, [doc.draft, purchaseOrderId, items, entryType]);
+
+  const warningsFor = (field: string) => doc.draft?.warnings.filter((w) => w.field === field) ?? [];
+  const flagFor = (field: string): FieldFlag => (aiFields[field] ? (warningsFor(field).length > 0 ? 'warn' : 'ai') : undefined);
+  const messageFor = (field: string) => (aiFields[field] ? warningsFor(field)[0]?.message : undefined);
+  const HEADER_FIELDS = ['delivery_note_series', 'delivery_note_number', 'delivery_note_date', 'supplier_id'];
+  const generalWarnings = sortWarnings((doc.draft?.warnings ?? []).filter((w) => !w.field || !HEADER_FIELDS.includes(w.field)));
+
   const submit = async () => {
     if (!supplierId) { window.alert('Elegí un proveedor.'); return; }
     if (!deliveryNoteSeries.trim() || !deliveryNoteNumber.trim()) { window.alert('Falta la serie o el número de la guía de remisión.'); return; }
@@ -152,6 +259,7 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
 
     setSaving(true);
     try {
+      const fileId = await doc.ensureUploaded();
       const receipt = await goodsReceiptService.createGoodsReceipt(projectId, {
         supplier_id: Number(supplierId),
         entry_type: entryType,
@@ -161,15 +269,8 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
         delivery_note_date: deliveryNoteDate,
         received_date: receivedDate || undefined,
         items: payloadItems,
+        file_id: fileId,
       });
-      if (scanFile) {
-        try {
-          const uploaded = await projectService.uploadFile(projectId, scanFile, 'almacen');
-          await goodsReceiptService.setFile(projectId, receipt.goods_receipt_id, uploaded.file_id);
-        } catch (err) {
-          window.alert(err instanceof Error ? `Ingreso registrado, pero no se pudo adjuntar el escaneo: ${err.message}` : 'Ingreso registrado, pero no se pudo adjuntar el escaneo.');
-        }
-      }
       onCreated(receipt);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'No se pudo registrar el ingreso.');
@@ -180,11 +281,16 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
 
   return (
     <div className="h-full overflow-y-auto p-6 @container">
-      <button onClick={onCancel} className="text-sm text-[#0056b3] font-medium mb-3">← Volver a Ingresos</button>
-      <h1 className="text-2xl font-bold text-gray-800 mb-4">Nuevo ingreso</h1>
+      <button onClick={onCancel} className="inline-flex items-center gap-1.5 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50 mb-3">
+        <ArrowLeft size={15} /> Volver a Ingresos
+      </button>
+      <h1 className="text-2xl font-bold text-gray-800">Nuevo ingreso</h1>
+      <p className="text-sm text-gray-500 mb-4 max-w-2xl">Sube la guía de remisión a la derecha: la ves mientras llenas el formulario y, si quieres, la IA lee sus datos (lo recibido y las casillas los pones tú).</p>
 
-      <div className="flex flex-col @xl:flex-row gap-4 items-stretch">
-        <div className="w-full @xl:flex-1 @xl:max-w-3xl bg-white border border-gray-200 rounded-xl shadow-sm p-5">
+      <DraftNotices warnings={generalWarnings} readNotes={doc.draft?.read_notes ?? []} />
+
+      <div className={`flex flex-col @4xl:flex-row gap-4 items-start ${doc.reading || saving ? '[&>div:first-child]:pointer-events-none [&>div:first-child]:opacity-60' : ''}`}>
+        <div className="w-full @4xl:flex-1 min-w-0 bg-white border border-gray-200 rounded-xl shadow-sm p-5">
           <p className="text-sm font-semibold text-gray-700 mb-3">Tipo de entrada</p>
           <div className="grid grid-cols-2 gap-2 mb-4">
             <button
@@ -203,19 +309,17 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
 
           <p className="text-sm font-semibold text-gray-700 mb-3">Datos de la guía</p>
           <div className="grid grid-cols-1 @sm:grid-cols-2 gap-3 mb-3">
-            <label className="block">
-              <span className="text-[11px] text-gray-400 uppercase tracking-wide">Proveedor</span>
-              <select
-                value={supplierId}
-                onChange={(e) => setSupplierId(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                className="w-full mt-1 px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-[#0056b3]/30 focus:border-[#0056b3]"
-              >
-                <option value="">Elegir...</option>
-                {suppliers.map((s) => (
-                  <option key={s.supplier_id} value={s.supplier_id}>{s.name} — {s.ruc}</option>
-                ))}
-              </select>
-            </label>
+            <div>
+              <span className="text-[11px] text-gray-500 font-medium">Proveedor<span className="text-red-500"> *</span></span>
+              <SupplierPicker
+                projectId={projectId}
+                selected={selectedSupplier}
+                onSelect={chooseSupplier}
+                flag={flagFor('supplier_id')}
+                message={messageFor('supplier_id')}
+                offer={doc.draft?.supplier.to_create ?? null}
+              />
+            </div>
             {entryType === 'normal' && (
               <label className="block">
                 <span className="text-[11px] text-gray-400 uppercase tracking-wide">Orden de compra (opcional)</span>
@@ -234,13 +338,14 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
             )}
           </div>
           <div className="grid grid-cols-1 @sm:grid-cols-4 gap-3 mb-4">
-            <Field label="Serie" value={deliveryNoteSeries} onChange={setDeliveryNoteSeries} placeholder="T001" />
-            <Field label="Número" value={deliveryNoteNumber} onChange={setDeliveryNoteNumber} placeholder="000451" />
-            <Field label="Fecha de guía" type="date" value={deliveryNoteDate} onChange={setDeliveryNoteDate} />
-            <Field label="Fecha de recepción (opcional)" type="date" value={receivedDate} onChange={setReceivedDate} />
+            <Field label="Serie" required value={deliveryNoteSeries} onChange={editField('delivery_note_series', setDeliveryNoteSeries)} placeholder="T001" hint="1 a 4 letras o números" flag={flagFor('delivery_note_series')} message={messageFor('delivery_note_series')} />
+            <Field label="Número" required value={deliveryNoteNumber} onChange={editField('delivery_note_number', setDeliveryNoteNumber)} placeholder="000451" hint="1 a 8 dígitos" flag={flagFor('delivery_note_number')} message={messageFor('delivery_note_number')} />
+            <Field label="Fecha de guía" required type="date" value={deliveryNoteDate} onChange={editField('delivery_note_date', setDeliveryNoteDate)} flag={flagFor('delivery_note_date')} message={messageFor('delivery_note_date')} />
+            <Field label="Fecha de recepción" type="date" value={receivedDate} onChange={setReceivedDate} hint="Opcional: si no, hoy" />
           </div>
 
           <p className="text-sm font-semibold text-gray-700 mt-5 mb-3">Ítems que llegan</p>
+          {lineNote && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">{lineNote}</p>}
           <div className="space-y-4">
             {items.map((item, i) => {
               const product = isFromOrder ? null : getProduct(item.productId);
@@ -248,7 +353,7 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
               const diff = total - sumLocations(item);
               return (
                 <div key={i} className="border border-gray-100 rounded-lg p-3">
-                  <div className="grid grid-cols-1 @sm:grid-cols-[1fr_8rem_auto] gap-2 items-end">
+                  <div className="grid grid-cols-1 @sm:grid-cols-[1fr_8rem_8rem_auto] gap-2 items-end">
                     {isFromOrder ? (
                       <div>
                         <span className="text-[11px] text-gray-400 uppercase tracking-wide">Producto (de la orden)</span>
@@ -267,12 +372,30 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
                             <option key={p.product_id} value={p.product_id}>{p.code} — {p.name}</option>
                           ))}
                         </select>
+                        <button type="button" onClick={() => setCreatingProductFor(i)} className="block mt-1 text-[11px] font-medium text-[#0056b3] hover:underline">+ Crear producto</button>
+                        {item.productId === '' && (item.candidates?.length ?? 0) > 0 && (
+                          <span className="block mt-1 text-[11px] text-gray-500">
+                            Posibles:{' '}
+                            {item.candidates!.map((c) => {
+                              const prod = products.find((p) => String(p.product_id) === String(c.product_id));
+                              return prod ? (
+                                <button key={c.product_id} type="button" onClick={() => updateItem(i, { productId: prod.product_id })} className="text-[#0056b3] hover:underline mr-2">{prod.code} — {prod.name}</button>
+                              ) : null;
+                            })}
+                          </span>
+                        )}
                       </label>
                     )}
                     <Field
                       label={`Cantidad recibida${product ? ` (${product.unit})` : isFromOrder && item.unit ? ` (${item.unit})` : ''}`}
                       value={item.cantidad}
                       onChange={(v) => updateItem(i, { cantidad: v })}
+                    />
+                    <Field
+                      label="Según guía"
+                      value={item.quantityPerNote}
+                      onChange={(v) => updateItem(i, { quantityPerNote: v, ai: false })}
+                      flag={item.ai ? 'ai' : undefined}
                     />
                     <button
                       onClick={() => removeItem(i)}
@@ -317,15 +440,6 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
             </button>
           )}
 
-          <div className="mt-5">
-            <span className="text-[11px] text-gray-400 uppercase tracking-wide">Escaneo de la guía (opcional)</span>
-            <input
-              type="file"
-              onChange={(e) => setScanFile(e.target.files?.[0] ?? null)}
-              className="block w-full mt-1 text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-[#0056b3] hover:file:bg-blue-100"
-            />
-          </div>
-
           <div className="flex justify-end">
             <button
               onClick={submit}
@@ -337,23 +451,34 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
           </div>
         </div>
 
-        {items.some((it) => getProduct(it.productId)?.model_3d_asset_id != null) && (
-          <div className="w-full @xl:w-[34rem] flex-shrink-0 space-y-4">
-            {items.map((item, i) => {
-              const previewProduct = getProduct(item.productId);
-              if (previewProduct?.model_3d_asset_id == null) return null;
-              return (
-                <div key={i} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
-                  <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 truncate">
-                    {previewProduct.code} — {previewProduct.name}
-                  </p>
-                  <InlineModelPreview projectId={projectId} assetId={previewProduct.model_3d_asset_id} className="w-full h-[32rem]" />
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <div className="w-full @4xl:w-[26rem] flex-shrink-0 space-y-4">
+          <DocumentPanel doc={doc} disabled={saving} onRead={() => { doc.read(); }} />
+          {items.map((item, i) => {
+            const previewProduct = getProduct(item.productId);
+            if (previewProduct?.model_3d_asset_id == null) return null;
+            return (
+              <div key={i} className="bg-white border border-gray-200 rounded-xl shadow-sm p-4">
+                <p className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-2 truncate">
+                  {previewProduct.code} — {previewProduct.name}
+                </p>
+                <InlineModelPreview projectId={projectId} assetId={previewProduct.model_3d_asset_id} className="w-full h-80" />
+              </div>
+            );
+          })}
+        </div>
       </div>
+
+      {creatingProductFor !== null && (
+        <CreateProductModal
+          projectId={projectId}
+          onClose={() => setCreatingProductFor(null)}
+          onCreated={(product) => {
+            setProducts((prev) => [...prev, product]);
+            updateItem(creatingProductFor, { productId: product.product_id });
+            setCreatingProductFor(null);
+          }}
+        />
+      )}
 
       {ciudadItemIndex !== null && (
         <CiudadModal

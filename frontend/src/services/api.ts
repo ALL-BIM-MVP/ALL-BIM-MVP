@@ -100,10 +100,10 @@ const refreshToken = async (): Promise<string | null> => {
   return refreshPromise;
 };
 
-const request = async (endpoint: string, options: RequestInit = {}) => {
+const request = async (endpoint: string, options: RequestInit = {}, timeoutOverrideMs?: number) => {
   let token = localStorage.getItem('accessToken');
   const isFormData = options.body instanceof FormData;
-  const timeoutMs = isFormData ? FILE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
+  const timeoutMs = timeoutOverrideMs ?? (isFormData ? FILE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS);
 
   const headers = {
     ...options.headers,
@@ -139,7 +139,8 @@ const request = async (endpoint: string, options: RequestInit = {}) => {
 
 export const api = {
   get: (endpoint: string) => request(endpoint, { method: 'GET' }),
-  post: (endpoint: string, data: any) => request(endpoint, { method: 'POST', body: JSON.stringify(data) }),
+  // timeoutMs: para llamadas lentas a propósito (ej. la lectura de un documento con IA, hasta 2-3 min).
+  post: (endpoint: string, data: any, timeoutMs?: number) => request(endpoint, { method: 'POST', body: JSON.stringify(data) }, timeoutMs),
   put: (endpoint: string, data: any) => request(endpoint, { method: 'PUT', body: JSON.stringify(data) }),
   patch: (endpoint: string, data: any) => request(endpoint, { method: 'PATCH', body: JSON.stringify(data) }),
   delete: (endpoint: string) => request(endpoint, { method: 'DELETE' }),
