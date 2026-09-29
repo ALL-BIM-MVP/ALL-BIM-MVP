@@ -1,0 +1,9 @@
+# node_modules/dist se reinstalan/rebuildean DENTRO de la imagen
+# (npm ci / vite build) — copiar los de acá afuera pisa lo que "npm ci"
+# ya instaló bien adentro del contenedor con binarios de la plataforma
+# del HOST (ej. node_modules instalado en Windows trae node.exe en los
+# shims de .bin/, que no existe en el contenedor Linux — causa real de
+# "exec: node.exe: not found" en un build de frontend). Mismo criterio
+# que ya usa el .dockerignore de la raíz para backend/.
+node_modules/
+dist/
