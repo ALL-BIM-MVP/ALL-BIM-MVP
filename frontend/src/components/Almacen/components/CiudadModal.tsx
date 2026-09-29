@@ -1,14 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Building2, ChevronRight, Move, Pencil, Plus, RotateCw, Search, Tractor, Trash2, Warehouse, X } from 'lucide-react';
+import { Building2, ChevronRight, Move, Pencil, Plus, RotateCw, Search, Trash2, Warehouse, X } from 'lucide-react';
 import { CityScene, DEFAULT_WAREHOUSE_SIZE, Footprint, WAREHOUSE_SIZES, WarehouseSizeKey } from '../utils/CityScene';
-import { BayPreviewScene, GridPoint, isPalletName, MAX_STOCK_COPIES, WarehouseInteriorScene } from '../utils/WarehouseInteriorScene';
-import { CUBE_SIZE, cubesToMeters, DEFAULT_GRID, directionToRotation, footprintCorners, footprintFromCorners, rotationToDirection } from '../utils/warehouseMapping';
+import { BayPreviewScene, GridPoint, isPalletName, MAX_STOCK_COPIES, ObjectOrientation, WarehouseInteriorScene } from '../utils/WarehouseInteriorScene';
+import { DEFAULT_GRID, directionToRotation, footprintCorners, footprintFromCorners, rotationToDirection } from '../utils/warehouseMapping';
 import { Bin, Rack, Warehouse as WarehouseData, WarehouseInput, WarehouseStyle } from '../../../types/almacen.types';
 import { warehouseStyleService } from '../../../services/almacen/warehouseStyle.service';
 import { warehouseService } from '../../../services/almacen/warehouse.service';
 import { rackService } from '../../../services/almacen/rack.service';
-import BinTrace from './BinTrace';
+import { binService } from '../../../services/almacen/bin.service';
+import ProductTrace from './ProductTrace';
+import ElementDocumentTrace from './ElementDocumentTrace';
 
 // Alto aprox. del chip de la etiqueta flotante (dos líneas): con -translate-y-full
 // nunca puede quedar más arriba de esto, o se mete visualmente en la franja del header.
@@ -32,7 +34,17 @@ interface CiudadModalProps {
   // Cuando el modal se abre desde un ítem del ingreso, en vez de uso libre
   // te lleva a elegir una casilla puntual y confirmarla como su ubicación —
   // el bin_id real es lo que de verdad importa, label es solo para mostrar.
-  pickMode?: { itemLabel: string; itemModelPath?: string | null; onConfirm: (bin: { binId: number; label: string }) => void };
+  // warehouseId/rackId van para que quien llama pueda, después de crear el ingreso (recién ahí existe
+  // el bin_content_id real), guardar escala/rotación con binService.updateContentPose (Fase A).
+  pickMode?: {
+    itemLabel: string;
+    itemModelPath?: string | null;
+    onConfirm: (bin: { binId: number; label: string; warehouseId: number; rackId: number; scale: number; rotationDeg: number; orientation: ObjectOrientation }) => void;
+    // Atajo "Llenar todo el estante" (a modo de prueba): agrega TODAS las casillas vacías del estante
+    // que se está mirando como ubicaciones del ítem, 1 unidad cada una — quien llama decide qué hacer
+    // con cada una (hoy, NuevoIngreso les pone quantity: '1').
+    onFillAll?: (bins: Array<{ binId: number; label: string; warehouseId: number; rackId: number }>) => void;
+  };
 }
 
 const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode }) => {
@@ -94,6 +106,14 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
   const [casillaTagPos, setCasillaTagPos] = useState<{ x: number; y: number } | null>(null);
   const [objectScale, setObjectScale] = useState(1);
   const [objectRotationDeg, setObjectRotationDeg] = useState(0);
+  const [objectOrientation, setObjectOrientation] = useState<ObjectOrientation>('pie');
+
+  // Ajuste (Fase A): tamaño/postura de un contenido YA guardado en una casilla — aparte del ingreso,
+  // no genera Kardex. Se reinicia con lo que ya tenga guardado cada vez que se selecciona otra casilla.
+  const [poseScale, setPoseScale] = useState(1);
+  const [poseOrientation, setPoseOrientation] = useState<ObjectOrientation>('pie');
+  const [poseSaving, setPoseSaving] = useState(false);
+  const [elementTab, setElementTab] = useState<'info' | 'editar' | 'trazabilidad'>('info');
 
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const previewContainerRef = useRef<HTMLDivElement>(null);
@@ -121,6 +141,7 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
     setCasillaTagPos(null);
     setObjectScale(1);
     setObjectRotationDeg(0);
+    setObjectOrientation('pie');
     if (!viewingBayId || !projectId || !interiorWarehouse) return;
     const rackId = Number(viewingBayId);
     if (!Number.isFinite(rackId)) return;
@@ -133,7 +154,7 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
   useEffect(() => {
     const scene = previewSceneRef.current;
     if (!scene || !rackDetail) return;
-    scene.update(rackDetail.width, rackDetail.depth, rackDetail.levels, isPalletName(rackDetail.name));
+    scene.update(rackDetail.bays, rackDetail.depth, rackDetail.levels, isPalletName(rackDetail.name));
     scene.setBins(rackDetail.bins ?? [], binFace);
     scene.renderStock(rackDetail.bins ?? []);
   }, [rackDetail, binFace]);
@@ -151,16 +172,47 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
             setSelectedBin(bin);
             setObjectScale(1);
             setObjectRotationDeg(0);
+            setObjectOrientation('pie');
           }
         : null
     );
     scene.setViewSelectHandler(!pickMode && viewingBayId ? (bin) => setSelectedBin(bin) : null);
   }, [viewingBayId, pickMode, rackDetail, binFace]);
 
-  // Escala/rotación a mano del objeto ya puesto en la casilla elegida.
+  // Escala/rotación/echado a mano del objeto ya puesto en la casilla elegida.
   useEffect(() => {
-    if (selectedBin) previewSceneRef.current?.setObjectAdjustment(objectScale, objectRotationDeg);
-  }, [selectedBin, objectScale, objectRotationDeg]);
+    if (selectedBin) previewSceneRef.current?.setObjectAdjustment(objectScale, objectRotationDeg, objectOrientation);
+  }, [selectedBin, objectScale, objectRotationDeg, objectOrientation]);
+
+  // Panel "Ajustar" (Fase A): arranca con lo que ya tenga guardado el contenido de la casilla recién
+  // seleccionada — no con lo que quedó de la casilla anterior. La pestaña vuelve a "Información" con
+  // cada elemento nuevo, para no quedar en "Editar"/"Trazabilidad" del anterior por error.
+  useEffect(() => {
+    const content = selectedBin?.contents?.[0];
+    setPoseScale(content?.scale ?? 1);
+    setPoseOrientation(content?.rotation_z ? 'lado' : content?.rotation_x ? 'echado' : 'pie');
+    setElementTab('info');
+  }, [selectedBin?.bin_id]);
+
+  const saveContentPose = async () => {
+    const content = selectedBin?.contents?.[0];
+    if (!content || !interiorWarehouse || !selectedBin || !viewingBayId) return;
+    setPoseSaving(true);
+    try {
+      const updated = await binService.updateContentPose(
+        projectId, interiorWarehouse.warehouse_id, Number(viewingBayId), selectedBin.bin_id, content.bin_content_id,
+        { scale: poseScale, rotation_x: poseOrientation === 'echado' ? Math.PI / 2 : 0, rotation_z: poseOrientation === 'lado' ? Math.PI / 2 : 0 }
+      );
+      // El backend devuelve solo la pose, no el producto — se combina con lo que ya había, no se reemplaza entero.
+      const applyUpdate = (bin: Bin): Bin => ({ ...bin, contents: [{ ...content, ...updated }, ...(bin.contents?.slice(1) ?? [])] });
+      setSelectedBin((prev) => (prev ? applyUpdate(prev) : prev));
+      setRackDetail((prev) => (prev ? { ...prev, bins: prev.bins?.map((b) => (b.bin_id === selectedBin.bin_id ? applyUpdate(b) : b)) } : prev));
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'No se pudo guardar el ajuste.');
+    } finally {
+      setPoseSaving(false);
+    }
+  };
 
   // Catálogo real de estilos (GET /api/warehouse-styles) — 3 fijos, de solo lectura.
   useEffect(() => {
@@ -194,16 +246,22 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
       name,
       levels: lv,
       direction: 0,
-      corner1_x: cubesToMeters(gx1),
-      corner1_z: cubesToMeters(gz1),
-      corner2_x: cubesToMeters(gx2),
-      corner2_z: cubesToMeters(gz2),
+      bays: Math.abs(gx2 - gx1),
+      depth: Math.abs(gz2 - gz1) as 1 | 2,
+      corner1_x: gx1,
+      corner1_z: gz1,
+      corner2_x: gx2,
+      corner2_z: gz2,
     });
     // Por categoría: el estante con la cabecera de color contra la pared del fondo, y delante 3
-    // tarimas en fila (2 cubos de ancho, 1 de separación) — ver isPalletName en WarehouseInteriorScene.
+    // tarimas de tamaño distinto, cada una separada y salteada (ni todas en la misma fila ni
+    // pegadas entre sí, para que se noten como piezas distintas) — ver isPalletName en
+    // WarehouseInteriorScene. La 2 es doble cara (depth 2): el doble de casillas que las otras dos.
     await Promise.allSettled(DEFAULT_RACK_CATEGORIES.flatMap((cat) => [
       rack(cat.name, levels, cat.gx1, cat.gx2, 1, 2),
-      ...[0, 1, 2].map((i) => rack(`Tarima ${cat.name} ${i + 1}`, 1, cat.gx1 + i * 3, cat.gx1 + i * 3 + 2, 4, 5)),
+      rack(`Tarima ${cat.name} 1`, 1, cat.gx1, cat.gx1 + 2, 4, 5),
+      rack(`Tarima ${cat.name} 2`, 1, cat.gx1 + 3, cat.gx1 + 7, 5, 7),
+      rack(`Tarima ${cat.name} 3`, 1, cat.gx1 + 1, cat.gx1 + 3, 7, 8),
     ]));
   };
 
@@ -318,8 +376,8 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
             const id = String(r.rack_id);
             scene.loadBay(
               id,
-              { gx: r.corner1_x / CUBE_SIZE, gz: r.corner1_z / CUBE_SIZE },
-              { gx: r.corner2_x / CUBE_SIZE, gz: r.corner2_z / CUBE_SIZE },
+              { gx: r.corner1_x, gz: r.corner1_z },
+              { gx: r.corner2_x, gz: r.corner2_z },
               r.levels,
               r.direction,
               r.name
@@ -423,10 +481,12 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
         name: tempName,
         levels: draft.levels,
         direction: draft.direction,
-        corner1_x: cubesToMeters(draft.corner1.gx),
-        corner1_z: cubesToMeters(draft.corner1.gz),
-        corner2_x: cubesToMeters(draft.corner2.gx),
-        corner2_z: cubesToMeters(draft.corner2.gz),
+        bays: Math.abs(draft.corner2.gx - draft.corner1.gx),
+        depth: Math.abs(draft.corner2.gz - draft.corner1.gz) as 1 | 2,
+        corner1_x: draft.corner1.gx,
+        corner1_z: draft.corner1.gz,
+        corner2_x: draft.corner2.gx,
+        corner2_z: draft.corner2.gz,
       });
       const realId = String(created.rack_id);
       interiorSceneRef.current?.remapBayId(draft.id, realId);
@@ -654,7 +714,7 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
                 className={`w-full h-full block ${placingRack ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing'}`}
               />
 
-              {bayLabelPositions.map(({ id, x, y, scale }) => (
+              {bayLabelPositions.filter(({ id }) => id === selectedBayId).map(({ id, x, y, scale }) => (
                 <div
                   key={id}
                   className="absolute z-10 flex flex-col items-center pointer-events-none"
@@ -685,7 +745,7 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
               />
               {selectedBin && casillaTagPos && (
                 <span
-                  className="absolute z-10 -translate-x-1/2 -translate-y-full bg-[#0056b3] text-white text-xs font-semibold rounded-md px-2 py-1 pointer-events-none"
+                  className="absolute z-10 -translate-x-1/2 -translate-y-full bg-[#0056b3] text-white text-[10px] font-medium rounded px-1.5 py-0.5 pointer-events-none"
                   style={{ left: casillaTagPos.x, top: Math.max(casillaTagPos.y, LABEL_MIN_TOP) }}
                 >
                   {selectedBin.location_label}
@@ -698,9 +758,6 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
           )}
 
           <div className="w-80 flex-shrink-0 border-l border-gray-100 p-4 overflow-y-auto">
-            <button className="flex items-center gap-2 w-full justify-center border border-gray-200 rounded-lg py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors mb-4">
-              <Tractor size={15} /> Ampliar terreno
-            </button>
 
             {view === 'ciudad' && (placingStyleId !== null || movingId || selected) && (
               <button
@@ -770,15 +827,43 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
                         className="w-full accent-[#0056b3]"
                       />
                     </label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setObjectOrientation('pie')}
+                        className={`rounded-lg py-1.5 text-xs font-medium border ${objectOrientation === 'pie' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                      >
+                        De pie
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setObjectOrientation('echado')}
+                        className={`rounded-lg py-1.5 text-xs font-medium border ${objectOrientation === 'echado' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                      >
+                        Echado
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setObjectOrientation('lado')}
+                        className={`rounded-lg py-1.5 text-xs font-medium border ${objectOrientation === 'lado' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                      >
+                        De lado
+                      </button>
+                    </div>
                   </div>
                 )}
                 <button
                   disabled={!selectedBin}
                   onClick={() => {
-                    if (!selectedBin || !interiorHouseId) return;
+                    if (!selectedBin || !interiorHouseId || !interiorWarehouse || !viewingBayId) return;
                     pickMode.onConfirm({
                       binId: selectedBin.bin_id,
                       label: `${houses[interiorHouseId]?.nombre ?? ''} · ${selectedBin.location_label}`,
+                      warehouseId: interiorWarehouse.warehouse_id,
+                      rackId: Number(viewingBayId),
+                      scale: objectScale,
+                      rotationDeg: objectRotationDeg,
+                      orientation: objectOrientation,
                     });
                     onClose();
                   }}
@@ -786,6 +871,27 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
                 >
                   Confirmar esta ubicación
                 </button>
+                {pickMode.onFillAll && (
+                  <button
+                    onClick={() => {
+                      if (!interiorHouseId || !interiorWarehouse || !viewingBayId || !rackDetail) return;
+                      const empty = (rackDetail.bins ?? []).filter((b) => !b.contents || b.contents.length === 0);
+                      if (empty.length === 0) return;
+                      pickMode.onFillAll!(
+                        empty.map((b) => ({
+                          binId: b.bin_id,
+                          label: `${houses[interiorHouseId]?.nombre ?? ''} · ${b.location_label}`,
+                          warehouseId: interiorWarehouse.warehouse_id,
+                          rackId: Number(viewingBayId),
+                        }))
+                      );
+                      onClose();
+                    }}
+                    className="w-full mt-2 border border-[#0056b3] text-[#0056b3] rounded-lg py-2 text-sm font-semibold hover:bg-blue-50"
+                  >
+                    Llenar todo el estante (prueba)
+                  </button>
+                )}
                 <button
                   onClick={backFromEstante}
                   className="w-full mt-2 border border-gray-200 rounded-lg py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
@@ -796,19 +902,99 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
             ) : view === 'interior' && viewingBayId ? (
               <>
                 <p className="text-sm font-semibold text-gray-800">{racks[viewingBayId]?.name ?? 'Estante'}</p>
-                <p className="text-xs text-gray-400 mt-1 mb-3">{rackDetail ? `${rackDetail.width} bahías × ${rackDetail.levels} niveles` : 'Cargando...'}</p>
+                <p className="text-xs text-gray-400 mt-1 mb-3">{rackDetail ? `${rackDetail.bays} bahías × ${rackDetail.levels} niveles` : 'Cargando...'}</p>
 
                 {selectedBin ? (
                   <div className="bg-gray-50 rounded-lg px-3 py-2.5 mb-3">
                     <p className="text-[11px] text-gray-400 uppercase tracking-wide">{selectedBin.location_label}</p>
                     {selectedBin.contents?.[0] ? (
                       <>
-                        <p className="text-sm font-semibold text-gray-800 mt-0.5">
-                          {selectedBin.contents[0].code} — {selectedBin.contents[0].name}
-                        </p>
-                        <p className="text-xs text-gray-500">Cantidad: {selectedBin.contents[0].quantity}</p>
-                        {selectedBin.contents[0].quantity > MAX_STOCK_COPIES && (
-                          <p className="text-[11px] text-gray-400">En pantalla se dibujan {MAX_STOCK_COPIES} unidades.</p>
+                        <div className="grid grid-cols-3 gap-1.5 mt-2 mb-3">
+                          <button
+                            onClick={() => setElementTab('info')}
+                            className={`rounded-lg py-1.5 text-xs font-medium border ${elementTab === 'info' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            Información
+                          </button>
+                          <button
+                            onClick={() => setElementTab('editar')}
+                            className={`rounded-lg py-1.5 text-xs font-medium border ${elementTab === 'editar' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => setElementTab('trazabilidad')}
+                            className={`rounded-lg py-1.5 text-xs font-medium border ${elementTab === 'trazabilidad' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                          >
+                            Trazabilidad
+                          </button>
+                        </div>
+
+                        {elementTab === 'info' && (
+                          <>
+                            <p className="text-sm font-semibold text-gray-800 mt-0.5">
+                              {selectedBin.contents[0].code} — {selectedBin.contents[0].name}
+                            </p>
+                            <p className="text-xs text-gray-500">Cantidad: {selectedBin.contents[0].quantity}</p>
+                            {selectedBin.contents[0].quantity > MAX_STOCK_COPIES && (
+                              <p className="text-[11px] text-gray-400">En pantalla se dibujan {MAX_STOCK_COPIES} unidades.</p>
+                            )}
+                          </>
+                        )}
+
+                        {elementTab === 'editar' && (
+                          <div>
+                            <div className="flex items-center justify-between text-[11px] text-gray-400 uppercase tracking-wide">
+                              <span>Tamaño</span>
+                              <span className="font-mono text-gray-600">{poseScale.toFixed(2)}x</span>
+                            </div>
+                            <input
+                              type="range" min={0.3} max={2} step={0.05}
+                              value={poseScale}
+                              onChange={(e) => setPoseScale(parseFloat(e.target.value))}
+                              className="w-full accent-[#0056b3] mb-2"
+                            />
+                            <div className="grid grid-cols-3 gap-1.5 mb-2">
+                              <button
+                                onClick={() => setPoseOrientation('pie')}
+                                className={`rounded-lg py-1.5 text-xs font-medium border ${poseOrientation === 'pie' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                              >
+                                De pie
+                              </button>
+                              <button
+                                onClick={() => setPoseOrientation('echado')}
+                                className={`rounded-lg py-1.5 text-xs font-medium border ${poseOrientation === 'echado' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                              >
+                                Echado
+                              </button>
+                              <button
+                                onClick={() => setPoseOrientation('lado')}
+                                className={`rounded-lg py-1.5 text-xs font-medium border ${poseOrientation === 'lado' ? 'bg-[#0056b3] border-[#0056b3] text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                              >
+                                De lado
+                              </button>
+                            </div>
+                            <button
+                              onClick={saveContentPose}
+                              disabled={poseSaving}
+                              className="w-full bg-[#0056b3] text-white rounded-lg py-1.5 text-xs font-semibold hover:bg-[#004494] disabled:opacity-50"
+                            >
+                              {poseSaving ? 'Guardando...' : 'Guardar ajuste'}
+                            </button>
+                          </div>
+                        )}
+
+                        {elementTab === 'trazabilidad' && interiorWarehouse && (
+                          <div>
+                            <ElementDocumentTrace
+                              projectId={projectId}
+                              warehouseId={interiorWarehouse.warehouse_id}
+                              rackId={Number(viewingBayId)}
+                              binId={selectedBin.bin_id}
+                              productId={selectedBin.contents[0].product_id}
+                            />
+                            <ProductTrace projectId={projectId} productId={selectedBin.contents[0].product_id} />
+                          </div>
                         )}
                       </>
                     ) : (
@@ -817,10 +1003,6 @@ const CiudadModal: React.FC<CiudadModalProps> = ({ projectId, onClose, pickMode 
                   </div>
                 ) : (
                   <p className="text-xs text-gray-400 mb-3">Clickeá una casilla para ver qué tiene guardado.</p>
-                )}
-
-                {selectedBin && interiorWarehouse && (
-                  <BinTrace projectId={projectId} warehouseId={interiorWarehouse.warehouse_id} rackId={Number(viewingBayId)} binId={selectedBin.bin_id} />
                 )}
 
                 <button

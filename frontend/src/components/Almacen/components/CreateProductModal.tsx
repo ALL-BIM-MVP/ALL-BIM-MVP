@@ -20,6 +20,7 @@ const CreateProductModal: React.FC<CreateProductModalProps> = ({ projectId, pref
   const [code, setCode] = useState(prefill?.code ?? '');
   const [name, setName] = useState(prefill?.name ?? '');
   const [unit, setUnit] = useState(prefill?.unit ?? '');
+  const [modelFile, setModelFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,7 +48,20 @@ const CreateProductModal: React.FC<CreateProductModalProps> = ({ projectId, pref
         name: name.trim(),
         unit: unit.trim(),
       });
-      onCreated(created);
+      if (!modelFile) {
+        onCreated(created);
+        return;
+      }
+      // El producto ya quedó creado — si el modelo falla, no se pierde lo anterior: se puede asignar
+      // después desde Inventario, como ya se podía hacer sin este campo.
+      try {
+        const asset = await productService.uploadModel3DAsset(modelFile);
+        const withModel = await productService.assignProductModel3D(projectId, created.product_id, asset.model_3d_asset_id);
+        onCreated(withModel);
+      } catch {
+        window.alert('El producto se creó, pero no se pudo subir el modelo 3D. Se puede asignar después desde Inventario.');
+        onCreated(created);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear el producto.');
       setSaving(false);
@@ -58,7 +72,7 @@ const CreateProductModal: React.FC<CreateProductModalProps> = ({ projectId, pref
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-6">
       <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
         <h3 className="text-lg font-bold text-gray-800 mb-1">Nuevo producto</h3>
-        <p className="text-xs text-gray-400 mb-4">Se crea en el catálogo y queda elegido en esta línea. El modelo 3D se asigna después, desde Inventario.</p>
+        <p className="text-xs text-gray-400 mb-4">Se crea en el catálogo y queda elegido en esta línea. El modelo 3D es opcional acá — si no lo subes ahora, se puede asignar después desde Inventario.</p>
         <label className="block mb-3">
           <span className="text-[11px] text-gray-500 font-medium">Categoría</span>
           <select
@@ -82,6 +96,15 @@ const CreateProductModal: React.FC<CreateProductModalProps> = ({ projectId, pref
           <Field label="Nombre" required value={name} onChange={setName} />
           <Field label="Unidad" required value={unit} onChange={setUnit} placeholder="und, bls, m2…" />
         </div>
+        <label className="block mb-4">
+          <span className="text-[11px] text-gray-500 font-medium">Modelo 3D (opcional)</span>
+          <input
+            type="file"
+            accept=".glb,.gltf"
+            onChange={(e) => setModelFile(e.target.files?.[0] ?? null)}
+            className="block w-full mt-1 text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-[#0056b3] hover:file:bg-blue-100"
+          />
+        </label>
         {error && <p className="mb-3 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{error}</p>}
         <div className="flex gap-2">
           <button onClick={onClose} disabled={saving} className="flex-1 border border-gray-200 text-gray-600 text-sm font-semibold py-2 rounded-lg hover:bg-gray-50 disabled:opacity-50">Cancelar</button>

@@ -178,7 +178,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
         estimated_unit_price: l.price.trim() ? parseFloat(l.price) : null,
       }));
     if (!formNumber.trim() || !formRequester.trim() || items.length === 0) {
-      window.alert('Completá número, solicitante y al menos una línea con producto y cantidad.');
+      window.alert('Completá número, solicitante y al menos un material o equipo con producto y cantidad.');
       return;
     }
     setSaving(true);
@@ -277,7 +277,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
       setDetail(updated);
       setAddingLine(false);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo agregar la línea.');
+      window.alert(err instanceof Error ? err.message : 'No se pudo agregar el material o equipo.');
     } finally {
       setSavingLine(false);
     }
@@ -299,12 +299,12 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
 
   const removeLine = async (itemId: string) => {
     if (!detail) return;
-    if (!window.confirm('¿Quitar esta línea?')) return;
+    if (!window.confirm('¿Quitar este material o equipo?')) return;
     try {
       const updated = await purchaseRequisitionService.removeItem(projectId, detail.purchase_requisition_id, itemId);
       setDetail(updated);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo quitar la línea.');
+      window.alert(err instanceof Error ? err.message : 'No se pudo quitar el material o equipo.');
     }
   };
 
@@ -335,14 +335,14 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
                 <Field label="Fecha" required type="date" value={formDate} onChange={editField('requisition_date', setFormDate)} flag={flagFor('requisition_date')} message={messageFor('requisition_date')} />
                 <Field label="Solicitante" required value={formRequester} onChange={editField('requester', setFormRequester)} placeholder="ej. Ing. Rojas — Obra" flag={flagFor('requester')} message={messageFor('requester')} />
               </div>
-              <Field label="Observaciones" value={formNotes} onChange={editField('notes', setFormNotes)} placeholder="ej. Segundo tramo de columnas" className="mt-3" flag={flagFor('notes')} message={messageFor('notes')} />
+              <Field label="Asunto" value={formNotes} onChange={editField('notes', setFormNotes)} placeholder="ej. Segundo tramo de columnas" className="mt-3" flag={flagFor('notes')} message={messageFor('notes')} />
             </div>
 
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-                <p className="text-sm font-semibold text-gray-800">Líneas</p>
+                <p className="text-sm font-semibold text-gray-800">Materiales y equipos</p>
                 <button onClick={() => setLines((prev) => [...prev, emptyLine()])} className="text-xs font-medium border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50">
-                  + Línea con producto
+                  + Material o equipo
                 </button>
               </div>
               <div className="p-4 space-y-3">
@@ -419,7 +419,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
 
           <div className="grid grid-cols-3 @sm:grid-cols-6 gap-2 mt-4">
             {[
-              { label: 'Líneas', value: detail.summary.lines },
+              { label: 'Materiales y equipos', value: detail.summary.lines },
               { label: 'Cotizadas', value: detail.summary.quoted },
               { label: 'Ordenadas', value: detail.summary.ordered },
               { label: 'Facturadas', value: detail.summary.invoiced },
@@ -442,7 +442,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
               { key: 'number', label: 'Número' },
               { key: 'requisition_date', label: 'Fecha', type: 'date' },
               { key: 'requester', label: 'Solicitante' },
-              { key: 'notes', label: 'Observaciones', nullable: true, span: 3 },
+              { key: 'notes', label: 'Asunto', nullable: true, span: 3 },
             ]}
               initial={{ number: detail.number, requisition_date: detail.requisition_date, requester: detail.requester, notes: detail.notes }}
               onSave={saveHeader}
@@ -477,9 +477,9 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
 
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-gray-700">Líneas</p>
+            <p className="text-sm font-semibold text-gray-700">Materiales y equipos</p>
             <button onClick={startAddLine} className="flex items-center gap-1.5 text-xs font-semibold text-[#0056b3] hover:underline">
-              <Plus size={14} /> Agregar línea
+              <Plus size={14} /> Agregar material o equipo
             </button>
           </div>
 
@@ -497,7 +497,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
             <tbody>
               {detail.items.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-gray-300">Sin líneas</td>
+                  <td colSpan={6} className="py-6 text-center text-gray-300">Sin materiales ni equipos</td>
                 </tr>
               )}
               {detail.items.map((item) => (
@@ -517,7 +517,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
                     </div>
                   </td>
                   <td className="py-2 text-right">
-                    <button onClick={() => setEditingLineId(item.purchase_requisition_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar línea">
+                    <button onClick={() => setEditingLineId(item.purchase_requisition_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar material o equipo">
                       <Pencil size={14} />
                     </button>
                     <button onClick={() => removeLine(item.purchase_requisition_item_id)} className="text-gray-300 hover:text-red-500">
@@ -535,7 +535,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <EditForm
                   key={editingLineId}
-                  title="Editar línea"
+                  title="Editar material o equipo"
                   fields={[
                     { key: 'description', label: 'Descripción', span: 3 },
                     { key: 'quantity_requested', label: 'Cantidad', type: 'number' },
@@ -587,7 +587,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Requerimientos</h1>
-          <p className="text-sm text-gray-400">Lo que se pide a la obra. Cada línea es un producto real del catálogo.</p>
+          <p className="text-sm text-gray-400">Lo que se pide a la obra. Cada material o equipo es un producto real del catálogo.</p>
         </div>
         <button
           onClick={() => setView('new')}
@@ -621,7 +621,7 @@ const Requerimientos: React.FC<RequerimientosProps> = ({ projectId }) => {
               <th className="py-2 font-medium">Número</th>
               <th className="py-2 font-medium">Solicitante</th>
               <th className="py-2 font-medium">Observación</th>
-              <th className="py-2 font-medium">Líneas</th>
+              <th className="py-2 font-medium">Materiales y equipos</th>
               <th className="py-2 font-medium">Fecha</th>
               <th className="py-2 font-medium">Archivo</th>
             </tr>

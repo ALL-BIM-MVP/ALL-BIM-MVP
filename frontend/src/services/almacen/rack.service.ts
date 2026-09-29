@@ -1,6 +1,24 @@
 import { api } from '../api';
 import { Rack, RackInput } from '../../types/almacen.types';
 
+// Mismo bloque que normalizeContent en bin.service.ts — este archivo no lo reusa porque no importa
+// nada de bin.service.ts (no hace falta acoplarlos por un helper tan chico).
+function normalizeContent(c: any) {
+  return {
+    ...c,
+    bin_content_id: Number(c.bin_content_id),
+    product_id: Number(c.product_id),
+    quantity: Number(c.quantity),
+    position_x: Number(c.position_x),
+    position_y: Number(c.position_y),
+    position_z: Number(c.position_z),
+    rotation_x: Number(c.rotation_x),
+    rotation_y: Number(c.rotation_y),
+    rotation_z: Number(c.rotation_z),
+    scale: c.scale != null ? Number(c.scale) : null,
+  };
+}
+
 // Mismo problema de siempre: NUMERIC (corner1/corner2, quantity) Y BIGINT
 // (rack_id, bin_id, product_id) vuelven los dos como string desde Postgres
 // — sin esto, comparar un id así contra un número real en el frontend
@@ -18,7 +36,7 @@ function normalizeRack(r: any): Rack {
       bin_id: Number(b.bin_id),
       rack_id: Number(b.rack_id),
       level: Number(b.level) + 1, // el backend cuenta niveles desde 0; la escena 3D y el tipo Bin, desde 1
-      contents: b.contents?.map((c: any) => ({ ...c, product_id: Number(c.product_id), quantity: Number(c.quantity) })),
+      contents: b.contents?.map(normalizeContent),
     })),
   };
 }
