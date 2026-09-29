@@ -41,12 +41,22 @@ export interface WarehouseInput {
 }
 
 export interface BinContent {
+  bin_content_id: number;
   product_id: number;
   code: string;
   name: string;
   quantity: number;
   model_3d_url: string | null;
   model_3d_format: 'glb' | 'gltf' | null;
+  // Ajuste visual aparte del ingreso (ver binService.updateContentPose) — en 0/null se ve igual que
+  // un contenido que nunca se ajustó.
+  position_x: number;
+  position_y: number;
+  position_z: number;
+  rotation_x: number;
+  rotation_y: number;
+  rotation_z: number;
+  scale: number | null;
 }
 
 export interface Bin {
@@ -70,15 +80,19 @@ export interface Rack {
   corner2_z: number;
   levels: number;
   direction: 0 | 1;
-  width: number; // bahías, derivado de las esquinas
-  depth: 1 | 2; // derivado de las esquinas, nunca más de 2
+  bays: number; // dato directo, ya no derivado de las esquinas
+  depth: 1 | 2; // dato directo, ya no derivado de las esquinas
   bins?: Bin[]; // solo viene en el detalle, no en el listado
 }
 
 export interface RackInput {
   name: string;
+  bays: number;
+  depth: 1 | 2;
   levels: number;
   direction: 0 | 1;
+  // Enteros de la grilla del almacén (no metros) — solo dicen posición; el backend valida que
+  // coincidan con bays/depth, nunca los usa para calcular nada.
   corner1_x: number;
   corner1_z: number;
   corner2_x: number;

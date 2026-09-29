@@ -10,10 +10,25 @@ import { DraftNotices, Field, FieldFlag, sortWarnings } from '../../components/F
 import { productService } from '../../../../services/almacen/product.service';
 import { goodsReceiptService } from '../../../../services/almacen/goodsReceipt.service';
 import { purchaseOrderService } from '../../../../services/almacen/purchaseOrder.service';
+import { rackService } from '../../../../services/almacen/rack.service';
+import { binService } from '../../../../services/almacen/bin.service';
+import { ObjectOrientation } from '../../utils/WarehouseInteriorScene';
 import { DraftProductCandidate, GoodsReceipt, GoodsReceiptEntryType, Product, PurchaseOrderListItem, Supplier } from '../../../../types/almacen.types';
 import { trimNumeric } from '../../../../utils/numberFormat';
 
-interface ItemLocation { binId: number; label: string; quantity: string; }
+interface ItemLocation {
+  binId: number;
+  label: string;
+  quantity: string;
+  // Guardados al elegir la casilla (sliders "Escala"/"Rotación" y postura del selector) — recién se
+  // pueden persistir (binService.updateContentPose, Fase A) DESPUÉS de crear el ingreso, cuando existe
+  // el bin_content_id real. warehouseId/rackId son los del estante donde está esta casilla.
+  warehouseId: number;
+  rackId: number;
+  scale: number;
+  rotationDeg: number;
+  orientation: ObjectOrientation;
+}
 
 interface ItemRow {
   // Distinto de null solo cuando la línea viene de una Orden de Compra vinculada — en ese caso
@@ -127,8 +142,14 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
   const removeItem = (i: number) => setItems((prev) => prev.filter((_, idx) => idx !== i));
 
-  const addLocation = (i: number, loc: { binId: number; label: string }) => {
+  const addLocation = (i: number, loc: Omit<ItemLocation, 'quantity'>) => {
     setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, locations: [...it.locations, { ...loc, quantity: '' }] } : it)));
+  };
+  // Atajo "Llenar todo el estante" (a modo de prueba): 1 unidad por casilla vacía, de pie, sin ajustar
+  // escala ni rotación — el usuario puede editar cada cantidad después a mano, como cualquier ubicación.
+  const addLocations = (i: number, bins: Array<{ binId: number; label: string; warehouseId: number; rackId: number }>) => {
+    const newLocations: ItemLocation[] = bins.map((b) => ({ ...b, quantity: '1', scale: 1, rotationDeg: 0, orientation: 'pie' }));
+    setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, locations: [...it.locations, ...newLocations] } : it)));
   };
   const updateLocationQty = (i: number, li: number, qty: string) => {
     setItems((prev) => prev.map((it, idx) => (idx === i ? { ...it, locations: it.locations.map((l, lidx) => (lidx === li ? { ...l, quantity: qty } : l)) } : it)));
@@ -231,6 +252,43 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
   const HEADER_FIELDS = ['delivery_note_series', 'delivery_note_number', 'delivery_note_date', 'supplier_id'];
   const generalWarnings = sortWarnings((doc.draft?.warnings ?? []).filter((w) => !w.field || !HEADER_FIELDS.includes(w.field)));
 
+  // El bin_content_id real no existe hasta que el ingreso se crea — recién ahí se puede guardar la
+  // escala/rotación que se eligió al ubicar (binService.updateContentPose, Fase A). El producto de cada
+  // línea sale de la RESPUESTA del ingreso (receipt.items), no del estado local: para líneas de una
+  // orden de compra, product_id puede no estar cargado del lado del frontend.
+  const persistLocationPoses = async (receipt: GoodsReceipt) => {
+    const rackCache = new Map<string, Awaited<ReturnType<typeof rackService.getRackById>>>();
+    for (let i = 0; i < items.length; i++) {
+      const productId = receipt.items?.[i]?.product ? Number(receipt.items[i].product!.product_id) : null;
+      if (productId === null) continue;
+      for (const loc of items[i].locations) {
+        if (loc.scale === 1 && loc.rotationDeg === 0 && loc.orientation === 'pie') continue; // nunca se tocó, nada que guardar
+        const key = `${loc.warehouseId}:${loc.rackId}`;
+        let rack = rackCache.get(key);
+        if (!rack) {
+          try {
+            rack = await rackService.getRackById(projectId, loc.warehouseId, loc.rackId);
+            rackCache.set(key, rack);
+          } catch {
+            continue;
+          }
+        }
+        const content = rack.bins?.find((b) => b.bin_id === loc.binId)?.contents?.find((c) => c.product_id === productId);
+        if (!content) continue;
+        try {
+          await binService.updateContentPose(projectId, loc.warehouseId, loc.rackId, loc.binId, content.bin_content_id, {
+            scale: loc.scale,
+            rotation_x: loc.orientation === 'echado' ? Math.PI / 2 : 0,
+            rotation_z: loc.orientation === 'lado' ? Math.PI / 2 : 0,
+            rotation_y: (loc.rotationDeg * Math.PI) / 180,
+          });
+        } catch {
+          // El ingreso ya quedó guardado — el tamaño/sentido se puede ajustar después a mano desde el estante.
+        }
+      }
+    }
+  };
+
   const submit = async () => {
     if (!supplierId) { window.alert('Elegí un proveedor.'); return; }
     if (!deliveryNoteSeries.trim() || !deliveryNoteNumber.trim()) { window.alert('Falta la serie o el número de la guía de remisión.'); return; }
@@ -271,6 +329,7 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
         items: payloadItems,
         file_id: fileId,
       });
+      await persistLocationPoses(receipt);
       onCreated(receipt);
     } catch (err) {
       window.alert(err instanceof Error ? err.message : 'No se pudo registrar el ingreso.');
@@ -487,7 +546,8 @@ const NuevoIngreso: React.FC<NuevoIngresoProps> = ({ projectId, onCreated, onCan
           pickMode={{
             itemLabel: (isFromOrder ? items[ciudadItemIndex]?.productLabel : getProduct(items[ciudadItemIndex]?.productId)?.name) || 'este ítem',
             itemModelPath: getProduct(items[ciudadItemIndex]?.productId)?.model_3d_url,
-            onConfirm: (bin) => addLocation(ciudadItemIndex, { binId: bin.binId, label: bin.label }),
+            onConfirm: (bin) => addLocation(ciudadItemIndex, bin),
+            onFillAll: (bins) => addLocations(ciudadItemIndex, bins),
           }}
         />
       )}

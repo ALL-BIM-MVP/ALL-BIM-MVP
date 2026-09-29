@@ -185,7 +185,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
     setLineDrafts(next);
     const orphans = readItems.filter((_, i) => !used.has(i));
     setLineNote(orphans.length > 0
-      ? `${orphans.length} línea(s) del documento no coinciden con ninguna línea del requerimiento elegido: ${orphans.map((o) => o.description).filter(Boolean).join('; ')}.`
+      ? `${orphans.length} material(es) o equipo(s) del documento no coinciden con ningún material o equipo del requerimiento elegido: ${orphans.map((o) => o.description).filter(Boolean).join('; ')}.`
       : null);
   }, [doc.draft, requisitionDetail]);
 
@@ -233,7 +233,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
         };
       });
     if (items.length === 0) {
-      window.alert('Marcá al menos una línea con cantidad y total.');
+      window.alert('Marcá al menos un material o equipo con cantidad y total.');
       return;
     }
     setSaving(true);
@@ -349,7 +349,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
       setDetail(updated);
       setAddingLine(false);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo agregar la línea.');
+      window.alert(err instanceof Error ? err.message : 'No se pudo agregar el material o equipo.');
     } finally {
       setSavingLine(false);
     }
@@ -371,12 +371,12 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
 
   const removeLine = async (itemId: string) => {
     if (!detail) return;
-    if (!window.confirm('¿Quitar esta línea?')) return;
+    if (!window.confirm('¿Quitar este material o equipo?')) return;
     try {
       const updated = await quotationService.removeItem(projectId, detail.quotation_id, itemId);
       setDetail(updated);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo quitar la línea.');
+      window.alert(err instanceof Error ? err.message : 'No se pudo quitar el material o equipo.');
     }
   };
 
@@ -441,12 +441,12 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
 
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
               <div className="px-5 py-3 border-b border-gray-100">
-                <p className="text-sm font-semibold text-gray-800">Líneas</p>
+                <p className="text-sm font-semibold text-gray-800">Materiales y equipos</p>
               </div>
               <div className="p-4 space-y-3">
                 {lineNote && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">{lineNote}</p>}
                 {!requisitionDetail ? (
-                  <div className="border border-dashed border-gray-300 rounded-lg py-8 text-center text-sm text-gray-400">Elige el origen para cargar sus líneas.</div>
+                  <div className="border border-dashed border-gray-300 rounded-lg py-8 text-center text-sm text-gray-400">Elige el origen para cargar sus materiales y equipos.</div>
                 ) : (
                   requisitionDetail.items.map((it) => {
                     const d = lineDrafts[it.purchase_requisition_item_id];
@@ -468,7 +468,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
                           <div className="grid grid-cols-1 @sm:grid-cols-3 gap-3 mt-3 pl-7">
                             <Field label="Cantidad cotizada" type="number" value={d.quantity} onChange={(v) => setLineField(it.purchase_requisition_item_id, 'quantity', v)} />
                             <Field label="Precio unit." type="number" value={d.unitPrice} onChange={(v) => setLineField(it.purchase_requisition_item_id, 'unitPrice', v)} />
-                            <Field label="Total línea" type="number" value={d.lineTotal} onChange={(v) => setLineField(it.purchase_requisition_item_id, 'lineTotal', v)} />
+                            <Field label="Total" type="number" value={d.lineTotal} onChange={(v) => setLineField(it.purchase_requisition_item_id, 'lineTotal', v)} />
                           </div>
                         )}
                       </div>
@@ -527,12 +527,12 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
               <p className="text-lg font-bold text-gray-800">{detail.total_amount != null ? trimNumeric(detail.total_amount) : '—'}</p>
             </div>
             <div className="bg-gray-50 rounded-lg px-3 py-2.5">
-              <p className="text-[11px] text-gray-400 uppercase tracking-wide">Suma de líneas</p>
+              <p className="text-[11px] text-gray-400 uppercase tracking-wide">Suma de materiales y equipos</p>
               <p className="text-lg font-bold text-gray-800">{trimNumeric(detail.lines_total)}</p>
             </div>
           </div>
           {detail.total_amount !== null && detail.total_amount !== detail.lines_total && (
-            <p className="text-xs text-amber-600 mt-2">⚠ El total del documento no coincide con la suma de las líneas.</p>
+            <p className="text-xs text-amber-600 mt-2">⚠ El total del documento no coincide con la suma de los materiales y equipos.</p>
           )}
         </div>
 
@@ -581,9 +581,9 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
 
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-gray-700">Líneas</p>
+            <p className="text-sm font-semibold text-gray-700">Materiales y equipos</p>
             <button onClick={startAddLine} className="flex items-center gap-1.5 text-xs font-semibold text-[#0056b3] hover:underline">
-              <Plus size={14} /> Agregar línea
+              <Plus size={14} /> Agregar material o equipo
             </button>
           </div>
 
@@ -593,7 +593,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
                 <th className="py-2 font-medium">Producto</th>
                 <th className="py-2 font-medium">Cant. cotizada</th>
                 <th className="py-2 font-medium">Precio unit.</th>
-                <th className="py-2 font-medium">Total línea</th>
+                <th className="py-2 font-medium">Total</th>
                 <th className="py-2 font-medium">Estado</th>
                 <th className="py-2 font-medium"></th>
               </tr>
@@ -601,7 +601,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
             <tbody>
               {detail.items.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-gray-300">Sin líneas</td>
+                  <td colSpan={6} className="py-6 text-center text-gray-300">Sin materiales ni equipos</td>
                 </tr>
               )}
               {detail.items.map((item) => (
@@ -625,7 +625,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
                     </div>
                   </td>
                   <td className="py-2 text-right">
-                    <button onClick={() => setEditingLineId(item.quotation_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar línea">
+                    <button onClick={() => setEditingLineId(item.quotation_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar material o equipo">
                       <Pencil size={14} />
                     </button>
                     <button onClick={() => removeLine(item.quotation_item_id)} className="text-gray-300 hover:text-red-500">
@@ -643,12 +643,12 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <EditForm
                   key={editingLineId}
-                  title="Editar línea"
+                  title="Editar material o equipo"
                   fields={[
                     { key: 'description', label: 'Descripción', span: 3 },
                     { key: 'quantity_quoted', label: 'Cantidad cotizada', type: 'number' },
                     { key: 'unit_price', label: 'Precio unit.', type: 'number', nullable: true },
-                    { key: 'line_total', label: 'Total línea', type: 'number' },
+                    { key: 'line_total', label: 'Total', type: 'number' },
                     { key: 'notes', label: 'Observaciones', nullable: true, span: 3 },
                   ]}
                   initial={{ description: editingLine.description, quantity_quoted: editingLine.quantity_quoted, unit_price: editingLine.unit_price, line_total: editingLine.line_total, notes: editingLine.notes }}
@@ -662,7 +662,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
           {addingLine && (
             <div className="mt-4 pt-4 border-t border-gray-100 grid grid-cols-1 @sm:grid-cols-4 gap-3">
               <label className="block">
-                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Línea del requerimiento</span>
+                <span className="text-[11px] text-gray-400 uppercase tracking-wide">Material o equipo del requerimiento</span>
                 <select
                   value={newLineItemId}
                   onChange={(e) => setNewLineItemId(e.target.value)}
@@ -678,7 +678,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
               </label>
               <Field label="Cantidad cotizada" type="number" value={newLineQuantity} onChange={(v) => { setNewLineQuantity(v); setNewLineTotal(recalcLineTotal(v, newLineUnitPrice) || newLineTotal); }} />
               <Field label="Precio unit. (opcional)" type="number" value={newLineUnitPrice} onChange={(v) => { setNewLineUnitPrice(v); setNewLineTotal(recalcLineTotal(newLineQuantity, v) || newLineTotal); }} />
-              <Field label="Total línea" type="number" value={newLineTotal} onChange={setNewLineTotal} />
+              <Field label="Total" type="number" value={newLineTotal} onChange={setNewLineTotal} />
               <div className="@sm:col-span-4 flex gap-2">
                 <button onClick={confirmAddLine} disabled={savingLine} className="bg-[#0056b3] text-white rounded-lg px-4 py-1.5 text-sm font-semibold hover:bg-[#004494] disabled:opacity-50">
                   {savingLine ? 'Guardando...' : 'Agregar'}
@@ -699,7 +699,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Cotizaciones</h1>
-          <p className="text-sm text-gray-400">Una cotización puede cubrir solo algunas líneas de un requerimiento.</p>
+          <p className="text-sm text-gray-400">Una cotización puede cubrir solo algunos materiales o equipos de un requerimiento.</p>
         </div>
         <button
           onClick={() => { resetCreateForm(); setView('new'); }}
@@ -734,7 +734,7 @@ const Cotizaciones: React.FC<CotizacionesProps> = ({ projectId }) => {
               <th className="py-2 font-medium">Código</th>
               <th className="py-2 font-medium">Proveedor</th>
               <th className="py-2 font-medium">Requerimiento</th>
-              <th className="py-2 font-medium">Líneas</th>
+              <th className="py-2 font-medium">Materiales y equipos</th>
               <th className="py-2 font-medium">Monto ref.</th>
               <th className="py-2 font-medium">Fecha</th>
               <th className="py-2 font-medium">Archivo</th>

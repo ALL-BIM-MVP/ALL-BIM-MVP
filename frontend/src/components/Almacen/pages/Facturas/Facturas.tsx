@@ -243,7 +243,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
     }));
     const orphans = readItems.filter((_, i) => !used.has(i));
     setLineNote(orphans.length > 0
-      ? `${orphans.length} línea(s) del documento no coinciden con ninguna línea de la orden elegida: ${orphans.map((o) => o.description).filter(Boolean).join('; ')}.`
+      ? `${orphans.length} material(es) o equipo(s) del documento no coinciden con ningún material o equipo de la orden elegida: ${orphans.map((o) => o.description).filter(Boolean).join('; ')}.`
       : null);
   }, [doc.draft, orderDetail]);
 
@@ -279,7 +279,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
         line_total: parseFloat(l.lineTotal),
       }));
     if (items.length === 0) {
-      window.alert('Marcá al menos una línea con cantidad y total.');
+      window.alert('Marcá al menos un material o equipo con cantidad y total.');
       return;
     }
 
@@ -388,7 +388,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
       setDetail(updated);
       setAddingLine(false);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo agregar la línea.');
+      window.alert(err instanceof Error ? err.message : 'No se pudo agregar el material o equipo.');
     } finally {
       setSavingLine(false);
     }
@@ -410,12 +410,12 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
 
   const removeLine = async (itemId: string) => {
     if (!detail) return;
-    if (!window.confirm('¿Quitar esta línea?')) return;
+    if (!window.confirm('¿Quitar este material o equipo?')) return;
     try {
       const updated = await invoiceService.removeItem(projectId, detail.invoice_id, itemId);
       setDetail(updated);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : 'No se pudo quitar la línea.');
+      window.alert(err instanceof Error ? err.message : 'No se pudo quitar el material o equipo.');
     }
   };
 
@@ -462,7 +462,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
                       <button type="button" onClick={() => loadOrder(null)} className="text-xs font-medium text-gray-600 hover:underline">Quitar la orden (factura directa)</button>
                     ) : undefined}
                   />
-                  {!selectedOrder && <span className="block text-[11px] text-gray-400 mt-0.5">Sin orden es una factura directa. Con orden, cada línea cita una línea de la orden.</span>}
+                  {!selectedOrder && <span className="block text-[11px] text-gray-400 mt-0.5">Sin orden es una factura directa. Con orden, cada material o equipo cita uno de la orden.</span>}
                 </div>
                 <Field label="Serie" required value={formSeries} onChange={editField('series', setFormSeries)} placeholder="F001" hint="1 a 4 letras o números" flag={flagFor('series')} message={messageFor('series')} />
                 <Field label="Número" required value={formNumber} onChange={editField('number', setFormNumber)} placeholder="00000123" hint="1 a 8 dígitos" flag={flagFor('number')} message={messageFor('number')} />
@@ -486,10 +486,10 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
 
             <div className="bg-white border border-gray-200 rounded-xl shadow-sm">
               <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-                <p className="text-sm font-semibold text-gray-800">Líneas</p>
+                <p className="text-sm font-semibold text-gray-800">Materiales y equipos</p>
                 {!selectedOrder && (
                   <button onClick={() => setLines((prev) => [...prev, emptyLine()])} className="text-xs font-medium border border-gray-200 rounded-lg px-3 py-1.5 text-gray-700 hover:bg-gray-50">
-                    + Línea con producto
+                    + Material o equipo
                   </button>
                 )}
               </div>
@@ -530,7 +530,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
                         )}
                         <Field label={`Cantidad${l.product ? ` (${l.product.unit})` : ''}`} type="number" value={l.quantity} onChange={(v) => updateLine(l.key, { quantity: v })} className={l.sourceId !== null ? '@sm:col-start-1' : ''} />
                         <Field label="Precio unit." type="number" value={l.unitPrice} onChange={(v) => updateLine(l.key, { unitPrice: v })} />
-                        <Field label="Total línea" type="number" value={l.lineTotal} onChange={(v) => updateLine(l.key, { lineTotal: v })} />
+                        <Field label="Total" type="number" value={l.lineTotal} onChange={(v) => updateLine(l.key, { lineTotal: v })} />
                       </div>
                     )}
                   </div>
@@ -599,7 +599,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
               <p className="text-sm font-bold text-gray-800">{detail.total_amount != null ? trimNumeric(detail.total_amount) : '—'}</p>
             </div>
             <div className="bg-gray-50 rounded-lg px-3 py-2.5">
-              <p className="text-[11px] text-gray-400 uppercase tracking-wide">Suma de líneas</p>
+              <p className="text-[11px] text-gray-400 uppercase tracking-wide">Suma de materiales y equipos</p>
               <p className="text-sm font-bold text-gray-800">{trimNumeric(detail.lines_total)}</p>
             </div>
           </div>
@@ -651,10 +651,10 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
 
         <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-5">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-gray-700">Líneas</p>
+            <p className="text-sm font-semibold text-gray-700">Materiales y equipos</p>
             {isDirect && (
               <button onClick={startAddLine} className="flex items-center gap-1.5 text-xs font-semibold text-[#0056b3] hover:underline">
-                <Plus size={14} /> Agregar línea
+                <Plus size={14} /> Agregar material o equipo
               </button>
             )}
           </div>
@@ -665,7 +665,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
                 <th className="py-2 font-medium">Producto</th>
                 <th className="py-2 font-medium">Cant. facturada</th>
                 <th className="py-2 font-medium">Precio unit.</th>
-                <th className="py-2 font-medium">Total línea</th>
+                <th className="py-2 font-medium">Total</th>
                 <th className="py-2 font-medium">Avance de la orden</th>
                 <th className="py-2 font-medium"></th>
               </tr>
@@ -673,7 +673,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
             <tbody>
               {detail.items.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-gray-300">Sin líneas</td>
+                  <td colSpan={6} className="py-6 text-center text-gray-300">Sin materiales ni equipos</td>
                 </tr>
               )}
               {detail.items.map((item) => (
@@ -697,7 +697,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
                     </div>
                   </td>
                   <td className="py-2 text-right">
-                    <button onClick={() => setEditingLineId(item.invoice_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar línea">
+                    <button onClick={() => setEditingLineId(item.invoice_item_id)} className="text-gray-300 hover:text-[#0056b3] mr-2" title="Editar material o equipo">
                       <Pencil size={14} />
                     </button>
                     {isDirect && (
@@ -717,12 +717,12 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
               <div className="mt-4 pt-4 border-t border-gray-100">
                 <EditForm
                   key={editingLineId}
-                  title="Editar línea"
+                  title="Editar material o equipo"
                   fields={[
                     { key: 'description', label: 'Descripción', span: 3 },
                     { key: 'quantity_invoiced', label: 'Cantidad facturada', type: 'number' },
                     { key: 'unit_price', label: 'Precio unit.', type: 'number', nullable: true },
-                    { key: 'line_total', label: 'Total línea', type: 'number' },
+                    { key: 'line_total', label: 'Total', type: 'number' },
                   ]}
                   initial={{ description: editingLine.description, quantity_invoiced: editingLine.quantity_invoiced, unit_price: editingLine.unit_price, line_total: editingLine.line_total }}
                   onSave={saveLine}
@@ -760,7 +760,7 @@ const Facturas: React.FC<FacturasProps> = ({ projectId }) => {
                 value={newLineUnitPrice}
                 onChange={(v) => { setNewLineUnitPrice(v); setNewLineTotal(recalcTotal(newLineQuantity, v) || newLineTotal); }}
               />
-              <Field label="Total línea" type="number" value={newLineTotal} onChange={setNewLineTotal} className="@sm:col-span-2" />
+              <Field label="Total" type="number" value={newLineTotal} onChange={setNewLineTotal} className="@sm:col-span-2" />
               <div className="@sm:col-span-4 flex gap-2">
                 <button onClick={confirmAddLine} disabled={savingLine} className="bg-[#0056b3] text-white rounded-lg px-4 py-1.5 text-sm font-semibold hover:bg-[#004494] disabled:opacity-50">
                   {savingLine ? 'Guardando...' : 'Agregar'}
